@@ -37,8 +37,28 @@ An Action — idle, sleep, or wait — that schedules the Character's next wake 
 _Avoid_: Final message, exit tool
 
 **Phone State**:
-One of the four conditions of the Character's phone — Closed, Home, Contact List, or one open Chat. Actions are available only in the Phone State they require and may move the phone to another; Idle and Sleep always leave the phone Closed.
+One of the conditions of the Character's phone — Closed, Home, or inside a Phone App. Actions are available only in the Phone State they require and may move the phone to another; Idle and Sleep always leave the phone Closed.
 _Avoid_: screen, page, runtime mode
+
+**Phone App**:
+A virtual application installed on the Character's phone, such as the QQ messaging app, exposing its own views, actions, and home notifications.
+_Avoid_: plugin, tool, agent tool
+
+**Top Notification**:
+A banner rendered at the top of the Character's phone whenever the phone is active, displaying the most recent event or notification.
+_Avoid_: toast, alert, push
+
+**Home Notification Area**:
+The section of the phone's Home state aggregating summaries and unread counts from installed Phone Apps.
+_Avoid_: notification center, message board
+
+**App Area**:
+The section of the phone's Home state displaying the available Phone Apps and their statuses.
+_Avoid_: app drawer, desktop icons
+
+**Notification Signal**:
+One of the three physical alert levels triggered by the phone — vibration, ring, or special ring. Phone Apps request a signal level while the phone system manages physical feedback and wake behavior.
+_Avoid_: sound effect, buzzer, notification type
 
 **Wait**:
 A Terminating Action that keeps the current Chat open and ends when the watched conversation has delivered enough new messages or when its time limit runs out, whichever happens first. A notification ends a Wait early, whether it comes from the watched conversation or another one.

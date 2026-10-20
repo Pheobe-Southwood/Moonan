@@ -1,16 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, Model, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
-import { archiveThreshold, estimateContextTokens, formatAvailableActions, listAvailableActions, notificationFor, pruneStaleActionMenus, segmentsMention } from "../domain/behavior.js";
-import type { AgentSelection, ConversationTarget, Importance, NotificationDecision, StoredMessage } from "../domain/types.js";
+import { archiveThreshold, estimateContextTokens, formatAvailableActions, listAvailableActions, pruneStaleActionMenus, segmentsMention } from "../domain/behavior.js";
+import type { AgentSelection, ConversationTarget, Importance, NotificationDecision, StoredMessage, TopNotification } from "../domain/types.js";
 import { MediaPipeline } from "../media/pipeline.js";
 import { renderMessagePreview, renderObservedMessages, renderSynthesisEvents, stripImageBlocks, type MediaView, type RenderedMessages } from "../media/render.js";
+import { PhoneAppRegistry } from "../domain/app.js";
+import { QQApp } from "../phone/qq-app.js";
 import type { PlatformMessageEvent } from "../platforms/types.js";
 import type { ChatPlatformAdapter } from "../platforms/types.js";
 import type { ProviderRegistry } from "../providers/registry.js";
 import type { MoonanDatabase, TimerRecord } from "../storage/database.js";
 import { renderPrompt } from "./prompts.js";
-import { buildSimulationTools } from "./simulation-tools.js";
+import { buildSimulationTools, createDefaultAppRegistry } from "./simulation-tools.js";
 import { buildSynthesisTools } from "./synthesis-tools.js";
 import { applySlotOverrides, currentCapabilities, describeMedia, effectiveSelection, formatWorld, selectionSeesImages } from "./vision.js";
 
@@ -34,17 +36,21 @@ export class RuntimeOrchestrator {
   private simulationActionCalls = 0;
   private timerLoop: NodeJS.Timeout | undefined;
   private notificationTimer: NodeJS.Timeout | undefined;
-  private pendingSignal: "alarm" | "ring" | "vibration" | null = null;
+  private pendingSignal: "special_ring" | "ring" | "vibration" | null = null;
+  private pendingTopNotification: TopNotification | null = null;
   private synthesisPromise: Promise<void> | null = null;
   private stopped = false;
   private readonly media: MediaPipeline;
+  private readonly appRegistry: PhoneAppRegistry;
 
   constructor(
     private readonly db: MoonanDatabase,
     private readonly providers: ProviderRegistry,
     private readonly platform: ChatPlatformAdapter,
     private readonly random: () => number = Math.random,
+    appRegistry?: PhoneAppRegistry,
   ) {
+    this.appRegistry = appRegistry ?? createDefaultAppRegistry(new QQApp());
     this.media = new MediaPipeline(db, platform, () => db.getSettings().value, (item) => describeMedia(db, providers, item));
   }
 
@@ -83,6 +89,9 @@ export class RuntimeOrchestrator {
     }
     if (capabilities.visionConfigured && !capabilities.visionSeesImages) {
       warnings.push("图片识别 Agent 所选模型未声明图片输入且未强制启用，识别调用可能失败");
+    }
+    if (!this.platform?.status().connected) {
+      warnings.push("OneBot 平台连接未建立：QQ 处于离线状态");
     }
     return { ready: problems.length === 0, problems, warnings };
   }
@@ -146,16 +155,28 @@ export class RuntimeOrchestrator {
     if (runtime.mode === "paused") return;
     const importance: Importance = existing?.importance ?? "normal";
     const mention = event.target.kind === "group" && segmentsMention(event.segments, runtime.activeSelfId);
-    const decision = notificationFor(event.target.kind, importance, runtime.mode === "sleeping", this.random, this.db.getSettings().value.simulation.priorityWakeProbability, mention);
+    const decision = QQApp.evaluateNotification(
+      event.target.kind,
+      event.senderName,
+      event.content,
+      importance,
+      runtime.mode === "sleeping",
+      this.random,
+      this.db.getSettings().value.simulation.priorityWakeProbability,
+      mention,
+    );
+    if (decision.topNotification) {
+      this.db.setRuntime({ topNotification: decision.topNotification });
+    }
     if (runtime.mode === "waiting") { void this.advanceWait(event, decision); return; }
     if (decision.signal === "none" || !decision.wakes) return;
-    this.queueNotification(decision.signal);
+    this.queueNotification(decision.signal, decision.topNotification);
   }
 
   /** While waiting: any notification-level message ends the wait early (q5+q22); silent visible messages in the watched chat count toward messageCount. */
   private async advanceWait(event: PlatformMessageEvent, decision: NotificationDecision): Promise<void> {
     const [wait] = this.db.listPendingTimers("wait");
-    if (decision.signal !== "none" && decision.wakes) { this.queueNotification(decision.signal); return; }
+    if (decision.signal !== "none" && decision.wakes) { this.queueNotification(decision.signal, decision.topNotification); return; }
     if (!wait || !decision.visibleOnPhone || wait.payload.mode !== "count") return;
     const watch = wait.payload.watch as ConversationTarget | undefined;
     if (!watch || watch.kind !== event.target.kind || watch.id !== event.target.id) return;
@@ -231,8 +252,12 @@ export class RuntimeOrchestrator {
     return this.waitText(watch, since, `等待时间已到（${Number(timer.payload.seconds ?? 0)} 秒）。`);
   }
 
-  private queueNotification(signal: "alarm" | "ring" | "vibration"): void {
-    const order = { vibration: 1, ring: 2, alarm: 3 } as const;
+  private queueNotification(signal: "special_ring" | "ring" | "vibration", topNotification?: TopNotification): void {
+    const order = { vibration: 1, ring: 2, special_ring: 3 } as const;
+    if (topNotification) {
+      this.pendingTopNotification = topNotification;
+      this.db.setRuntime({ topNotification });
+    }
     if (!this.pendingSignal || order[signal] > order[this.pendingSignal]) this.pendingSignal = signal;
     if (this.notificationTimer) return;
     this.notificationTimer = setTimeout(() => {
@@ -241,8 +266,8 @@ export class RuntimeOrchestrator {
       this.pendingSignal = null;
       if (!selected) return;
       void (async () => {
-        let text = selected === "alarm" ? "手机闹钟响了" : selected === "ring" ? "手机响了" : "手机振动了";
-        const type = selected === "alarm" ? "phone_alarm" : selected === "ring" ? "phone_ring" : "phone_vibration";
+        let text = selected === "special_ring" ? "手机特殊铃声响了" : selected === "ring" ? "手机铃声响了" : "手机振动了";
+        const type = selected === "special_ring" ? "phone_special_ring" : selected === "ring" ? "phone_ring" : "phone_vibration";
         let images: ImageContent[] = [];
         const [wait] = this.db.listPendingTimers("wait");
         if (wait) {
@@ -294,7 +319,7 @@ export class RuntimeOrchestrator {
     const selected = this.selectedModel("simulation");
     const prompt = renderPrompt(this.db.getPrompt("simulation").template, formatWorld(this.db));
     if (!this.simulationAgent) {
-      const tools = buildSimulationTools(this.db, this.platform, this.mediaView());
+      const tools = buildSimulationTools(this.db, this.platform, this.mediaView(), this.appRegistry);
       this.simulationAgent = new Agent({
         initialState: {
           systemPrompt: prompt, model: selected.model, thinkingLevel: selected.thinkingLevel,
@@ -322,7 +347,7 @@ export class RuntimeOrchestrator {
     this.simulationAgent.state.systemPrompt = prompt;
     this.simulationAgent.state.model = selected.model;
     this.simulationAgent.state.thinkingLevel = selected.thinkingLevel;
-    this.simulationAgent.state.tools = buildSimulationTools(this.db, this.platform, this.mediaView());
+    this.simulationAgent.state.tools = buildSimulationTools(this.db, this.platform, this.mediaView(), this.appRegistry);
     return this.simulationAgent;
   }
 
@@ -333,7 +358,7 @@ export class RuntimeOrchestrator {
 
   async activate(text: string, urgent = false, images: ImageContent[] = []): Promise<void> {
     if (this.db.getRuntime().mode === "paused") return;
-    const message = `${text}\n\n${formatAvailableActions(listAvailableActions(this.db.getRuntime()))}`;
+    const message = `${text}\n\n${formatAvailableActions(listAvailableActions(this.db.getRuntime(), this.appRegistry))}`;
     let agent: Agent;
     try { agent = this.ensureSimulationAgent(); } catch (error) {
       const problem = error instanceof Error ? error.message : String(error);

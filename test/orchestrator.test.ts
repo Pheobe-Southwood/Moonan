@@ -159,7 +159,7 @@ describe("runtime orchestration with pi faux provider", () => {
     db.upsertContact({ platform: "onebot", id: "7", name: "Seven", aliases: [], summary: "", importance: "normal", isFriend: true });
     faux.setResponses([
       fauxAssistantMessage([fauxToolCall("perform_action", { action: "open_phone" })], { stopReason: "toolUse" }),
-      fauxAssistantMessage([fauxToolCall("perform_action", { action: "view_contacts" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("perform_action", { action: "open_app", app: "qq" })], { stopReason: "toolUse" }),
       fauxAssistantMessage([fauxToolCall("perform_action", { action: "open_chat", kind: "private", targetId: "7" })], { stopReason: "toolUse" }),
       fauxAssistantMessage([fauxToolCall("perform_action", { action: "wait_messages", durationSeconds: 1 })], { stopReason: "toolUse" }),
       fauxAssistantMessage([fauxToolCall("perform_action", { action: "sleep", durationMinutes: 30 })], { stopReason: "toolUse" }),
@@ -170,7 +170,7 @@ describe("runtime orchestration with pi faux provider", () => {
     cleanups.push(() => { void orchestrator.close(); });
     await orchestrator.startBot();
     expect(db.getRuntime().mode).toBe("waiting");
-    expect(db.getRuntime().phone).toMatchObject({ kind: "chat" });
+    expect(db.getRuntime().phone).toMatchObject({ kind: "app", appId: "qq", substate: { view: "chat" } });
     orchestrator.start();
     await eventually(() => expect(db.getRuntime().mode).toBe("sleeping"), 10_000);
     expect(db.eventsSince(0).some((event) => event.type === "wait_elapsed")).toBe(true);
@@ -181,7 +181,7 @@ describe("runtime orchestration with pi faux provider", () => {
   it("counts silent messages toward a count-mode wait and wakes at the target count", async () => {
     const { db, faux, providers } = configured();
     db.upsertContact({ platform: "onebot", id: "7", name: "Seven", aliases: [], summary: "", importance: "do_not_disturb", isFriend: true });
-    db.setRuntime({ mode: "waiting", phone: { kind: "chat", target: sevenTarget } });
+    db.setRuntime({ mode: "waiting", phone: { kind: "app", appId: "qq", substate: { view: "chat", target: sevenTarget } } });
     db.createTimer("wait", Date.now() + 60_000, { watch: sevenTarget, mode: "count", count: 2, since: Date.now() - 1 });
     faux.setResponses([
       fauxAssistantMessage([fauxToolCall("perform_action", { action: "sleep", durationMinutes: 30 })], { stopReason: "toolUse" }),
@@ -206,7 +206,7 @@ describe("runtime orchestration with pi faux provider", () => {
     const gapAt = Date.now() - 5_000;
     faux.setResponses([
       fauxAssistantMessage([fauxToolCall("perform_action", { action: "open_phone" })], { stopReason: "toolUse" }),
-      fauxAssistantMessage([fauxToolCall("perform_action", { action: "view_contacts" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("perform_action", { action: "open_app", app: "qq" })], { stopReason: "toolUse" }),
       fauxAssistantMessage([fauxToolCall("perform_action", { action: "open_chat", kind: "private", targetId: "7" })], { stopReason: "toolUse" }),
       () => {
         // The reply lands while the provider is "thinking" between open_chat and wait_messages.
@@ -272,8 +272,8 @@ describe("runtime orchestration with pi faux provider", () => {
     await orchestrator.handleIncoming(privateEvent("normal", "1"));
     await orchestrator.handleIncoming(privateEvent("plus", "2"));
     await vi.advanceTimersByTimeAsync(5_001);
-    const signals = fixture.db.eventsSince(0).filter((event) => ["phone_alarm", "phone_ring", "phone_vibration"].includes(event.type));
-    expect(signals.map((event) => event.type)).toEqual(["phone_alarm"]);
+    const signals = fixture.db.eventsSince(0).filter((event) => ["phone_special_ring", "phone_ring", "phone_vibration"].includes(event.type));
+    expect(signals.map((event) => event.type)).toEqual(["phone_special_ring"]);
   });
 
   it("ends a wait early on any notification and merges the watched messages", async () => {
@@ -284,7 +284,7 @@ describe("runtime orchestration with pi faux provider", () => {
     const since = Date.now() - 1_000;
     db.upsertContact({ platform: "onebot", id: "7", name: "Seven", aliases: [], summary: "", importance: "normal", isFriend: true });
     db.upsertContact({ platform: "onebot", id: "9", name: "Nine", aliases: [], summary: "", importance: "priority_plus", isFriend: true });
-    db.setRuntime({ mode: "waiting", phone: { kind: "chat", target: sevenTarget } });
+    db.setRuntime({ mode: "waiting", phone: { kind: "app", appId: "qq", substate: { view: "chat", target: sevenTarget } } });
     db.insertMessage({
       id: "watched-1", platformMessageId: "w1", target: sevenTarget, senderId: "7", senderName: "Seven",
       direction: "incoming", content: "盯着屏幕时来的消息", segments: [], occurredAt: Date.now(), observedAt: Date.now(),
@@ -295,8 +295,8 @@ describe("runtime orchestration with pi faux provider", () => {
     cleanups.push(() => { void orchestrator.close(); });
     await orchestrator.handleIncoming(privateEvent("9", "loud"));
     await vi.advanceTimersByTimeAsync(5_001);
-    const alarm = db.eventsSince(0).find((event) => event.type === "phone_alarm");
-    expect(alarm?.text).toContain("手机闹钟响了");
+    const alarm = db.eventsSince(0).find((event) => event.type === "phone_special_ring");
+    expect(alarm?.text).toContain("手机特殊铃声响了");
     expect(alarm?.text).toContain("盯着屏幕时来的消息");
     expect(db.listPendingTimers("wait")).toHaveLength(0);
     expect(db.getRuntime().mode).toBe("awake");
@@ -348,7 +348,7 @@ describe("runtime orchestration with pi faux provider", () => {
     cleanups.push(fixture.cleanup);
     const db = fixture.db;
     const since = Date.now() - 1_000;
-    db.setRuntime({ mode: "waiting", phone: { kind: "chat", target: sevenTarget } });
+    db.setRuntime({ mode: "waiting", phone: { kind: "app", appId: "qq", substate: { view: "chat", target: sevenTarget } } });
     db.insertMessage({
       id: "watched-2", platformMessageId: "w2", target: sevenTarget, senderId: "7", senderName: "Seven",
       direction: "incoming", content: "等待期间来的消息", segments: [], occurredAt: Date.now(), observedAt: Date.now(),
@@ -369,7 +369,7 @@ describe("runtime orchestration with pi faux provider", () => {
     const fixture = testDatabase();
     cleanups.push(fixture.cleanup);
     const db = fixture.db;
-    db.setRuntime({ mode: "paused", phone: { kind: "chat", target: sevenTarget } });
+    db.setRuntime({ mode: "paused", phone: { kind: "app", appId: "qq", substate: { view: "chat", target: sevenTarget } } });
     db.insertMessage({
       id: "paused-1", platformMessageId: "p-1", target: sevenTarget, senderId: "7", senderName: "Seven",
       direction: "incoming", content: "暂停期间的消息", segments: [], occurredAt: Date.now() - 1_000, observedAt: Date.now() - 1_000,
@@ -414,7 +414,7 @@ function configuredWithInput(input: ("text" | "image")[], vision: boolean) {
 
 function parkInWaiting(db: ReturnType<typeof testDatabase>["db"]): number {
   const since = Date.now() - 1;
-  db.setRuntime({ mode: "waiting", phone: { kind: "chat", target: sevenTarget } });
+  db.setRuntime({ mode: "waiting", phone: { kind: "app", appId: "qq", substate: { view: "chat", target: sevenTarget } } });
   db.createTimer("wait", Date.now() + 60_000, { watch: sevenTarget, mode: "count", count: 1, since });
   return since;
 }

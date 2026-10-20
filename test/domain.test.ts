@@ -16,22 +16,24 @@ describe("behavior domain", () => {
     expect(listAvailableActions(closed).map((item) => item.id)).toEqual(["idle", "sleep", "open_phone"]);
 
     const home = withPhone(closed, { kind: "home" });
-    expect(listAvailableActions(home).map((item) => item.id)).toEqual(["idle", "sleep", "view_contacts", "close_phone"]);
+    expect(listAvailableActions(home).map((item) => item.id)).toEqual(["idle", "sleep", "open_app", "close_phone"]);
 
-    const contacts = withPhone(closed, { kind: "contacts" });
-    expect(listAvailableActions(contacts).map((item) => item.id)).toEqual([
-      "idle", "sleep", "view_contacts", "open_chat", "set_contact_importance", "close_phone",
+    const qqContacts = withPhone(closed, { kind: "app", appId: "qq", substate: { view: "contacts" } });
+    expect(listAvailableActions(qqContacts).map((item) => item.id)).toEqual([
+      "idle", "sleep", "open_chat", "set_contact_importance", "exit_app", "close_phone",
     ]);
 
-    const privateChat = withPhone(closed, { kind: "chat", target: chatTarget });
+    const privateChat = withPhone(closed, { kind: "app", appId: "qq", substate: { view: "chat", target: chatTarget } });
     expect(listAvailableActions(privateChat).map((item) => item.id)).toEqual([
-      "idle", "sleep", "view_contacts", "load_history", "send_messages", "wait_messages", "set_contact_importance", "close_phone",
+      "idle", "sleep", "send_messages", "load_history", "wait_messages", "view_contacts", "set_contact_importance", "exit_app", "close_phone",
     ]);
 
-    const groupChat = withPhone(closed, { kind: "chat", target: { ...chatTarget, kind: "group" as const } });
+    const groupChat = withPhone(closed, { kind: "app", appId: "qq", substate: { view: "chat", target: { ...chatTarget, kind: "group" as const } } });
     const groupActions = listAvailableActions(groupChat).map((item) => item.id);
     expect(groupActions).not.toContain("set_contact_importance");
     expect(groupActions).toContain("wait_messages");
+    expect(groupActions).toContain("view_contacts");
+    expect(groupActions).toContain("exit_app");
   });
 
   it("renders the action appendix from the current state", () => {
@@ -62,7 +64,7 @@ describe("behavior domain", () => {
   });
 
   it("implements all five importance levels and injectable wake probability", () => {
-    expect(notificationFor("private", "priority_plus", true, () => 1, 0.5)).toEqual({ signal: "alarm", wakes: true, visibleOnPhone: true });
+    expect(notificationFor("private", "priority_plus", true, () => 1, 0.5)).toEqual({ signal: "special_ring", wakes: true, visibleOnPhone: true });
     expect(notificationFor("private", "priority", true, () => 0.49, 0.5).wakes).toBe(true);
     expect(notificationFor("private", "priority", true, () => 0.5, 0.5).wakes).toBe(false);
     expect(notificationFor("private", "normal", true, () => 0, 0.5)).toEqual({ signal: "vibration", wakes: false, visibleOnPhone: true });
@@ -73,7 +75,7 @@ describe("behavior domain", () => {
   });
 
   it("maps group mentions onto the private signal rules", () => {
-    expect(notificationFor("group", "priority_plus", true, () => 0, 0.5, true)).toEqual({ signal: "alarm", wakes: true, visibleOnPhone: true });
+    expect(notificationFor("group", "priority_plus", true, () => 0, 0.5, true)).toEqual({ signal: "special_ring", wakes: true, visibleOnPhone: true });
     expect(notificationFor("group", "priority", true, () => 0.49, 0.5, true).wakes).toBe(true);
     expect(notificationFor("group", "priority", true, () => 0.5, 0.5, true).wakes).toBe(false);
     expect(notificationFor("group", "normal", false, () => 0, 0.5, true)).toEqual({ signal: "vibration", wakes: true, visibleOnPhone: true });
@@ -178,7 +180,7 @@ describe("action menu pruning", () => {
 
   it("strips real appended menus down to the newest copy", () => {
     const closedMenu = formatAvailableActions(listAvailableActions(defaultRuntime()));
-    const chatMenu = formatAvailableActions(listAvailableActions(withPhone(defaultRuntime(), { kind: "chat", target: chatTarget })));
+    const chatMenu = formatAvailableActions(listAvailableActions(withPhone(defaultRuntime(), { kind: "app", appId: "qq", substate: { view: "chat", target: chatTarget } })));
     const messages = [
       user(`你醒来了\n\n${closedMenu}`),
       toolResult(`打开了聊天窗口。\n\n${chatMenu}`),

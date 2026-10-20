@@ -1,9 +1,13 @@
+import type { PhoneAppRegistry, PhoneAppContext } from "./app.js";
 import type {
   AppSettings,
   Importance,
   NotificationDecision,
+  PhoneState,
+  QQSubstate,
   RuntimeState,
   TargetKind,
+  TopNotification,
 } from "./types.js";
 
 export type ActionId =
@@ -11,6 +15,8 @@ export type ActionId =
   | "sleep"
   | "set_contact_importance"
   | "open_phone"
+  | "open_app"
+  | "exit_app"
   | "view_contacts"
   | "open_chat"
   | "load_history"
@@ -24,33 +30,117 @@ export interface AvailableAction {
   parameters: Record<string, unknown>;
 }
 
-export function listAvailableActions(runtime: RuntimeState): AvailableAction[] {
+export function formatTopNotification(topNotification?: TopNotification | null): string {
+  if (!topNotification) return "【顶部通知】无";
+  return `【顶部通知】[${topNotification.source}] ${topNotification.content}`;
+}
+
+export function formatHomeScreen(
+  profile: { name: string; locale: string; timezone: string },
+  runtime: RuntimeState,
+  appRegistry: PhoneAppRegistry,
+  context: PhoneAppContext,
+): string {
+  const topText = formatTopNotification(runtime.topNotification);
+  const timeStr = new Intl.DateTimeFormat(profile.locale, { dateStyle: "full", timeStyle: "long", timeZone: profile.timezone }).format(new Date());
+
+  const notifications: string[] = [];
+  for (const app of appRegistry.list()) {
+    const notif = app.getHomeNotification(context);
+    if (notif) {
+      notifications.push(`- ${app.name}：${notif.summary}`);
+    }
+  }
+
+  const apps: string[] = [];
+  for (const app of appRegistry.list()) {
+    const status = app.getStatus(context);
+    const statusLabel = status.statusText ? ` [${status.statusText}]` : "";
+    apps.push(`- ${app.id}：${app.name}（${app.description}）${statusLabel}`);
+  }
+
+  return [
+    topText,
+    `${profile.name}打开了手机。`,
+    "当前手机状态：主页",
+    `当前时间：${timeStr}`,
+    "",
+    "【通知区】",
+    notifications.length ? notifications.join("\n") : "（暂无新通知）",
+    "",
+    "【App区】",
+    apps.length ? apps.join("\n") : "（无可用应用）",
+  ].join("\n");
+}
+
+export function listAvailableActions(runtime: RuntimeState, appRegistry?: PhoneAppRegistry): AvailableAction[] {
   const actions: AvailableAction[] = [
     { id: "idle", description: "自娱自乐一会并设置再次行动的时间；手机会被收起。", parameters: { durationMinutes: "number", activity: "string?" } },
     { id: "sleep", description: "睡觉并设置闹钟；手机会被收起。", parameters: { durationMinutes: "number" } },
   ];
-  const phone = runtime.phone;
+  const phone = runtime.phone as PhoneState | { kind: "contacts" } | { kind: "chat"; target: any; cursor?: any };
+
   if (phone.kind === "closed") {
-    actions.push({ id: "open_phone", description: "打开手机并查看时间与未读提示。", parameters: {} });
+    actions.push({ id: "open_phone", description: "打开手机并查看主页、通知区与可用应用。", parameters: {} });
     return actions;
   }
-  actions.push({ id: "view_contacts", description: "查看好友和群聊列表，含未读数与最近一条消息。", parameters: {} });
+
+  if (phone.kind === "home") {
+    actions.push({ id: "open_app", description: "打开指定应用。", parameters: { app: "string" } });
+    actions.push({ id: "close_phone", description: "关闭手机。", parameters: {} });
+    return actions;
+  }
+
+  // In-app state (or legacy contacts / chat compatibility)
+  if (phone.kind === "app") {
+    const app = appRegistry?.get(phone.appId);
+    if (app) {
+      actions.push(...(app.listActions(phone.substate) as AvailableAction[]));
+    } else if (phone.appId === "qq") {
+      const substate = phone.substate as QQSubstate | undefined;
+      if (!substate || substate.view === "contacts") {
+        actions.push(
+          { id: "open_chat", description: "进入好友或群聊的聊天窗口。", parameters: { kind: "private|group", targetId: "string" } },
+          { id: "set_contact_importance", description: "更改任意一个好友的消息重要程度。", parameters: { contactId: "string", importance: "importance" } },
+          { id: "exit_app", description: "退出 QQ，返回手机主页。", parameters: {} },
+        );
+      } else if (substate.view === "chat") {
+        actions.push(
+          { id: "send_messages", description: "向当前聊天逐条发送文本。", parameters: { messages: "string[]" } },
+          { id: "load_history", description: "从读取游标继续向上查看当前聊天的本地历史。", parameters: { count: "number?" } },
+          { id: "wait_messages", description: "盯着当前聊天窗口等待新消息并结束本轮：durationSeconds 与 messageCount 二选一。", parameters: { durationSeconds: "number?", messageCount: "number?" } },
+          { id: "view_contacts", description: "返回 QQ 好友和群聊列表。", parameters: {} },
+        );
+        if (substate.target?.kind === "private") {
+          actions.push({ id: "set_contact_importance", description: "更改当前聊天好友的消息重要程度。", parameters: { contactId: "string", importance: "importance" } });
+        }
+        actions.push({ id: "exit_app", description: "退出 QQ，返回手机主页。", parameters: {} });
+      }
+    }
+    actions.push({ id: "close_phone", description: "关闭手机。", parameters: {} });
+    return actions;
+  }
+
+  // Graceful fallback for legacy contacts/chat states if encountered
   if (phone.kind === "contacts") {
     actions.push(
       { id: "open_chat", description: "进入好友或群聊的聊天窗口。", parameters: { kind: "private|group", targetId: "string" } },
       { id: "set_contact_importance", description: "更改任意一个好友的消息重要程度。", parameters: { contactId: "string", importance: "importance" } },
+      { id: "exit_app", description: "退出 QQ，返回手机主页。", parameters: {} },
     );
-  }
-  if (phone.kind === "chat") {
+  } else if (phone.kind === "chat") {
     actions.push(
       { id: "load_history", description: "从读取游标继续向上查看当前聊天的本地历史。", parameters: { count: "number?" } },
       { id: "send_messages", description: "向当前聊天逐条发送文本。", parameters: { messages: "string[]" } },
       { id: "wait_messages", description: "盯着当前聊天窗口等待新消息并结束本轮：durationSeconds 与 messageCount 二选一。", parameters: { durationSeconds: "number?", messageCount: "number?" } },
+      { id: "view_contacts", description: "返回 QQ 好友和群聊列表。", parameters: {} },
     );
-    if (phone.target.kind === "private") {
+    if ((phone as any).target?.kind === "private") {
       actions.push({ id: "set_contact_importance", description: "更改当前聊天好友的消息重要程度。", parameters: { contactId: "string", importance: "importance" } });
     }
+    actions.push({ id: "exit_app", description: "退出 QQ，返回手机主页。", parameters: {} });
   }
+
   actions.push({ id: "close_phone", description: "关闭手机。", parameters: {} });
   return actions;
 }
@@ -192,7 +282,7 @@ export function notificationFor(
     if (importance === "priority_plus") return { signal: "vibration", wakes: !sleeping, visibleOnPhone: true };
     return { signal: "none", wakes: false, visibleOnPhone: true };
   }
-  if (importance === "priority_plus") return { signal: "alarm", wakes: true, visibleOnPhone: true };
+  if (importance === "priority_plus") return { signal: "special_ring", wakes: true, visibleOnPhone: true };
   if (importance === "priority") {
     return { signal: "ring", wakes: !sleeping || random() < priorityWakeProbability, visibleOnPhone: true };
   }

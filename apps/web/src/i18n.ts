@@ -20,7 +20,7 @@ const messages = {
     allRuns: "Agent runs", director: "Director note", reasoning: "Provider reasoning", tool: "Tool", exportCharacter: "Export character package",
     language: "Language", outbound: "Outbound messages", enabled: "Enabled", disabled: "Disabled", onebot: "OneBot v11",
     modePaused: "Paused", modeAwake: "Awake", modeEntertaining: "Entertaining", modeSleeping: "Sleeping", modeWaiting: "Waiting",
-    phoneClosed: "Closed", phoneHome: "Home", phoneContacts: "Contact list", phoneChat: "Chat",
+    phoneClosed: "Closed", phoneHome: "Home", phoneContacts: "Contact list", phoneChat: "Chat", phoneApp: "In App",
   },
   "zh-CN": {
     overview: "概览", character: "角色", agents: "Agents", connections: "连接", activity: "活动", settings: "设置",
@@ -41,7 +41,7 @@ const messages = {
     allRuns: "Agent 运行历史", director: "导演日志", reasoning: "供应商推理", tool: "工具", exportCharacter: "导出角色包",
     language: "语言", outbound: "出站消息", enabled: "已开启", disabled: "已关闭", onebot: "OneBot v11",
     modePaused: "已暂停", modeAwake: "清醒", modeEntertaining: "自娱自乐", modeSleeping: "睡眠中", modeWaiting: "等待新消息",
-    phoneClosed: "已关闭", phoneHome: "主页", phoneContacts: "好友和群聊列表", phoneChat: "聊天窗口",
+    phoneClosed: "已关闭", phoneHome: "主页", phoneContacts: "好友和群聊列表", phoneChat: "聊天窗口", phoneApp: "应用中",
   },
 } as const;
 

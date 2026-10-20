@@ -2,11 +2,22 @@ export type RuntimeMode = "paused" | "awake" | "entertaining" | "sleeping" | "wa
 export type RuntimeHealth = "healthy" | "degraded" | "faulted";
 export type Importance = "priority_plus" | "priority" | "normal" | "do_not_disturb" | "no_push";
 export type TargetKind = "private" | "group";
+
+export interface TopNotification {
+  source: string;
+  content: string;
+  occurredAt: number;
+}
+
+export type QQSubstate =
+  | { view: "contacts" }
+  | { view: "chat"; target: ConversationTarget; cursor?: number | null | undefined };
+
 export type PhoneState =
   | { kind: "closed" }
   | { kind: "home" }
-  | { kind: "contacts" }
-  | { kind: "chat"; target: ConversationTarget; cursor?: number | null };
+  | { kind: "app"; appId: "qq"; substate: QQSubstate }
+  | { kind: "app"; appId: string; substate: Record<string, unknown> };
 
 export interface ConversationTarget {
   platform: "onebot";
@@ -19,6 +30,7 @@ export interface RuntimeState {
   mode: RuntimeMode;
   health: RuntimeHealth;
   phone: PhoneState;
+  topNotification?: TopNotification | null;
   outboundEnabled: boolean;
   activeSelfId: string | null;
   nextWakeAt: number | null;
@@ -85,6 +97,7 @@ export type WorldEventType =
   | "character_started"
   | "operator_wake"
   | "phone_alarm"
+  | "phone_special_ring"
   | "phone_ring"
   | "phone_vibration"
   | "idle_elapsed"
@@ -226,8 +239,11 @@ export interface AgentRunSummary {
   error: string | null;
 }
 
+export type NotificationSignal = "special_ring" | "ring" | "vibration" | "none";
+
 export interface NotificationDecision {
-  signal: "alarm" | "ring" | "vibration" | "none";
+  signal: NotificationSignal;
   wakes: boolean;
   visibleOnPhone: boolean;
+  topNotification?: TopNotification;
 }

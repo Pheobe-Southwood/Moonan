@@ -12,7 +12,7 @@ type Section = "overview" | "character" | "agents" | "connections" | "activity" 
 type AnyRecord = Record<string, any>;
 
 const modeLabels: Record<string, CopyKey> = { paused: "modePaused", awake: "modeAwake", entertaining: "modeEntertaining", sleeping: "modeSleeping", waiting: "modeWaiting" };
-const phoneLabels: Record<string, CopyKey> = { closed: "phoneClosed", home: "phoneHome", contacts: "phoneContacts", chat: "phoneChat" };
+const phoneLabels: Record<string, CopyKey> = { closed: "phoneClosed", home: "phoneHome", contacts: "phoneContacts", chat: "phoneChat", app: "phoneApp" };
 
 function useLoad<T>(loader: () => Promise<T>, dependencies: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -88,7 +88,14 @@ function OverviewPage({ locale }: { locale: Locale }) {
     {data.readiness.ready && data.readiness.warnings?.length > 0 && <div className="notice"><CircleDot/><div><strong>{t("attention")}</strong><p>{data.readiness.warnings.join(" · ")}</p></div></div>}
     <div className="metric-grid">
       <Card className="metric" title={t("runtime")}><strong>{label(modeLabels, runtime.mode)}</strong><Pill tone={runtime.health === "healthy" ? "good" : "warn"}>{runtime.health}</Pill></Card>
-      <Card className="metric" title={t("phone")}><strong>{label(phoneLabels, runtime.phone.kind)}</strong><span>{runtime.phone.target?.name ?? "—"}</span></Card>
+      <Card className="metric" title={t("phone")}>
+        <strong>{runtime.phone.kind === "app" ? (runtime.phone.appId === "qq" ? "QQ" : `App: ${runtime.phone.appId}`) : label(phoneLabels, runtime.phone.kind)}</strong>
+        <span>
+          {runtime.phone.kind === "app"
+            ? (runtime.phone.substate?.view === "chat" ? (runtime.phone.substate.target?.name ?? runtime.phone.substate.target?.id ?? "—") : (runtime.phone.substate?.view === "contacts" ? t("phoneContacts") : "—"))
+            : (runtime.phone.target?.name ?? "—")}
+        </span>
+      </Card>
       <Card className="metric" title={t("nextWake")}><strong className="small-value">{runtime.nextWakeAt ? new Date(runtime.nextWakeAt).toLocaleString(locale) : "—"}</strong></Card>
       <Card className="metric" title="OneBot"><strong>{data.onebot.connected ? t("online") : t("offline")}</strong>{data.onebot.connected ? <Wifi size={18}/> : <WifiOff size={18}/>}</Card>
     </div>
