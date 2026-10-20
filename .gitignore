@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+.moonan/
+release/
+test-results/
+*.tgz
+*.tar.gz

@@ -1,0 +1,26 @@
+{
+  "name": "moonan-workspace",
+  "private": true,
+  "version": "0.0.1-rc.1",
+  "description": "实验性项目，让AI的角色扮演更沉浸，支持灵活的插件系统",
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "tsc -b",
+    "test": "pnpm -r test",
+    "start": "pnpm --filter @moonan/app start",
+    "dev": "pnpm --filter @moonan/app dev",
+    "dev:web": "pnpm --filter @moonan/ui dev",
+    "smoke": "pnpm --filter @moonan/app smoke",
+    "install:global": "pnpm build && cd apps/moonan && npm link"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

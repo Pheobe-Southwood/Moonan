@@ -1,0 +1,39 @@
+{
+  "name": "@moonan/app",
+  "version": "0.0.1-rc.1",
+  "private": true,
+  "type": "module",
+  "description": "Moonan 服务器与 CLI",
+  "bin": {
+    "moonan": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b && node scripts/build-ui.mjs",
+    "start": "node dist/cli.js",
+    "dev": "tsx watch src/cli.ts",
+    "test": "node --test --import tsx \"test/**/*.test.ts\"",
+    "smoke": "tsx scripts/smoke.ts"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.1.0",
+    "@earendil-works/pi-agent-core": "1.1.0",
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-protocol": "1.1.0",
+    "@earendil-works/pi-server": "1.1.0",
+    "@moonan/plugin-sdk": "workspace:*",
+    "@moonan/plugin-act": "workspace:*",
+    "@moonan/plugin-agent-manager": "workspace:*",
+    "@moonan/plugin-conversation": "workspace:*",
+    "@moonan/plugin-log-window": "workspace:*",
+    "@moonan/plugin-provider-panel": "workspace:*",
+    "@moonan/ui": "workspace:*",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "@moonan/ui",
+  "version": "0.0.1-rc.1",
+  "private": true,
+  "type": "module",
+  "description": "Moonan WebUI：瑞士风格组件库与宿主 shell",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./styles.css": "./src/styles.css"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "test": "node -e \"console.log('（该包暂无单测）')\"",
+    "dev": "vite",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.1.0",
+    "@earendil-works/pi-protocol": "1.1.0",
+    "@moonan/plugin-sdk": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^4.7.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.4.4"
+  }
+}

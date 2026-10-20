@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/plugin-sdk" },
+    { "path": "./packages/plugins/act" },
+    { "path": "./packages/plugins/provider-panel" },
+    { "path": "./packages/plugins/agent-manager" },
+    { "path": "./packages/plugins/conversation" },
+    { "path": "./packages/plugins/log-window" },
+    { "path": "./apps/moonan" }
+  ]
+}

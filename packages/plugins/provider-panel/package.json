@@ -1,0 +1,27 @@
+{
+  "name": "@moonan/plugin-provider-panel",
+  "version": "0.0.1-rc.1",
+  "private": true,
+  "type": "module",
+  "description": "提供商管理面板：在「提供商」Tab 管理 pi-ai provider 与 API Key",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "types": "./dist/index.d.ts",
+    "import": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "node -e \"console.log('（该包暂无单测）')\""
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.1.0",
+    "@moonan/plugin-sdk": "workspace:*",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
