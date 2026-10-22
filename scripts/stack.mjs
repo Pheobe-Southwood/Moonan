@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
-async function waitForHttp(url, timeoutMs = 60_000) {
+async function waitForHttp(url, timeoutMs = 120_000) {
 	const deadline = Date.now() + timeoutMs;
 	for (;;) {
 		try {
@@ -31,9 +32,11 @@ export async function startStack(options = {}) {
 	const logs = [];
 	let stopping = false;
 
-	const launch = (name, command, args, env = {}) => {
-		const child = spawn(command, args, {
-			cwd: root,
+	const launch = (name, command, args, extra = {}) => {
+		const { cwd = root, ...env } = extra;
+		const executable = command === "vite" ? process.execPath : command;
+		const child = spawn(executable, args, {
+			cwd,
 			env: { ...process.env, ...env },
 			stdio: ["ignore", "pipe", "pipe"],
 		});
@@ -61,15 +64,36 @@ export async function startStack(options = {}) {
 		"--data-dir",
 		dataDir,
 	]);
-	launch(
-		"web",
-		"pnpm",
-		["--filter", "@moonan/web", "exec", "vite", "--port", String(webPort), "--strictPort"],
-		{ MOONAN_NODE_PORT: String(nodePort) },
+	const viteBin = [join(root, "packages/web/node_modules/vite/bin/vite.js"), join(root, "node_modules/vite/bin/vite.js")].find(
+		(candidate) => existsSync(candidate),
 	);
+	launch("web", "vite", [viteBin ?? "vite", "--port", String(webPort), "--strictPort"], {
+		MOONAN_NODE_PORT: String(nodePort),
+		cwd: join(root, "packages/web"),
+	});
 
 	const url = `http://127.0.0.1:${webPort}`;
-	await waitForHttp(`${url}/`);
+	try {
+		await waitForHttp(`${url}/`);
+	} catch (error) {
+		await stopAll();
+		throw new Error(`${error instanceof Error ? error.message : String(error)}\n${logs.slice(-30).join("\n")}`);
+	}
+
+	const stopAll = async () => {
+		stopping = true;
+		await Promise.all(
+			children.map(
+				(child) =>
+					new Promise((resolve) => {
+						if (child.exitCode !== null) return resolve();
+						child.once("exit", resolve);
+						child.kill("SIGTERM");
+						setTimeout(() => child.kill("SIGKILL"), 3_000).unref();
+					}),
+			),
+		);
+	};
 
 	return {
 		url,
@@ -77,19 +101,6 @@ export async function startStack(options = {}) {
 		webPort,
 		dataDir,
 		logs,
-		async stop() {
-			stopping = true;
-			await Promise.all(
-				children.map(
-					(child) =>
-						new Promise((resolve) => {
-							if (child.exitCode !== null) return resolve();
-							child.once("exit", resolve);
-							child.kill("SIGTERM");
-							setTimeout(() => child.kill("SIGKILL"), 3_000).unref();
-						}),
-				),
-			);
-		},
+		stop: stopAll,
 	};
 }
