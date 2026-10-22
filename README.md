@@ -1,5 +1,8 @@
 # Moonan
 
+[![CI](https://github.com/Pheobe-Southwood/Moonan/actions/workflows/ci.yml/badge.svg)](https://github.com/Pheobe-Southwood/Moonan/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@moonan_ai/moonan/alpha?label=npm)](https://www.npmjs.com/package/@moonan_ai/moonan)
+
 **让 AI 角色扮演更沉浸，支持灵活的插件系统。**
 Immersive AI roleplay with a flexible plugin system.
 
@@ -15,6 +18,8 @@ Moonan is a local-first roleplay workbench. You hand it a character; it turns wh
 
 ```bash
 npx @moonan_ai/moonan@alpha
+# 或 / or
+npm i -g @moonan_ai/moonan@alpha && moonan
 ```
 
 打开 <http://127.0.0.1:21315>，在 **提供商** 里填一个 API 密钥，在 **Agent** 里选好模型，就可以开始说话。
