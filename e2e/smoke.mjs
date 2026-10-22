@@ -8,6 +8,8 @@ const fakeOpenAI = process.env.FAKE_OPENAI_URL ?? "";
 const fakeMcp = process.env.FAKE_MCP_PATH ?? "";
 const shotDir = process.env.MOONAN_SCREENSHOTS ?? "";
 
+const OUT_SELECTOR = '.entry[data-kind="out"]';
+
 const PERSONA =
 	"月见，二十七岁，在街角开一家只卖旧书的店。话很少，记得每个客人上次买过什么。下雨天不开门，但会留一盏灯。";
 
@@ -28,6 +30,12 @@ async function main() {
 		if (message.type() === "error") errors.push(message.text());
 	});
 	page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
+	const sockets = [];
+	page.on("websocket", (socket) => {
+		sockets.push(`open ${socket.url()}`);
+		socket.on("close", () => sockets.push(`close ${socket.url()}`));
+		socket.on("socketerror", (error) => sockets.push(`error ${socket.url()} ${error}`));
+	});
 
 	try {
 		const tab = (name) => page.locator("nav.tabs").getByRole("button", { name });
@@ -67,11 +75,18 @@ async function main() {
 		// --- conversation --------------------------------------------------
 		await tab("对话").click();
 		const input = page.getByRole("textbox", { name: "说点什么…" });
-		const bubbles = page.locator('.entry[data-kind="out"]');
-		for (const [index, message] of ["晚上好。", "你还记得我常喝什么吗？", "今天下雨了，店还开吗？"].entries()) {
-			await input.fill(message);
+		const bubbles = page.locator(OUT_SELECTOR);
+		// Replies are distinct, so wait for the words rather than for a count: a
+		// count can be satisfied by the previous turn's bubble if it lands late.
+		const turns = [
+			{ message: "晚上好。", reply: "外面很冷吧" },
+			{ message: "你还记得我常喝什么吗？", reply: "黑咖啡" },
+			{ message: "今天下雨了，店还开吗？", reply: "下雨天不开门" },
+		];
+		for (const [index, turn] of turns.entries()) {
+			await input.fill(turn.message);
 			await input.press("Enter");
-			await bubbles.nth(index).waitFor({ timeout: 40_000 });
+			await bubbles.filter({ hasText: turn.reply }).first().waitFor({ timeout: 60_000 });
 			log(`turn ${index + 1} answered`);
 		}
 		await page.waitForTimeout(500);
@@ -112,6 +127,16 @@ async function main() {
 
 		assert.deepEqual(errors, [], `console errors: ${errors.join(" | ")}`);
 		log("no console errors");
+	} catch (error) {
+		if (shotDir) {
+			await mkdir(shotDir, { recursive: true });
+			await page.screenshot({ path: join(shotDir, "failure.png") }).catch(() => undefined);
+		}
+		console.error("--- diagnostics ---");
+		console.error("sockets:", sockets);
+		console.error("console errors:", errors);
+		console.error("body:", (await page.locator("body").innerText().catch(() => "")).slice(0, 800));
+		throw error;
 	} finally {
 		await browser.close();
 	}

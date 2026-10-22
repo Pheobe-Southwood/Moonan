@@ -37,6 +37,8 @@ export class AgentInstance {
 	private flushHandle: ReturnType<typeof setTimeout> | undefined;
 	private rebuildQueued = false;
 	private readonly tools = new Map<string, AgentTool>();
+	/** Messages that arrived while a run was in flight; drained as the next run. */
+	private readonly outbox: AgentMessage[] = [];
 
 	constructor(
 		readonly id: string,
@@ -135,14 +137,10 @@ export class AgentInstance {
 				break;
 			}
 			case "agent_end": {
-				this.running = false;
+				// The run is not idle yet — `prompt()` settles after the listeners
+				// do, and `startRun` is what flips the status back.
 				this.persistNew();
-				this.setStatus(this.cells.phase.value === "error" ? "error" : "idle");
 				this.flushLive();
-				if (this.rebuildQueued) {
-					this.rebuildQueued = false;
-					this.build();
-				}
 				break;
 			}
 			default:
@@ -208,25 +206,49 @@ export class AgentInstance {
 
 	// --- commands -------------------------------------------------------
 
-	async send(text: string, mode: SendMode = "steer"): Promise<void> {
+	/**
+	 * Deliver a user message. A message that arrives mid-run is buffered and run
+	 * as soon as the current one settles.
+	 *
+	 * `mode` is accepted for the contract's sake but ignored: pi's `steer` can
+	 * drop a message queued around `agent_end`, and losing the person's words is
+	 * worse than a second round trip.
+	 */
+	async send(text: string, _mode: SendMode = "steer"): Promise<void> {
 		const config: AgentConfig = this.cells.config.value;
 		if (!config.model) throw new Error(`agent "${this.id}" has no model yet; pick one in Agent 管理`);
 		if (!this.agent) this.build();
 		const agent = this.agent;
 		if (!agent) throw new Error(`agent "${this.id}" failed to start`);
 		const message: UserMessage = { role: "user", content: text, timestamp: Date.now() };
-		if (!this.running) {
-			this.running = true;
-			this.setStatus("queued");
-			void agent.prompt(message).catch((error: unknown) => {
-				this.running = false;
-				this.setStatus("error");
-				this.deps.logger.error(`agent "${this.id}" failed to run`, error);
-			});
+		if (this.running) {
+			this.outbox.push(message);
 			return;
 		}
-		if (mode === "followUp") agent.followUp(message);
-		else agent.steer(message);
+		await this.startRun(agent, [message]);
+	}
+
+	private async startRun(agent: Agent, messages: AgentMessage[]): Promise<void> {
+		this.running = true;
+		this.setStatus("queued");
+		try {
+			await agent.prompt(messages);
+		} catch (error) {
+			this.setStatus("error");
+			this.deps.logger.error(`agent "${this.id}" failed to run`, error);
+		} finally {
+			this.running = false;
+			const next = this.outbox.splice(0);
+			if (next.length > 0) {
+				await this.startRun(agent, next);
+				return;
+			}
+			if (this.cells.phase.value !== "error") this.setStatus("idle");
+			if (this.rebuildQueued) {
+				this.rebuildQueued = false;
+				this.build();
+			}
+		}
 	}
 
 	interrupt(): void {
