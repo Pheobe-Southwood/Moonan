@@ -1,6 +1,6 @@
 {
   "name": "@moonan_ai/contracts",
-  "version": "0.0.1-alpha1",
+  "version": "0.0.1-alpha2",
   "description": "跨进程契约：所有面板、Agent 与服务器之间共享的类型与对象定义。",
   "type": "module",
   "license": "MIT",

@@ -1,6 +1,6 @@
 {
   "name": "@moonan_ai/plugin-sdk",
-  "version": "0.0.1-alpha1",
+  "version": "0.0.1-alpha2",
   "description": "Moonan 插件开发接口：注册 Agent、工具、存储与 chord facet。",
   "type": "module",
   "license": "MIT",

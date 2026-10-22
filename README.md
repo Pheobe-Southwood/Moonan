@@ -28,7 +28,14 @@ Open <http://127.0.0.1:21315>, add a provider key, pick a model, start talking.
 
 ```bash
 moonan --port 21315 --data-dir ~/.moonan   # 默认值 / defaults
+moonan --hostname 127.0.0.1                # 只给本机用 / loopback only
 ```
+
+默认监听 `0.0.0.0`，局域网和 Tailscale 内都能打开：启动时会打印可用地址。
+**界面没有登录鉴权**——端口对谁开放，谁就能控制 Agent、密钥和 MCP 工具；只想本机用就传 `--hostname 127.0.0.1`。
+
+By default Moonan listens on `0.0.0.0` so the UI is reachable over your LAN or Tailscale; the startup banner prints the addresses.
+**There is no authentication** — anyone who can reach the port can drive the agent, its keys and its MCP tools. Pass `--hostname 127.0.0.1` to keep it local.
 
 ## 它做了什么 · What it does
 

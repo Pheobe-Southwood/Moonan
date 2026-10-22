@@ -5,7 +5,7 @@ import logs from "./logs/server.js";
 import mcp from "./mcp/server.js";
 import providers from "./providers/server.js";
 
-export const VERSION = "0.0.1-alpha1";
+export const VERSION = "0.0.1-alpha2";
 
 /**
  * Order matters: `agents` registers the main agent before anything attaches a

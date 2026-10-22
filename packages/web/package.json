@@ -1,6 +1,6 @@
 {
   "name": "@moonan_ai/web",
-  "version": "0.0.1-alpha1",
+  "version": "0.0.1-alpha2",
   "description": "Moonan 的浏览器界面（构建产物）。",
   "type": "module",
   "license": "MIT",

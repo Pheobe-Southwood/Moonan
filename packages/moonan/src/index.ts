@@ -26,7 +26,7 @@ export async function start(options: StartOptions = {}): Promise<Moonan> {
 	return createMoonan({
 		dataDir: options.dataDir ?? defaultDataDir(),
 		port: options.port ?? 21315,
-		hostname: options.hostname ?? "127.0.0.1",
+		hostname: options.hostname ?? "0.0.0.0",
 		version: VERSION,
 		builtinPlugins,
 		...(webDist ? { webDist } : {}),
