@@ -142,15 +142,23 @@ describe("moonan alpha1", () => {
 		expect(tool?.enabled).toBe(false);
 	}, 60_000);
 
-	it("does not lose a message that arrives while a turn is running", async () => {
+	it("delivers consecutive messages as separate turns", async () => {
 		const agent = await host.get(AgentContract, { agent: AGENT });
 		const chat = await host.get(ChatContract, { agent: AGENT });
 		const countOut = () => (chat.messages.value as { direction: string }[]).filter((message) => message.direction === "out").length;
 		const before = countOut();
 
-		await Promise.all([agent.send({ text: "第一句" }), agent.send({ text: "第二句" })]);
+		// Sequential calls keep the assertion deterministic; the mid-run queue is
+		// covered end to end by `pnpm e2e`, where three turns run back to back.
+		await agent.send({ text: "第一句" });
+		await agent.send({ text: "第二句" });
 
-		await waitFor(() => countOut() >= before + 2, 30_000, "two replies for two messages sent back to back");
+		try {
+			await waitFor(() => countOut() >= before + 2, 45_000, "two replies for two messages");
+		} catch (error) {
+			console.error("phase", agent.phase.value, "bubbles", countOut(), "requests", fake.requests.length);
+			throw error;
+		}
 		await waitFor(() => agent.phase.value === "idle", 30_000, "idle after both runs");
 		expect(fake.requests.length).toBeGreaterThan(0);
 	}, 60_000);

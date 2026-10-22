@@ -240,7 +240,13 @@ export class AgentInstance {
 			this.running = false;
 			const next = this.outbox.splice(0);
 			if (next.length > 0) {
-				await this.startRun(agent, next);
+				// Wait for the agent to be fully idle before prompting again: calling
+				// prompt() while the previous run is still settling deadlocks.
+				void agent
+					.waitForIdle()
+					.catch(() => undefined)
+					.then(() => this.startRun(agent, next))
+					.catch((error: unknown) => this.deps.logger.error(`agent "${this.id}" failed to resume`, error));
 				return;
 			}
 			if (this.cells.phase.value !== "error") this.setStatus("idle");
