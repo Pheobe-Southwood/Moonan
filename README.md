@@ -14,7 +14,7 @@ Moonan is a local-first roleplay workbench. You hand it a character; it turns wh
 ## 快速开始 · Quick start
 
 ```bash
-npx moonan@alpha
+npx @moonan_ai/moonan@alpha
 ```
 
 打开 <http://127.0.0.1:21315>，在 **提供商** 里填一个 API 密钥，在 **Agent** 里选好模型，就可以开始说话。

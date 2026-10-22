@@ -4,7 +4,7 @@
 Immersive AI roleplay with a flexible plugin system.
 
 ```bash
-npx moonan@alpha
+npx @moonan_ai/moonan@alpha
 ```
 
 打开 <http://127.0.0.1:21315>，在 **提供商** 里填一个 API 密钥，在 **Agent** 里选好模型，就可以开始说话。

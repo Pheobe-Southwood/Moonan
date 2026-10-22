@@ -33,7 +33,7 @@ jobs:
       - run: pnpm build
 
       - name: Publish packages
-        run: pnpm -r publish --access public --tag alpha --no-git-checks
+        run: node scripts/publish.mjs --tag alpha
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
