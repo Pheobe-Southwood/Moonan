@@ -1,0 +1,54 @@
+{
+  "name": "@moonan/core",
+  "version": "0.0.1-alpha1",
+  "description": "Moonan 运行时：存储、模型、Agent 运行时与 chord 宿主。",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pheobe-Southwood/Moonan.git",
+    "directory": "packages/core"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.4.0",
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-mcp": "1.4.0",
+    "@moonan/contracts": "workspace:*",
+    "@moonan/plugin-sdk": "workspace:*",
+    "typebox": "1.3.27",
+    "ws": "^8.22.0"
+  },
+  "keywords": [
+    "moonan",
+    "roleplay",
+    "agent",
+    "llm",
+    "sqlite"
+  ],
+  "homepage": "https://github.com/Pheobe-Southwood/Moonan#readme",
+  "bugs": {
+    "url": "https://github.com/Pheobe-Southwood/Moonan/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2"
+  }
+}

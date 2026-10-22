@@ -1,0 +1,52 @@
+{
+  "name": "@moonan/web",
+  "version": "0.0.1-alpha1",
+  "description": "Moonan 的浏览器界面（构建产物）。",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pheobe-Southwood/Moonan.git",
+    "directory": "packages/web"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    "./dist/*": "./dist/*"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "vite build",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.4.0",
+    "@fontsource-variable/archivo": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@moonan/contracts": "workspace:*",
+    "@moonan/plugin-sdk": "workspace:*",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "vite": "^8.3.4"
+  },
+  "keywords": [
+    "moonan",
+    "web",
+    "ui",
+    "react",
+    "roleplay"
+  ],
+  "homepage": "https://github.com/Pheobe-Southwood/Moonan#readme",
+  "bugs": {
+    "url": "https://github.com/Pheobe-Southwood/Moonan/issues"
+  },
+  "private": true
+}

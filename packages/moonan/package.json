@@ -1,0 +1,64 @@
+{
+  "name": "moonan",
+  "version": "0.0.1-alpha1",
+  "description": "Immersive AI roleplay with a flexible plugin system.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pheobe-Southwood/Moonan.git",
+    "directory": "packages/moonan"
+  },
+  "bin": {
+    "moonan": "./bin/moonan.js"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-web.mjs",
+    "dev": "tsx watch src/cli.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.4.0",
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-mcp": "1.4.0",
+    "@moonan/contracts": "workspace:*",
+    "@moonan/core": "workspace:*",
+    "@moonan/plugin-sdk": "workspace:*",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@moonan/testing": "workspace:*",
+    "@moonan/web": "workspace:*",
+    "vitest": "^5.0.5"
+  },
+  "keywords": [
+    "moonan",
+    "roleplay",
+    "ai",
+    "agent",
+    "llm",
+    "mcp",
+    "plugin"
+  ],
+  "homepage": "https://github.com/Pheobe-Southwood/Moonan#readme",
+  "bugs": {
+    "url": "https://github.com/Pheobe-Southwood/Moonan/issues"
+  }
+}

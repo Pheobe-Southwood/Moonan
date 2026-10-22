@@ -1,0 +1,41 @@
+{
+  "name": "@moonan/testing",
+  "version": "0.0.1-alpha1",
+  "description": "Moonan 的测试替身：假 OpenAI 服务与假 MCP 服务。",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pheobe-Southwood/Moonan.git",
+    "directory": "packages/testing"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "bin"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "keywords": [
+    "moonan",
+    "testing",
+    "mcp",
+    "openai"
+  ],
+  "homepage": "https://github.com/Pheobe-Southwood/Moonan#readme",
+  "bugs": {
+    "url": "https://github.com/Pheobe-Southwood/Moonan/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

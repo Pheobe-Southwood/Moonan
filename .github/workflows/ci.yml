@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test (real turn against the fake model)
+        run: pnpm test
+
+      - name: Install Chromium
+        run: node node_modules/playwright-core/cli.js install --with-deps chromium
+
+      - name: End-to-end
+        run: pnpm e2e
+        env:
+          MOONAN_SCREENSHOTS: /tmp/moonan-e2e-shots
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: /tmp/moonan-e2e-shots
+          if-no-files-found: ignore
+          retention-days: 7
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
+
+      - name: Check the published entry points exist
+        run: |
+          test -f packages/contracts/dist/index.js
+          test -f packages/plugin-sdk/dist/index.js
+          test -f packages/core/dist/index.js
+          test -f packages/testing/dist/index.js
+          test -f packages/moonan/dist/index.js
+          test -f packages/moonan/dist/web/index.html

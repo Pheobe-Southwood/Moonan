@@ -1,0 +1,99 @@
+import { pathToFileURL } from "node:url";
+import { defaultDataDir, start } from "./index.js";
+
+const HELP = `moonan ${"0.0.1-alpha1"}
+
+用法 / usage:
+  moonan [选项]
+
+选项 / options:
+  --port <n>        监听端口，默认 21315
+  --hostname <h>    监听地址，默认 127.0.0.1
+  --data-dir <dir>  数据目录，默认 ~/.moonan
+  --help            显示帮助
+  --version         显示版本
+`;
+
+interface CliOptions {
+	port?: number;
+	hostname?: string;
+	dataDir?: string;
+}
+
+function parse(argv: string[]): CliOptions | "help" | "version" {
+	const options: CliOptions = {};
+	for (let index = 0; index < argv.length; index += 1) {
+		const arg = argv[index];
+		if (arg === "--help" || arg === "-h") return "help";
+		if (arg === "--version" || arg === "-v") return "version";
+		if (arg === "--port") {
+			const value = argv[index + 1];
+			if (!value) throw new Error("--port 需要一个数字");
+			const port = Number(value);
+			if (!Number.isInteger(port) || port <= 0 || port > 65535) throw new Error(`无效端口: ${value}`);
+			options.port = port;
+			index += 1;
+			continue;
+		}
+		if (arg === "--hostname") {
+			const value = argv[index + 1];
+			if (!value) throw new Error("--hostname 需要一个地址");
+			options.hostname = value;
+			index += 1;
+			continue;
+		}
+		if (arg === "--data-dir") {
+			const value = argv[index + 1];
+			if (!value) throw new Error("--data-dir 需要一个路径");
+			options.dataDir = value;
+			index += 1;
+			continue;
+		}
+		throw new Error(`未知参数: ${arg}`);
+	}
+	return options;
+}
+
+export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
+	let parsed: CliOptions | "help" | "version";
+	try {
+		parsed = parse(argv);
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : error);
+		console.error("");
+		console.error(HELP);
+		process.exitCode = 1;
+		return;
+	}
+	if (parsed === "help") {
+		console.log(HELP);
+		return;
+	}
+	if (parsed === "version") {
+		const { VERSION } = await import("./plugins/index.js");
+		console.log(VERSION);
+		return;
+	}
+
+	const instance = await start({
+		...(parsed.port !== undefined ? { port: parsed.port } : {}),
+		...(parsed.hostname !== undefined ? { hostname: parsed.hostname } : {}),
+		dataDir: parsed.dataDir ?? defaultDataDir(),
+	});
+
+	console.log(`Moonan 正在运行: ${instance.url}`);
+	console.log(`数据目录: ${parsed.dataDir ?? defaultDataDir()}`);
+
+	const shutdown = async (signal: string) => {
+		console.log(`\n收到 ${signal}，正在关闭…`);
+		await instance.close().catch(() => undefined);
+		process.exit(0);
+	};
+	process.once("SIGINT", () => void shutdown("SIGINT"));
+	process.once("SIGTERM", () => void shutdown("SIGTERM"));
+}
+
+const invokedDirectly = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (invokedDirectly) {
+	void main();
+}

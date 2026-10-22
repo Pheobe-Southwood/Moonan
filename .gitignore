@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.data/
+*.db
+*.db-wal
+*.db-shm
+.scratch/
+.env
+.env.*
+!.env.example
+playwright-report/
+test-results/
+e2e/artifacts/
+*.tsbuildinfo
+.DS_Store
