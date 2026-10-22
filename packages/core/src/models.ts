@@ -22,8 +22,8 @@ const STREAMS: Record<string, () => ProviderStreams> = {
 	"anthropic-messages": anthropicMessagesApi,
 };
 
-/** Providers whose pi-ai definition advertises an OAuth login. alpha1 only shows a disabled button. */
-const OAUTH_LABEL = "not implemented in alpha1";
+/** Providers whose pi-ai definition advertises an OAuth login. For now the UI only shows a disabled button. */
+const OAUTH_LABEL = "not implemented yet";
 
 export class ModelRegistry {
 	readonly models: MutableModels;

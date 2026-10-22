@@ -97,7 +97,7 @@ export const HelloContract = remote({
 
 ## 浏览器那一半
 
-`web.js` 会被服务器在 `/plugins/<id>/web.js` 提供，`GET /api/plugins` 里带 `web` 字段。这一版（`0.0.1-alpha1`）的外壳只挂载内置面板，磁盘插件的 `web.js` 还没有面板位，服务端对象仍然可以通过任何 chord 客户端直接使用。
+`web.js` 会被服务器在 `/plugins/<id>/web.js` 提供，`GET /api/plugins` 里带 `web` 字段。这一版的外壳只挂载内置面板，磁盘插件的 `web.js` 还没有面板位，服务端对象仍然可以通过任何 chord 客户端直接使用。
 
 内置面板的写法就是目标形态：`packages/web/src/plugins/<id>/ui.tsx` 用 `useRemote(contract, input)` 拿引用，`useReadable` 订阅状态，`useAction` 调用方法。
 

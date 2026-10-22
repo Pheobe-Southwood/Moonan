@@ -52,7 +52,7 @@ export function makeServerHostFactory(deps: PluginHostDeps) {
 				removeCustom: (id) => deps.models.removeCustom(id),
 				refresh: (providerId) => deps.models.refresh(providerId),
 				beginOauth: async (providerId) => {
-					throw new Error(`OAuth login for "${providerId}" is not implemented in alpha1`);
+					throw new Error(`OAuth login for "${providerId}" is not implemented yet`);
 				},
 				get oauthNotice() {
 					return deps.models.oauthNotice;

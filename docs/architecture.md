@@ -48,14 +48,14 @@
 2. chat 插件写入 `chat_messages`，把气泡推进状态单元，启动 2 秒合批计时器。
 3. 计时器到点，把这一批拼成
    `{用户昵称}通过webui给你发送了 N 条消息：\n[HH:MM] …`，交给 `AgentRuntime.send`。
-4. Agent 空闲时 `prompt()`，忙时 `steer()`——永不打断正在进行的回合。
+4. Agent 空闲时 `prompt()`，忙时先排队，等当前回合结束再作为下一轮处理——永不打断正在进行的回合。
 5. pi-agent-core 调模型（`pi-ai` 的 `streamSimple`），事件流回到 `AgentInstance`：
    - `message_update` 的增量以 50 ms 节流写进 `live` 状态单元；
    - `message_end` / `turn_end` 落库到 `agent_messages`。
-6. 模型调用 `act` 工具 → chat 插件再写一条 `chat_messages`（`direction: "out"`）并推给浏览器。
+6. 模型调用 `send_message` 工具 → chat 插件再写一条 `chat_messages`（`direction: "out"`）并推给浏览器。
 7. 工具结果回给模型，回合继续，直到 `agent_end` 把状态改回 `idle`。
 
-模型输出的普通文本是「内心独白」，只出现在日志面板；用户能看到的一切都必须经过 `act`。
+模型输出的普通文本是「内心独白」，只出现在日志面板；用户能看到的一切都必须经过 `send_message`。打开或切回对话窗不在这条路径上：它只读取已有气泡，不会向 Agent 发送提示词。
 
 ## 状态如何流动
 
@@ -69,7 +69,7 @@ chord 的链路不会续接：连接断开，所有引用释放。因此：
 
 - 服务端在启动时把 app、agent-index 和每个 Agent 对象**钉住**，浏览器断开不会中断正在跑的回合；
 - 浏览器每次重连都新建一个客户端 host，并递增 `generation`，让所有钩子重新取引用；
-- 对话消息有两条来源：初始快照来自数据库，之后靠状态增量。两者都在，所以断线期间 `act` 写入的气泡在重连后仍会出现。
+- 对话消息有两条来源：初始快照来自数据库，之后靠状态增量。两者都在，所以断线期间 `send_message` 写入的气泡在重连后仍会出现。
 
 ## 插件加载
 
@@ -85,7 +85,7 @@ createMoonan()
   ├─ 打开数据库、跑迁移
   ├─ 建 ModelRegistry / AgentRuntime / AppService / McpService
   ├─ 安装 core facets
-  ├─ 安装内置插件 → 注册主 Agent 与 act 工具
+  ├─ 安装内置插件 → 注册主 Agent 与 send_message 工具
   ├─ 扫描并加载外部插件
   ├─ 钉住 app / agent-index / agent:* 引用
   ├─ 后台连接已保存的 MCP 服务

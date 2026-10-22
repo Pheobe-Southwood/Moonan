@@ -54,14 +54,14 @@ afterAll(async () => {
 	await rm(dataDir, { recursive: true, force: true });
 });
 
-describe("moonan alpha1", () => {
+describe("moonan chat", () => {
 	it("serves the built-in plugin list", async () => {
 		const providers = await host.get(ProvidersContract, {});
 		const list = providers.providers.value as { id: string }[];
 		expect(Array.isArray(list)).toBe(true);
 	});
 
-	it("runs a full turn: user message in, act tool call, chat bubble out", async () => {
+	it("runs a full turn: user message in, send_message tool call, chat bubble out", async () => {
 		const providers = await host.get(ProvidersContract, {});
 		await providers.addCustom({
 			id: "fake",
@@ -89,13 +89,16 @@ describe("moonan alpha1", () => {
 		const bubble = await waitFor(
 			() => (chat.messages.value as { direction: string; text: string }[]).find((message) => message.direction === "out"),
 			20_000,
-			"the act bubble",
+			"the send_message bubble",
 		);
 		expect(bubble.text).toContain("你来了");
 
-		// The fake provider saw the batch note, the act call, and the tool result.
+		// The fake provider saw the batch note, the send_message call, and the tool result.
 		const first = fake.requests[0];
 		expect(JSON.stringify(first?.messages)).toContain("通过webui给你发送了 1 条消息");
+		const toolNames = (first?.tools ?? []).map((tool) => tool.function.name);
+		expect(toolNames).toContain("send_message");
+		expect(toolNames).not.toContain("act");
 		await waitFor(() => fake.requests.length >= 2, 20_000, "the follow-up request");
 		expect(JSON.stringify(fake.requests[1]?.messages)).toContain("已发送");
 

@@ -45,10 +45,6 @@ export function ChatTab({ user }: TabProps) {
 	});
 
 	useEffect(() => {
-		if (chat) void chat.enter();
-	}, [chat]);
-
-	useEffect(() => {
 		const node = feed.current;
 		if (node) node.scrollTop = node.scrollHeight;
 	}, [messages.length, phase]);

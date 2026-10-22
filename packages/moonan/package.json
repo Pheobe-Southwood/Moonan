@@ -1,6 +1,6 @@
 {
   "name": "@moonan_ai/moonan",
-  "version": "0.0.1-alpha2",
+  "version": "0.0.1-alpha3",
   "description": "Immersive AI roleplay with a flexible plugin system.",
   "type": "module",
   "license": "MIT",

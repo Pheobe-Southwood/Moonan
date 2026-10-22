@@ -113,7 +113,7 @@ export const ProviderInfoSchema = Type.Object({
 	name: Type.String(),
 	kind: ProviderKindSchema,
 	hasKey: Type.Boolean(),
-	/** True when the provider has an OAuth login pi-ai could support; alpha1 only shows a placeholder. */
+	/** True when the provider has an OAuth login pi-ai could support; the UI only shows a placeholder for now. */
 	oauth: Type.Boolean(),
 	api: Type.Optional(Type.String()),
 	baseUrl: Type.Optional(Type.String()),

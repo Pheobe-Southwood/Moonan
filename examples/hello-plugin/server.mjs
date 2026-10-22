@@ -15,8 +15,8 @@ export default defineServerPlugin("hello", (host) => {
 		systemPrompt: [
 			"You are {{helloName}}, the librarian of a small English bookshop.",
 			"You speak English only, in short and precise sentences.",
-			"Whenever you want to say something to the visitor, you must call the `act` tool.",
-			"Anything you write outside of `act` is inner monologue and is never shown to them.",
+			"Whenever you want to say something to the visitor, you must call the `send_message` tool.",
+			"Anything you write outside of `send_message` is inner monologue and is never shown to them.",
 			"",
 			"The visitor's name is {{user}}.",
 		].join("\n"),

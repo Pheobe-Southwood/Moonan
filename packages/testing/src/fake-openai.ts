@@ -29,7 +29,7 @@ export type FakeScript = (request: FakeChatRequest, index: number) => FakeTurn |
 
 export interface FakeOpenAIOptions {
 	port?: number;
-	/** Default: calls `act` once, then wraps up after the tool result comes back. */
+	/** Default: calls `send_message` once, then wraps up after the tool result comes back. */
 	script?: FakeScript;
 	/** Milliseconds between streamed chunks. */
 	chunkDelayMs?: number;
@@ -54,7 +54,7 @@ const defaultScript: FakeScript = (request) => {
 			thinking: "对方在等我开口。先给她一句回应，看看她的反应。",
 			toolCalls: [
 				{
-					name: "act",
+					name: "send_message",
 					arguments: { content: "「你来了。」她把杯子推到你面前，没有抬头。" },
 				},
 			],

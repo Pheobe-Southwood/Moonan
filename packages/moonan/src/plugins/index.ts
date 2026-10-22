@@ -5,11 +5,11 @@ import logs from "./logs/server.js";
 import mcp from "./mcp/server.js";
 import providers from "./providers/server.js";
 
-export const VERSION = "0.0.1-alpha2";
+export const VERSION = "0.0.1-alpha3";
 
 /**
  * Order matters: `agents` registers the main agent before anything attaches a
- * tool to it. alpha1 ships only these five, and they are always on.
+ * tool to it. This alpha ships only these five, and they are always on.
  */
 export const builtinPlugins: BuiltinPlugin[] = [
 	{ id: "agents", name: "Agent 管理", version: VERSION, facet: agents, hasWeb: true },

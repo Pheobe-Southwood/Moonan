@@ -11,15 +11,15 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const replies = [
 	{
 		thinking: "她推门进来时带进一身雨气。先让她坐下。",
-		act: "「外面很冷吧。」她把杯子推到你面前，杯口还冒着热气。",
+		message: "「外面很冷吧。」她把杯子推到你面前，杯口还冒着热气。",
 	},
 	{
 		thinking: "她在试探我还记不记得。当然记得。",
-		act: "「黑咖啡，不加糖。」她没抬头，「你上次也是这么点的。」",
+		message: "「黑咖啡，不加糖。」她没抬头，「你上次也是这么点的。」",
 	},
 	{
 		thinking: "下雨天我从不营业。但她问的是「还开吗」。",
-		act: "「下雨天不开门。」她顿了顿，把灯拧亮了一些，「不过你可以留下。」",
+		message: "「下雨天不开门。」她顿了顿，把灯拧亮了一些，「不过你可以留下。」",
 	},
 ];
 
@@ -33,7 +33,7 @@ const script = (request) => {
 	turn += 1;
 	return {
 		thinking: reply.thinking,
-		toolCalls: [{ name: "act", arguments: { content: reply.act } }],
+		toolCalls: [{ name: "send_message", arguments: { content: reply.message } }],
 	};
 };
 

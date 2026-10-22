@@ -76,6 +76,14 @@ async function main() {
 		await tab("对话").click();
 		const input = page.getByRole("textbox", { name: "说点什么…" });
 		const bubbles = page.locator(OUT_SELECTOR);
+		// Opening the chat is passive: no prompt, no turn, no bubble.
+		await page.waitForTimeout(3_000);
+		assert.equal(await bubbles.count(), 0, "opening the chat must not prompt the agent");
+		await tab("日志").click();
+		await page.waitForTimeout(1_000);
+		assert.equal(await page.locator(".entry").count(), 0, "opening the chat must not create a transcript");
+		await page.getByText("这一轮还没有产生任何记录。").waitFor();
+		await tab("对话").click();
 		// Replies are distinct, so wait for the words rather than for a count: a
 		// count can be satisfied by the previous turn's bubble if it lands late.
 		const turns = [
@@ -98,6 +106,8 @@ async function main() {
 		await page.locator(".entry").nth(3).waitFor({ timeout: 20_000 });
 		await page.waitForTimeout(400);
 		assert.ok((await page.locator(".entry").count()) >= 4, "expected transcript entries");
+		assert.ok((await page.getByText("→ send_message", { exact: true }).count()) >= 3, "expected send_message tool calls");
+		assert.equal(await page.getByText("→ act", { exact: true }).count(), 0, "the old act tool must not be called");
 		await shot(page, "logs");
 
 		// --- agents --------------------------------------------------------

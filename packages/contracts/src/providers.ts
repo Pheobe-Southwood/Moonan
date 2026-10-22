@@ -22,7 +22,7 @@ export const ProvidersContract = remote("moonan.providers", {
 				removeCustom: method(Type.Object({ id: Type.String() })),
 				models: method(Type.Object({ provider: Type.String() }), Type.Array(ModelInfoSchema)),
 				refresh: method(Type.Object({ provider: Type.Optional(Type.String()) })),
-				/** alpha1 placeholder: always rejects with `not_implemented`. */
+				/** Placeholder: always rejects with `not_implemented`. */
 				beginOauth: method(Type.Object({ provider: Type.String() })),
 			},
 		},

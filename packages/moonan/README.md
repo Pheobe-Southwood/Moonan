@@ -16,7 +16,7 @@ moonan --port 21315 --data-dir ~/.moonan   # 默认值 / defaults
 ```
 
 - 数据全部明文存在 `~/.moonan/moonan.db`，可以随时用任何 SQLite 客户端打开。
-- 模型的心理描写留在日志面板，只有 `act` 工具的输出会出现在对话窗口。
+- 模型的心理描写留在日志面板，只有 `send_message` 工具的输出会出现在对话窗口；打开对话窗不会触发模型。
 - 五个面板本身就是插件，外部插件放在 `~/.moonan/plugins` 即可加载。
 
 文档：[架构](https://github.com/Pheobe-Southwood/Moonan/blob/main/docs/architecture.md) ·

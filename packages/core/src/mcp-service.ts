@@ -6,7 +6,7 @@ import type { AgentRuntime } from "./runtime/agent-runtime.js";
 import type { Store } from "./storage/store.js";
 import type { Logger } from "./util.js";
 
-/** alpha1 attaches MCP tools to the main agent only. */
+/** MCP tools attach to the main agent only. */
 export const MCP_AGENT_ID = "main";
 
 interface ServerRuntime {
@@ -143,7 +143,7 @@ export class McpService {
 		server.error = undefined;
 		this.emit();
 		try {
-			const client = new McpClient({ name: "moonan", version: "0.0.1-alpha1" });
+			const client = new McpClient({ name: "moonan", version: "0.0.1-alpha3" });
 			const transport =
 				server.input.transport === "stdio"
 					? new StdioTransport({

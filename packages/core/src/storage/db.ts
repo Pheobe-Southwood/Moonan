@@ -64,6 +64,22 @@ const MIGRATIONS: readonly string[] = [
 		PRIMARY KEY (plugin_id, key)
 	);
 	`,
+	// alpha2 saved the chat tool name inside agent configs; rename it in place so
+	// an upgraded install keeps speaking through the current tool.
+	`
+	UPDATE agents
+	SET config = replace(
+		replace(
+			replace(
+				replace(config, '使用act控制其行为', '使用send_message控制其行为'),
+				'\`act\`', '\`send_message\`'
+			),
+			'act 工具', 'send_message 工具'
+		),
+		'act工具', 'send_message工具'
+	)
+	WHERE id = 'main' AND plugin_id = 'agents' AND instr(config, 'act') > 0;
+	`,
 ];
 
 export type Db = DatabaseSync;

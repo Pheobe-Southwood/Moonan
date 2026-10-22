@@ -12,7 +12,7 @@ import type {
 	Variable,
 } from "@moonan_ai/contracts";
 
-/** How a plugin declares the agent it contributes. One definition = one agent instance in alpha1. */
+/** How a plugin declares the agent it contributes. One definition = one agent instance. */
 export interface AgentDefinition {
 	/** Unique across all plugins. */
 	id: string;
@@ -24,7 +24,7 @@ export interface AgentDefinition {
 	systemPrompt: string;
 	/** Variables this agent owns. `global: true` makes them visible to every agent's template. */
 	variables: AgentVariable[];
-	/** Tools the agent starts with. The chat plugin adds `act` at install time. */
+	/** Tools the agent starts with. The chat plugin adds `send_message` at install time. */
 	tools?: AgentTool[];
 	/** Default model (`provider/id`), if the plugin has an opinion. */
 	defaultModel?: { provider: string; id: string };
@@ -61,7 +61,7 @@ export interface ModelBridge {
 	addCustom(input: CustomProviderInput): ProviderInfo;
 	removeCustom(id: string): void;
 	refresh(providerId?: string): Promise<void>;
-	/** alpha1 placeholder; always rejects. */
+	/** Placeholder; always rejects. */
 	beginOauth(providerId: string): Promise<never>;
 	readonly oauthNotice: string;
 }
