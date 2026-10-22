@@ -1,4 +1,4 @@
-import { AppContract } from "@moonan/contracts";
+import { AppContract } from "@moonan_ai/contracts";
 import { useEffect, useState, type ReactNode } from "react";
 import { useConnection } from "./chord/connection.js";
 import { useReadable, useRemote } from "./chord/hooks.js";

@@ -1,5 +1,5 @@
-import { LogsContract } from "@moonan/contracts";
-import { defineServerPlugin } from "@moonan/plugin-sdk";
+import { LogsContract } from "@moonan_ai/contracts";
+import { defineServerPlugin } from "@moonan_ai/plugin-sdk";
 
 /** Read-only view over one agent's raw transcript. Live deltas come from AgentContract.live. */
 export default defineServerPlugin("logs", ({ chord, logs }) => {

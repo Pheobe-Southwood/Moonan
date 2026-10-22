@@ -1,8 +1,8 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { scanPlugins } from "@moonan/core";
-import type { Logger } from "@moonan/core";
+import { scanPlugins } from "@moonan_ai/core";
+import type { Logger } from "@moonan_ai/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const logged: string[] = [];

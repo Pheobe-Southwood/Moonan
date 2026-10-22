@@ -1,5 +1,5 @@
-import { McpContract, McpServerStateSchema } from "@moonan/contracts";
-import { defineServerPlugin } from "@moonan/plugin-sdk";
+import { McpContract, McpServerStateSchema } from "@moonan_ai/contracts";
+import { defineServerPlugin } from "@moonan_ai/plugin-sdk";
 import { Type } from "typebox";
 
 export default defineServerPlugin("mcp", ({ chord, mcp, log }) => {

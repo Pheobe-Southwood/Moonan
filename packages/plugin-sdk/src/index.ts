@@ -10,7 +10,7 @@ import type {
 	SendMode,
 	TranscriptEntry,
 	Variable,
-} from "@moonan/contracts";
+} from "@moonan_ai/contracts";
 
 /** How a plugin declares the agent it contributes. One definition = one agent instance in alpha1. */
 export interface AgentDefinition {
@@ -111,7 +111,7 @@ type HostFactory = (api: FacetApi<unknown>, pluginId: string) => ServerHost;
 let hostFactory: HostFactory | undefined;
 
 /**
- * Called once by `@moonan/core` before any plugin is installed. Plugin code must
+ * Called once by `@moonan_ai/core` before any plugin is installed. Plugin code must
  * never call this; it exists so the SDK stays independent of the runtime.
  */
 export function setServerHostFactory(factory: HostFactory): void {

@@ -26,7 +26,7 @@ let hooksInstalled = false;
 
 /**
  * Disk plugins live outside this package's `node_modules`, so a bare
- * `@moonan/contracts` import inside `~/.moonan/plugins/x/server.js` would fail to
+ * `@moonan_ai/contracts` import inside `~/.moonan/plugins/x/server.js` would fail to
  * resolve. Point the shared specifiers at the copies this process already uses,
  * which also guarantees one chord/typebox instance across the boundary.
  */
@@ -34,7 +34,7 @@ export function installSharedModuleHooks(): void {
 	if (hooksInstalled) return;
 	hooksInstalled = true;
 	const shims = new Map<string, string>();
-	for (const specifier of ["@moonan/contracts", "@moonan/plugin-sdk", "@earendil-works/chord", "typebox"]) {
+	for (const specifier of ["@moonan_ai/contracts", "@moonan_ai/plugin-sdk", "@earendil-works/chord", "typebox"]) {
 		try {
 			shims.set(specifier, import.meta.resolve(specifier));
 		} catch {

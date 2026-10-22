@@ -6,8 +6,8 @@ import {
 	AgentIndexContract,
 	AppContract,
 	type PluginInfo,
-} from "@moonan/contracts";
-import { setServerHostFactory } from "@moonan/plugin-sdk";
+} from "@moonan_ai/contracts";
+import { setServerHostFactory } from "@moonan_ai/plugin-sdk";
 import { AppService } from "./app-service.js";
 import { coreFacets } from "./facets.js";
 import { McpService } from "./mcp-service.js";

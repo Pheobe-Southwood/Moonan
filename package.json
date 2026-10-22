@@ -15,7 +15,7 @@
     "e2e": "node --conditions=development --import tsx scripts/e2e.mjs"
   },
   "devDependencies": {
-    "@moonan/testing": "workspace:*",
+    "@moonan_ai/testing": "workspace:*",
     "@types/node": "^22.20.5",
     "playwright-core": "1.58.0",
     "tsx": "^4.23.15",

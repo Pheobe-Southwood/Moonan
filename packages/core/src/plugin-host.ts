@@ -1,5 +1,5 @@
 import type { FacetApi } from "@earendil-works/chord";
-import type { ServerHost } from "@moonan/plugin-sdk";
+import type { ServerHost } from "@moonan_ai/plugin-sdk";
 import type { AppService } from "./app-service.js";
 import type { McpService } from "./mcp-service.js";
 import type { ModelRegistry } from "./models.js";

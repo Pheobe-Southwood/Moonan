@@ -1,5 +1,5 @@
 {
-  "name": "@moonan/plugin-sdk",
+  "name": "@moonan_ai/plugin-sdk",
   "version": "0.0.1-alpha1",
   "description": "Moonan 插件开发接口：注册 Agent、工具、存储与 chord facet。",
   "type": "module",
@@ -27,7 +27,7 @@
   "dependencies": {
     "@earendil-works/chord": "1.4.0",
     "@earendil-works/pi-agent-core": "1.4.0",
-    "@moonan/contracts": "workspace:*",
+    "@moonan_ai/contracts": "workspace:*",
     "typebox": "1.3.27"
   },
   "keywords": [

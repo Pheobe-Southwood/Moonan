@@ -1,7 +1,7 @@
-import { ProvidersContract } from "@moonan/contracts";
-import { defineServerPlugin } from "@moonan/plugin-sdk";
+import { ProvidersContract } from "@moonan_ai/contracts";
+import { defineServerPlugin } from "@moonan_ai/plugin-sdk";
 import { Type } from "typebox";
-import { ProviderInfoSchema } from "@moonan/contracts";
+import { ProviderInfoSchema } from "@moonan_ai/contracts";
 
 export default defineServerPlugin("providers", ({ chord, models, log }) => {
 	chord.serve(ProvidersContract, (_input, _principal, self) => {

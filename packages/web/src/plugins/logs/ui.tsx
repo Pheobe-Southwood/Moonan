@@ -1,4 +1,4 @@
-import { AgentContract, LogsContract } from "@moonan/contracts";
+import { AgentContract, LogsContract } from "@moonan_ai/contracts";
 import { useEffect, useRef, useState } from "react";
 import type { TabProps } from "../../app.js";
 import { useReadable, useRemote } from "../../chord/hooks.js";

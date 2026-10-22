@@ -30,7 +30,7 @@
 ## 写一个服务端插件
 
 ```js
-import { defineServerPlugin } from "@moonan/plugin-sdk";
+import { defineServerPlugin } from "@moonan_ai/plugin-sdk";
 
 export default defineServerPlugin("hello", (host) => {
 	host.agents.register({
@@ -66,7 +66,7 @@ export default defineServerPlugin("hello", (host) => {
 
 ## 服务一个对象
 
-对象走 chord：契约定义在 `@moonan/contracts`，服务端 `serve`，浏览器 `host.get`。
+对象走 chord：契约定义在 `@moonan_ai/contracts`，服务端 `serve`，浏览器 `host.get`。
 
 ```js
 import { remote, hostNamed } from "@earendil-works/chord";
@@ -103,6 +103,6 @@ export const HelloContract = remote({
 
 ## 模块解析
 
-插件目录在 `node_modules` 之外，因此 `@moonan/contracts`、`@moonan/plugin-sdk`、`@earendil-works/chord`、`typebox` 这四个裸标识符会被重定向到主进程正在用的那一份。这样全进程只有一个 chord 实例和一份 TypeBox，插件的对象才能注册进同一个 host。
+插件目录在 `node_modules` 之外，因此 `@moonan_ai/contracts`、`@moonan_ai/plugin-sdk`、`@earendil-works/chord`、`typebox` 这四个裸标识符会被重定向到主进程正在用的那一份。这样全进程只有一个 chord 实例和一份 TypeBox，插件的对象才能注册进同一个 host。
 
 其他依赖请随插件一起放在自己的目录里。

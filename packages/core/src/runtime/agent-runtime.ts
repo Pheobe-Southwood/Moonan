@@ -1,7 +1,7 @@
 import type { Ctx } from "@earendil-works/chord";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import type { AgentConfig, AgentStatus, AgentSummary, SendMode } from "@moonan/contracts";
-import type { AgentDefinition } from "@moonan/plugin-sdk";
+import type { AgentConfig, AgentStatus, AgentSummary, SendMode } from "@moonan_ai/contracts";
+import type { AgentDefinition } from "@moonan_ai/plugin-sdk";
 import type { ModelRegistry } from "../models.js";
 import type { Store } from "../storage/store.js";
 import { renderTemplate, type Logger } from "../util.js";

@@ -1,8 +1,8 @@
 import type { Cell, Ctx } from "@earendil-works/chord";
 import { Agent, type AgentEvent, type AgentMessage, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { UserMessage } from "@earendil-works/pi-ai";
-import type { AgentConfig, AgentConfigPatch, AgentStatus, LiveMessage, SendMode, Variable } from "@moonan/contracts";
-import type { AgentDefinition } from "@moonan/plugin-sdk";
+import type { AgentConfig, AgentConfigPatch, AgentStatus, LiveMessage, SendMode, Variable } from "@moonan_ai/contracts";
+import type { AgentDefinition } from "@moonan_ai/plugin-sdk";
 import type { ModelRegistry } from "../models.js";
 import type { Store } from "../storage/store.js";
 import { renderTemplate, type Logger } from "../util.js";

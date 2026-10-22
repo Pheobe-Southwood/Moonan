@@ -13,6 +13,6 @@ cp -r examples/hello-plugin ~/.moonan/plugins/hello
 - 一条写入 `plugin_state` 的记录；
 - 一行日志，出现在启动输出里。
 
-入口是 `server.mjs` 而不是 `server.js`——目录里没有 `package.json` 时，Node 会把 `.js` 当 CommonJS。插件也不需要安装依赖：`@moonan/plugin-sdk`、`@moonan/contracts`、`@earendil-works/chord`、`typebox` 由宿主解析到它自己的那一份。
+入口是 `server.mjs` 而不是 `server.js`——目录里没有 `package.json` 时，Node 会把 `.js` 当 CommonJS。插件也不需要安装依赖：`@moonan_ai/plugin-sdk`、`@moonan_ai/contracts`、`@earendil-works/chord`、`typebox` 由宿主解析到它自己的那一份。
 
 想让它有界面，见 [插件文档](../../docs/plugins.md)。

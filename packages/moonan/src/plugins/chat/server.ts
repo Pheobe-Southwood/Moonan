@@ -1,6 +1,6 @@
 import type { Cell } from "@earendil-works/chord";
-import { ChatContract, ChatMessageSchema, type ChatMessage } from "@moonan/contracts";
-import { defineServerPlugin, type ServerHost } from "@moonan/plugin-sdk";
+import { ChatContract, ChatMessageSchema, type ChatMessage } from "@moonan_ai/contracts";
+import { defineServerPlugin, type ServerHost } from "@moonan_ai/plugin-sdk";
 import { Type } from "typebox";
 
 const BATCH_WINDOW_MS = 2_000;

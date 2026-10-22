@@ -1,4 +1,4 @@
-import type { BuiltinPlugin } from "@moonan/core";
+import type { BuiltinPlugin } from "@moonan_ai/core";
 import agents from "./agents/server.js";
 import chat from "./chat/server.js";
 import logs from "./logs/server.js";

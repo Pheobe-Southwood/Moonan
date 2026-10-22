@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { startFakeOpenAI } from "@moonan/testing";
+import { startFakeOpenAI } from "@moonan_ai/testing";
 import { startStack } from "./stack.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));

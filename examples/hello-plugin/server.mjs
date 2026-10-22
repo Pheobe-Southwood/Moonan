@@ -5,7 +5,7 @@
  *   mkdir -p ~/.moonan/plugins && cp -r examples/hello-plugin ~/.moonan/plugins/hello
  * 重启 moonan，Agent 面板里会多出一个 Helen。
  */
-import { defineServerPlugin } from "@moonan/plugin-sdk";
+import { defineServerPlugin } from "@moonan_ai/plugin-sdk";
 
 export default defineServerPlugin("hello", (host) => {
 	host.agents.register({

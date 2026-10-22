@@ -9,11 +9,11 @@
 | 包 | 职责 |
 |---|---|
 | `moonan` | CLI、HTTP/WS 服务器、五个内置插件 |
-| `@moonan/core` | 存储、模型、运行时、chord 宿主 facet、插件加载 |
-| `@moonan/contracts` | 所有跨进程契约（TypeBox + chord `remote`） |
-| `@moonan/plugin-sdk` | 插件作者看到的接口：`defineServerPlugin`、`ServerHost` |
-| `@moonan/web` | React 19 应用，五个面板，中英双语 |
-| `@moonan/testing` | 假 OpenAI 服务、假 MCP 服务，测试与 e2e 用 |
+| `@moonan_ai/core` | 存储、模型、运行时、chord 宿主 facet、插件加载 |
+| `@moonan_ai/contracts` | 所有跨进程契约（TypeBox + chord `remote`） |
+| `@moonan_ai/plugin-sdk` | 插件作者看到的接口：`defineServerPlugin`、`ServerHost` |
+| `@moonan_ai/web` | React 19 应用，五个面板，中英双语 |
+| `@moonan_ai/testing` | 假 OpenAI 服务、假 MCP 服务，测试与 e2e 用 |
 
 依赖方向是单向的：`moonan → core → contracts`，`web → contracts`，谁都不反向依赖。
 
@@ -75,7 +75,7 @@ chord 的链路不会续接：连接断开，所有引用释放。因此：
 
 1. 内置插件在 `moonan/src/plugins/*`，编译进主包，启动时 `host.install(facet)`。
 2. 外部插件在 `~/.moonan/plugins/<id>/`，需要 `plugin.json`（`id`、`name`、`version`、`server`、`web`）。
-3. 外部插件的模块解析由 `module.registerHooks` 兜底：`@moonan/contracts`、`@moonan/plugin-sdk`、`@earendil-works/chord`、`typebox` 一律指向主进程里的那一份，保证只有一份 chord 和一份 TypeBox。
+3. 外部插件的模块解析由 `module.registerHooks` 兜底：`@moonan_ai/contracts`、`@moonan_ai/plugin-sdk`、`@earendil-works/chord`、`typebox` 一律指向主进程里的那一份，保证只有一份 chord 和一份 TypeBox。
 4. 单个插件加载失败只会记录错误并把 `error` 放进插件列表，不会拖垮进程。
 
 ## 生命周期

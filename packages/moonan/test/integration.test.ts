@@ -3,9 +3,9 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHost, webSocketLink } from "@earendil-works/chord";
-import { AgentContract, ChatContract, McpContract, ProvidersContract } from "@moonan/contracts";
-import { createMoonan, type Moonan } from "@moonan/core";
-import { startFakeOpenAI, type FakeOpenAI } from "@moonan/testing";
+import { AgentContract, ChatContract, McpContract, ProvidersContract } from "@moonan_ai/contracts";
+import { createMoonan, type Moonan } from "@moonan_ai/core";
+import { startFakeOpenAI, type FakeOpenAI } from "@moonan_ai/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { builtinPlugins, VERSION } from "../src/plugins/index.js";
 

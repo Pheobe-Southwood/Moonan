@@ -1,4 +1,4 @@
-import { ProvidersContract } from "@moonan/contracts";
+import { ProvidersContract } from "@moonan_ai/contracts";
 import { useEffect, useMemo, useState } from "react";
 import type { TabProps } from "../../app.js";
 import { useAction, useReadable, useRemote } from "../../chord/hooks.js";

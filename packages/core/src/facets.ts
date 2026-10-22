@@ -1,6 +1,6 @@
 import type { Facet, FacetApi } from "@earendil-works/chord";
 import { Type } from "typebox";
-import { AgentConfigSchema, AgentContract, AgentIndexContract, AgentStatusSchema, AgentSummarySchema, AppContract, LiveMessageSchema, PluginInfoSchema } from "@moonan/contracts";
+import { AgentConfigSchema, AgentContract, AgentIndexContract, AgentStatusSchema, AgentSummarySchema, AppContract, LiveMessageSchema, PluginInfoSchema } from "@moonan_ai/contracts";
 import type { AppService } from "./app-service.js";
 import type { AgentRuntime } from "./runtime/agent-runtime.js";
 

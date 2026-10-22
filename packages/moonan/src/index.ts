@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createMoonan, type Moonan } from "@moonan/core";
+import { createMoonan, type Moonan } from "@moonan_ai/core";
 import { builtinPlugins, VERSION } from "./plugins/index.js";
 
 export interface StartOptions {

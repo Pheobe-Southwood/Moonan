@@ -1,4 +1,4 @@
-import { McpContract } from "@moonan/contracts";
+import { McpContract } from "@moonan_ai/contracts";
 import { useState } from "react";
 import type { TabProps } from "../../app.js";
 import { useAction, useReadable, useRemote } from "../../chord/hooks.js";

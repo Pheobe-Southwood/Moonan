@@ -1,4 +1,4 @@
-import type { ChatMessage, AgentConfig, CustomProviderInput, McpServerInput, TranscriptEntry } from "@moonan/contracts";
+import type { ChatMessage, AgentConfig, CustomProviderInput, McpServerInput, TranscriptEntry } from "@moonan_ai/contracts";
 import type { Credential, CredentialInfo } from "@earendil-works/pi-ai";
 import type { Message } from "@earendil-works/pi-ai";
 import type { Db } from "./db.js";

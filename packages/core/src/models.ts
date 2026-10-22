@@ -12,7 +12,7 @@ import {
 import { builtinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
-import type { CustomProviderInput, ModelInfo, ModelRef, ProviderInfo } from "@moonan/contracts";
+import type { CustomProviderInput, ModelInfo, ModelRef, ProviderInfo } from "@moonan_ai/contracts";
 import type { Store } from "./storage/store.js";
 import type { SqliteCredentialStore } from "./storage/credentials.js";
 import type { Logger } from "./util.js";

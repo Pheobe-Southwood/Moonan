@@ -1,6 +1,6 @@
 import { McpClient, StdioTransport, StreamableHttpTransport, toLlmContent, type Tool } from "@earendil-works/pi-mcp";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { McpServerInput, McpServerState } from "@moonan/contracts";
+import type { McpServerInput, McpServerState } from "@moonan_ai/contracts";
 import { Type } from "typebox";
 import type { AgentRuntime } from "./runtime/agent-runtime.js";
 import type { Store } from "./storage/store.js";

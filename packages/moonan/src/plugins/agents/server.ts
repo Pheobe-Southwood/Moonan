@@ -1,4 +1,4 @@
-import { defineServerPlugin } from "@moonan/plugin-sdk";
+import { defineServerPlugin } from "@moonan_ai/plugin-sdk";
 
 /**
  * The director prompt. Users edit it in Agent 管理 → 高级; alpha1 ships this text

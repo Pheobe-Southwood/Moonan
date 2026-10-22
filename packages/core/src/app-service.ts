@@ -1,4 +1,4 @@
-import type { PluginInfo } from "@moonan/contracts";
+import type { PluginInfo } from "@moonan_ai/contracts";
 import type { Store } from "./storage/store.js";
 
 export interface AppState {

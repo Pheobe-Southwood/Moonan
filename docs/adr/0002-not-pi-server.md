@@ -4,4 +4,4 @@ Moonan 建在 `pi-ai`、`pi-agent-core`、chord 之上，但服务器外壳是�
 
 `pi` 的 Unix socket 传输和 `pi-durable` 是本项目明确参考过、但没有采用的设计：前者面向单机 CLI 与后台进程通信，Moonan 的客户端是浏览器；后者解决的是进程重启后的会话恢复，而 Moonan 的做法更简单——把状态写进 SQLite，重连时重新取快照。
 
-**Consequences**: 服务器胶水（HTTP、静态文件、WebSocket 升级、插件模块解析）由 `@moonan/core` 自己维护，升级 chord 时要自己跟进。
+**Consequences**: 服务器胶水（HTTP、静态文件、WebSocket 升级、插件模块解析）由 `@moonan_ai/core` 自己维护，升级 chord 时要自己跟进。
