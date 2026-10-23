@@ -1,13 +1,12 @@
 import { McpClient, StdioTransport, StreamableHttpTransport, toLlmContent, type Tool } from "@earendil-works/pi-mcp";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { SqliteDatabase } from "@earendil-works/chord/sqlite";
 import type { McpServerInput, McpServerState } from "@moonan_ai/contracts";
 import { Type } from "typebox";
-import type { AgentRuntime } from "./runtime/agent-runtime.js";
-import type { Store } from "./storage/store.js";
-import type { Logger } from "./util.js";
 
 /** MCP tools attach to the main agent only. */
 export const MCP_AGENT_ID = "main";
+const VERSION = "0.0.1-alpha4";
 
 interface ServerRuntime {
 	id: string;
@@ -17,6 +16,7 @@ interface ServerRuntime {
 	error?: string;
 	tools: Tool[];
 	agentTools: Map<string, AgentTool>;
+	enabled: Map<string, boolean>;
 }
 
 function toolName(serverId: string, name: string): string {
@@ -28,16 +28,18 @@ function targetOf(input: McpServerInput): string {
 	return [input.command, ...(input.args ?? [])].filter(Boolean).join(" ");
 }
 
+/**
+ * MCP servers, owned by the plugin: its own SQLite file, its own connection pool.
+ * Tools are exposed to the kernel through a tool group, so a server that connects
+ * after the plugin loaded still reaches the next turn.
+ */
 export class McpService {
 	private readonly servers = new Map<string, ServerRuntime>();
 	private readonly listeners = new Set<() => void>();
 	private disposed = false;
+	private restored = false;
 
-	constructor(
-		private readonly store: Store,
-		private readonly agents: AgentRuntime,
-		private readonly logger: Logger,
-	) {}
+	constructor(private readonly db: SqliteDatabase) {}
 
 	subscribe(listener: () => void): () => void {
 		this.listeners.add(listener);
@@ -60,7 +62,6 @@ export class McpService {
 	}
 
 	private describe(server: ServerRuntime): McpServerState {
-		const overrides = this.store.listToolOverrides(server.id);
 		return {
 			id: server.id,
 			name: server.input.name,
@@ -71,42 +72,73 @@ export class McpService {
 			tools: server.tools.map((tool) => ({
 				name: tool.name,
 				description: tool.description ?? tool.name,
-				enabled: overrides.get(tool.name) ?? true,
+				enabled: server.enabled.get(tool.name) ?? true,
 			})),
 		};
 	}
 
+	/** Tools the model may call right now: connected servers, enabled tools only. */
+	currentTools(): AgentTool[] {
+		const tools: AgentTool[] = [];
+		for (const server of this.servers.values()) {
+			for (const [name, tool] of server.agentTools) {
+				if (server.enabled.get(name) ?? true) tools.push(tool);
+			}
+		}
+		return tools;
+	}
+
 	async restore(): Promise<void> {
-		for (const row of this.store.listMcpServers()) {
+		if (this.restored) return;
+		this.restored = true;
+		const rows = await this.db.all<{ id: string; payload: string; enabled: number }>(
+			"SELECT id, payload, enabled FROM servers ORDER BY rowid",
+		);
+		for (const row of rows) {
+			const input = JSON.parse(row.payload) as McpServerInput;
 			if (!row.enabled) continue;
 			this.servers.set(row.id, {
 				id: row.id,
-				input: row.input,
+				input,
 				status: "idle",
 				tools: [],
 				agentTools: new Map(),
+				enabled: await this.overrides(row.id),
 			});
 		}
 		await Promise.all([...this.servers.keys()].map((id) => this.connect(id)));
 	}
 
+	private async overrides(serverId: string): Promise<Map<string, boolean>> {
+		const rows = await this.db.all<{ tool_name: string; enabled: number }>(
+			"SELECT tool_name, enabled FROM tools WHERE server_id = ?",
+			serverId,
+		);
+		return new Map(rows.map((row) => [row.tool_name, Number(row.enabled) === 1] as const));
+	}
+
 	async add(input: McpServerInput): Promise<McpServerState> {
 		const id = `mcp-${Date.now().toString(36)}`;
-		const server: ServerRuntime = { id, input, status: "idle", tools: [], agentTools: new Map() };
+		const server: ServerRuntime = { id, input, status: "idle", tools: [], agentTools: new Map(), enabled: new Map() };
 		this.servers.set(id, server);
-		this.store.saveMcpServer(id, input);
+		await this.db.run(
+			"INSERT INTO servers (id, payload, enabled, updated_at) VALUES (?, ?, 1, ?)",
+			id,
+			JSON.stringify(input),
+			Date.now(),
+		);
 		await this.connect(id);
 		return this.describe(server);
 	}
 
-	remove(id: string): void {
+	async remove(id: string): Promise<void> {
 		const server = this.servers.get(id);
 		if (server) {
-			for (const name of server.agentTools.keys()) this.agents.removeTool(MCP_AGENT_ID, name);
-			void server.client?.close();
+			await server.client?.close().catch(() => undefined);
 			this.servers.delete(id);
 		}
-		this.store.deleteMcpServer(id);
+		await this.db.run("DELETE FROM servers WHERE id = ?", id);
+		await this.db.run("DELETE FROM tools WHERE server_id = ?", id);
 		this.emit();
 	}
 
@@ -114,21 +146,18 @@ export class McpService {
 		await this.connect(id);
 	}
 
-	setToolEnabled(serverId: string, name: string, enabled: boolean): void {
+	async setToolEnabled(serverId: string, name: string, enabled: boolean): Promise<void> {
 		const server = this.servers.get(serverId);
 		if (!server) throw new Error(`unknown MCP server "${serverId}"`);
-		this.store.setToolEnabled(serverId, name, enabled);
-		this.syncTools(server);
+		server.enabled.set(name, enabled);
+		await this.db.run(
+			`INSERT INTO tools (server_id, tool_name, enabled) VALUES (?, ?, ?)
+			 ON CONFLICT(server_id, tool_name) DO UPDATE SET enabled = excluded.enabled`,
+			serverId,
+			name,
+			enabled ? 1 : 0,
+		);
 		this.emit();
-	}
-
-	private syncTools(server: ServerRuntime): void {
-		const overrides = this.store.listToolOverrides(server.id);
-		for (const [name, agentTool] of server.agentTools) {
-			const enabled = overrides.get(name) ?? true;
-			if (enabled) this.agents.registerTool(MCP_AGENT_ID, agentTool);
-			else this.agents.removeTool(MCP_AGENT_ID, agentTool.name);
-		}
 	}
 
 	async connect(id: string): Promise<void> {
@@ -137,13 +166,12 @@ export class McpService {
 		await server.client?.close().catch(() => undefined);
 		server.client = undefined;
 		server.agentTools.clear();
-		for (const tool of server.tools) this.agents.removeTool(MCP_AGENT_ID, toolName(id, tool.name));
 		server.tools = [];
 		server.status = "connecting";
 		server.error = undefined;
 		this.emit();
 		try {
-			const client = new McpClient({ name: "moonan", version: "0.0.1-alpha3" });
+			const client = new McpClient({ name: "moonan", version: VERSION });
 			const transport =
 				server.input.transport === "stdio"
 					? new StdioTransport({
@@ -151,7 +179,7 @@ export class McpService {
 							args: server.input.args ?? [],
 							...(server.input.env ? { env: server.input.env } : {}),
 							stderr: "pipe",
-							onStderr: (chunk: string) => this.logger.warn(`[${server.input.name}] ${chunk.trim()}`),
+							onStderr: (chunk: string) => console.warn(`[${server.input.name}] ${chunk.trim()}`),
 						})
 					: new StreamableHttpTransport({
 							url: server.input.url ?? "",
@@ -170,11 +198,11 @@ export class McpService {
 			await this.refreshTools(server);
 			server.status = "connected";
 			server.error = undefined;
-			this.logger.info(`MCP server "${server.input.name}" connected with ${server.tools.length} tools`);
+			console.info(`MCP server "${server.input.name}" connected with ${server.tools.length} tools`);
 		} catch (error) {
 			server.status = "error";
 			server.error = error instanceof Error ? error.message : String(error);
-			this.logger.error(`MCP server "${server.input.name}" failed`, error);
+			console.error(`MCP server "${server.input.name}" failed`, error);
 		}
 		this.emit();
 	}
@@ -187,7 +215,7 @@ export class McpService {
 		server.agentTools.clear();
 		for (const tool of tools) {
 			const name = toolName(server.id, tool.name);
-			const agentTool: AgentTool = {
+			server.agentTools.set(tool.name, {
 				name,
 				label: tool.title ?? tool.name,
 				description: tool.description ?? tool.name,
@@ -204,20 +232,14 @@ export class McpService {
 						isError: result.isError === true,
 					};
 				},
-			};
-			server.agentTools.set(tool.name, agentTool);
+			});
 		}
-		this.syncTools(server);
 		this.emit();
 	}
 
 	async dispose(): Promise<void> {
 		this.disposed = true;
-		await Promise.all(
-			[...this.servers.values()].map(async (server) => {
-				await server.client?.close().catch(() => undefined);
-			}),
-		);
+		await Promise.all([...this.servers.values()].map((server) => server.client?.close().catch(() => undefined)));
 		this.servers.clear();
 	}
 }

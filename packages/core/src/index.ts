@@ -1,18 +1,18 @@
 import { join } from "node:path";
-import { type FacetDefinition, type Host, createHost } from "@earendil-works/chord";
+import { type Host, createHost } from "@earendil-works/chord";
 import { nodeLoader } from "@earendil-works/chord/node";
 import {
 	AgentContract,
+	AgentDefinitions,
 	AgentIndexContract,
+	AgentToolGroups,
+	AgentTools,
 	AppContract,
 	type PluginInfo,
 } from "@moonan_ai/contracts";
-import { setServerHostFactory } from "@moonan_ai/plugin-sdk";
 import { AppService } from "./app-service.js";
 import { coreFacets } from "./facets.js";
-import { McpService } from "./mcp-service.js";
 import { ModelRegistry } from "./models.js";
-import { makeServerHostFactory } from "./plugin-host.js";
 import { installSharedModuleHooks, scanPlugins } from "./plugins.js";
 import { AgentRuntime } from "./runtime/agent-runtime.js";
 import { startWebServer, type PluginWebAsset, type WebServerHandle } from "./server.js";
@@ -25,7 +25,8 @@ export interface BuiltinPlugin {
 	id: string;
 	name: string;
 	version: string;
-	facet: FacetDefinition<unknown>;
+	/** The module whose default export is the facet. Loaded through `nodeLoader`, like a disk plugin. */
+	module: string | URL;
 	/** True when the web app already bundles this plugin's UI. */
 	hasWeb: boolean;
 }
@@ -59,35 +60,67 @@ export async function createMoonan(options: MoonanOptions): Promise<Moonan> {
 	const credentials = new SqliteCredentialStore(store);
 	const models = new ModelRegistry(store, credentials, logger.child("models"));
 	const app = new AppService(store, options.version);
-	const runtime = new AgentRuntime({ store, models, logger: logger.child("agents"), sceneVariables: () => ({ user: app.get().user }) });
-	const mcp = new McpService(store, runtime, logger.child("mcp"));
-
-	setServerHostFactory(makeServerHostFactory({ runtime, store, models, mcp, app, logger }));
+	const runtime = new AgentRuntime({
+		store,
+		models,
+		logger: logger.child("agents"),
+		sceneVariables: () => ({ user: app.get().user }),
+	});
 
 	installSharedModuleHooks();
 	const chordHost = createHost({ name: "moonan", self: { id: "local" }, loader: nodeLoader });
 
-	for (const facet of coreFacets({ runtime, app })) {
+	for (const facet of coreFacets({
+		runtime,
+		app,
+		store,
+		models,
+		logger: logger.child("core"),
+		dataDir: options.dataDir,
+	})) {
 		await chordHost.install({ name: facet.name, setup: facet.setup, ...(facet.uses ? { uses: facet.uses } : {}) });
 	}
 
+	// Registries are the only channel from plugins to the kernel: the host owns the
+	// subscriptions, so a plugin never calls into the runtime directly.
+	const held: { release(): void }[] = [];
+	const heldAgents = new Set<string>();
+	const pin = async (promise: Promise<{ release(): void }>): Promise<void> => {
+		held.push(await promise);
+	};
+	const pinAgents = async (): Promise<void> => {
+		for (const id of runtime.ids()) {
+			if (heldAgents.has(id)) continue;
+			heldAgents.add(id);
+			try {
+				await pin(chordHost.get(AgentContract, { agent: id }));
+			} catch (error) {
+				heldAgents.delete(id);
+				logger.error(`agent "${id}" could not be pinned`, error);
+			}
+		}
+	};
+
+	chordHost.registry(AgentDefinitions).subscribe((table) => {
+		runtime.setDefinitions(table);
+		void pinAgents();
+	});
+	chordHost.registry(AgentTools).subscribe((table) => {
+		runtime.setTools(table);
+	});
+	chordHost.registry(AgentToolGroups).subscribe((table) => {
+		runtime.setToolGroups(table);
+	});
+
 	const pluginInfos: PluginInfo[] = [];
 	const webAssets: PluginWebAsset[] = [];
+	const modules = new Map<string, string | URL>();
 
 	for (const plugin of options.builtinPlugins) {
+		modules.set(plugin.id, plugin.module);
 		try {
-			await chordHost.install({
-				name: `builtin:${plugin.id}`,
-				setup: plugin.facet.setup,
-				...(plugin.facet.uses ? { uses: plugin.facet.uses } : {}),
-			});
-			pluginInfos.push({
-				id: plugin.id,
-				name: plugin.name,
-				version: plugin.version,
-				source: "builtin",
-				hasWeb: plugin.hasWeb,
-			});
+			await chordHost.load([plugin.module]);
+			pluginInfos.push({ id: plugin.id, name: plugin.name, version: plugin.version, source: "builtin", hasWeb: plugin.hasWeb });
 		} catch (error) {
 			logger.error(`builtin plugin "${plugin.id}" failed to load`, error);
 			pluginInfos.push({
@@ -102,6 +135,7 @@ export async function createMoonan(options: MoonanOptions): Promise<Moonan> {
 	}
 
 	for (const plugin of scanPlugins(join(options.dataDir, "plugins"), logger.child("plugins"))) {
+		modules.set(plugin.id, plugin.server);
 		try {
 			await chordHost.load([plugin.server]);
 			pluginInfos.push({
@@ -129,18 +163,27 @@ export async function createMoonan(options: MoonanOptions): Promise<Moonan> {
 
 	app.setPlugins(pluginInfos);
 
-	// Pin every agent object so a browser disconnect never tears down a running turn.
-	const pinned: { release(): void }[] = [];
-	const pin = async <T extends { release(): void }>(promise: Promise<T>): Promise<void> => {
-		pinned.push(await promise);
-	};
+	// Hold the app, the index and every agent so a browser disconnect never tears
+	// down a running turn. Agents with an input cannot be `lifetime: "host"`.
 	await pin(chordHost.get(AppContract, {}));
 	await pin(chordHost.get(AgentIndexContract, {}));
-	for (const id of runtime.ids()) {
-		await pin(chordHost.get(AgentContract, { agent: id }));
-	}
+	await pinAgents();
 
-	void mcp.restore().catch((error: unknown) => logger.error("MCP restore failed", error));
+	const reload = async (id?: string): Promise<Awaited<ReturnType<Host["reload"]>>> => {
+		const urls: (string | URL)[] = [];
+		if (id === undefined) {
+			urls.push(...modules.values());
+		} else {
+			const url = modules.get(id);
+			if (!url) throw new Error(`unknown plugin "${id}"`);
+			urls.push(url);
+		}
+		logger.info(`reloading ${id ? `plugin "${id}"` : `${urls.length} plugin(s)`}`);
+		const report = await chordHost.reload(urls);
+		runtime.refresh();
+		await pinAgents();
+		return report;
+	};
 
 	const server: WebServerHandle = await startWebServer({
 		chordHost,
@@ -149,6 +192,7 @@ export async function createMoonan(options: MoonanOptions): Promise<Moonan> {
 		...(options.webDist ? { webDist: options.webDist } : {}),
 		version: options.version,
 		plugins: () => webAssets,
+		reload,
 		logger: logger.child("http"),
 	});
 
@@ -161,8 +205,14 @@ export async function createMoonan(options: MoonanOptions): Promise<Moonan> {
 		store,
 		close: async () => {
 			await server.close();
-			runtime.dispose();
-			await mcp.dispose().catch(() => undefined);
+			await runtime.dispose();
+			for (const ref of held) {
+				try {
+					ref.release();
+				} catch {
+					// already released
+				}
+			}
 			await chordHost.close().catch(() => undefined);
 			db.close();
 		},
@@ -170,7 +220,6 @@ export async function createMoonan(options: MoonanOptions): Promise<Moonan> {
 }
 
 export { AppService } from "./app-service.js";
-export { McpService } from "./mcp-service.js";
 export { ModelRegistry } from "./models.js";
 export { AgentRuntime } from "./runtime/agent-runtime.js";
 export { Store } from "./storage/store.js";

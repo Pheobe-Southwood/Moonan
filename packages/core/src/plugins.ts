@@ -32,9 +32,12 @@ let hooksInstalled = false;
  */
 export function installSharedModuleHooks(): void {
 	if (hooksInstalled) return;
+	// Vitest already routes `.ts` through its own loader; a shim on top of that makes
+	// Node load the source file itself, which fails. Tests import from source anyway.
+	if (process.env.VITEST) return;
 	hooksInstalled = true;
 	const shims = new Map<string, string>();
-	for (const specifier of ["@moonan_ai/contracts", "@moonan_ai/plugin-sdk", "@earendil-works/chord", "typebox"]) {
+	for (const specifier of ["@moonan_ai/contracts", "@earendil-works/chord", "typebox"]) {
 		try {
 			shims.set(specifier, import.meta.resolve(specifier));
 		} catch {

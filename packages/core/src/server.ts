@@ -21,6 +21,8 @@ export interface WebServerOptions {
 	webDist?: string;
 	version: string;
 	plugins: () => PluginWebAsset[];
+	/** Reload one plugin, or every plugin when `id` is omitted. */
+	reload: (id?: string) => Promise<unknown>;
 	logger: Logger;
 }
 
@@ -73,6 +75,18 @@ async function sendFile(response: ServerResponse, file: string, cache: boolean):
 	}
 }
 
+async function readJson(request: IncomingMessage): Promise<Record<string, unknown> | undefined> {
+	const chunks: Buffer[] = [];
+	for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+	if (chunks.length === 0) return undefined;
+	try {
+		const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 export async function startWebServer(options: WebServerOptions): Promise<WebServerHandle> {
 	const server = createServer((request, response) => {
 		handle(request, response).catch((error: unknown) => {
@@ -110,6 +124,23 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 					web: `/plugins/${plugin.id}/web.js`,
 				})),
 			});
+			return;
+		}
+
+		if (pathname === "/api/plugins/reload") {
+			if (request.method !== "POST") {
+				sendJson(response, 405, { error: "method not allowed" });
+				return;
+			}
+			const body = await readJson(request);
+			const id = typeof body?.id === "string" ? body.id : undefined;
+			try {
+				const report = await options.reload(id);
+				sendJson(response, 200, report ?? { ok: true });
+			} catch (error) {
+				options.logger.error("plugin reload failed", error);
+				sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });
+			}
 			return;
 		}
 

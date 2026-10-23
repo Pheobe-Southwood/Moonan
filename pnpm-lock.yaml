@@ -32,6 +32,9 @@ importers:
       '@earendil-works/chord':
         specifier: 1.4.0
         version: 1.4.0
+      '@earendil-works/pi-agent-core':
+        specifier: 1.4.0
+        version: 1.4.0(@aws-sdk/credential-provider-node@3.972.87)(@smithy/signature-v4@5.7.4)(ws@8.22.0)
       typebox:
         specifier: 1.3.27
         version: 1.3.27
@@ -47,15 +50,9 @@ importers:
       '@earendil-works/pi-ai':
         specifier: 1.4.0
         version: 1.4.0(@aws-sdk/credential-provider-node@3.972.87)(@smithy/signature-v4@5.7.4)(ws@8.22.0)
-      '@earendil-works/pi-mcp':
-        specifier: 1.4.0
-        version: 1.4.0
       '@moonan_ai/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@moonan_ai/plugin-sdk':
-        specifier: workspace:*
-        version: link:../plugin-sdk
       typebox:
         specifier: 1.3.27
         version: 1.3.27
@@ -87,9 +84,6 @@ importers:
       '@moonan_ai/core':
         specifier: workspace:*
         version: link:../core
-      '@moonan_ai/plugin-sdk':
-        specifier: workspace:*
-        version: link:../plugin-sdk
       typebox:
         specifier: 1.3.27
         version: 1.3.27
@@ -103,21 +97,6 @@ importers:
       vitest:
         specifier: ^5.0.5
         version: 5.0.5(@types/node@22.20.5)(vite@8.3.4(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15))
-
-  packages/plugin-sdk:
-    dependencies:
-      '@earendil-works/chord':
-        specifier: 1.4.0
-        version: 1.4.0
-      '@earendil-works/pi-agent-core':
-        specifier: 1.4.0
-        version: 1.4.0(@aws-sdk/credential-provider-node@3.972.87)(@smithy/signature-v4@5.7.4)(ws@8.22.0)
-      '@moonan_ai/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      typebox:
-        specifier: 1.3.27
-        version: 1.3.27
 
   packages/testing: {}
 
@@ -135,9 +114,6 @@ importers:
       '@moonan_ai/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@moonan_ai/plugin-sdk':
-        specifier: workspace:*
-        version: link:../plugin-sdk
       react:
         specifier: ^19.3.1
         version: 19.3.1

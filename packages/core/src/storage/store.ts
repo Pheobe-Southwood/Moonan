@@ -1,4 +1,4 @@
-import type { ChatMessage, AgentConfig, CustomProviderInput, McpServerInput, TranscriptEntry } from "@moonan_ai/contracts";
+import type { AgentConfig, CustomProviderInput, TranscriptEntry } from "@moonan_ai/contracts";
 import type { Credential, CredentialInfo } from "@earendil-works/pi-ai";
 import type { Message } from "@earendil-works/pi-ai";
 import type { Db } from "./db.js";
@@ -17,12 +17,6 @@ export interface StoredMessage {
 	createdAt: number;
 }
 
-export interface McpServerRow {
-	id: string;
-	input: McpServerInput;
-	enabled: boolean;
-}
-
 type Raw = Record<string, unknown>;
 
 function parseJson<T>(value: unknown, fallback: T): T {
@@ -34,6 +28,10 @@ function parseJson<T>(value: unknown, fallback: T): T {
 	}
 }
 
+/**
+ * The kernel's database: app settings, agent configuration, the model's transcript and
+ * credentials. Chat bubbles and MCP servers are owned by their plugins' own databases.
+ */
 export class Store {
 	constructor(readonly db: Db) {}
 
@@ -97,6 +95,20 @@ export class Store {
 		return Number(row?.count ?? 0);
 	}
 
+	/** Highest seq of this agent's transcript, or 0 when it has none. */
+	lastSeq(agentId: string): number {
+		const row = this.db.prepare("SELECT MAX(seq) AS seq FROM agent_messages WHERE agent_id = ?").get(agentId) as Raw | undefined;
+		return Number(row?.seq ?? 0);
+	}
+
+	/** Entries newer than `afterSeq`, oldest first. Used to catch up after a reload. */
+	messagesAfter(agentId: string, afterSeq: number): Message[] {
+		const rows = this.db
+			.prepare("SELECT message FROM agent_messages WHERE agent_id = ? AND seq > ? ORDER BY seq ASC")
+			.all(agentId, afterSeq) as Raw[];
+		return rows.map((row) => parseJson<Message>(row.message, { role: "user", content: "", timestamp: 0 } as Message));
+	}
+
 	/** Newest-first page, returned oldest-first so the caller can just append it. */
 	pageMessages(agentId: string, options: { before?: number; limit: number }): TranscriptEntry[] {
 		const limit = Math.max(1, Math.min(options.limit, 500));
@@ -126,39 +138,6 @@ export class Store {
 			.prepare("SELECT message FROM agent_messages WHERE agent_id = ? ORDER BY seq ASC")
 			.all(agentId) as Raw[];
 		return rows.map((row) => parseJson<Message>(row.message, { role: "user", content: "", timestamp: 0 } as Message));
-	}
-
-	// --- chat -----------------------------------------------------------
-
-	appendChat(agentId: string, direction: ChatMessage["direction"], text: string): ChatMessage {
-		const createdAt = Date.now();
-		const info = this.db
-			.prepare("INSERT INTO chat_messages (agent_id, direction, text, created_at) VALUES (?, ?, ?, ?)")
-			.run(agentId, direction, text, createdAt);
-		return { seq: Number(info.lastInsertRowid), direction, text, createdAt };
-	}
-
-	pageChat(agentId: string, options: { before?: number; limit: number }): ChatMessage[] {
-		const limit = Math.max(1, Math.min(options.limit, 500));
-		const rows = (
-			options.before === undefined
-				? this.db
-						.prepare("SELECT seq, direction, text, created_at FROM chat_messages WHERE agent_id = ? ORDER BY seq DESC LIMIT ?")
-						.all(agentId, limit)
-				: this.db
-						.prepare(
-							"SELECT seq, direction, text, created_at FROM chat_messages WHERE agent_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?",
-						)
-						.all(agentId, options.before, limit)
-		) as Raw[];
-		return rows
-			.map((row) => ({
-				seq: Number(row.seq),
-				direction: String(row.direction) as ChatMessage["direction"],
-				text: String(row.text),
-				createdAt: Number(row.created_at),
-			}))
-			.reverse();
 	}
 
 	// --- credentials ----------------------------------------------------
@@ -209,62 +188,5 @@ export class Store {
 	deleteCustomProvider(id: string): void {
 		this.db.prepare("DELETE FROM custom_providers WHERE id = ?").run(id);
 		this.db.prepare("DELETE FROM credentials WHERE provider_id = ?").run(id);
-	}
-
-	// --- mcp ------------------------------------------------------------
-
-	listMcpServers(): McpServerRow[] {
-		const rows = this.db.prepare("SELECT id, payload, enabled FROM mcp_servers ORDER BY rowid").all() as Raw[];
-		return rows.map((row) => ({
-			id: String(row.id),
-			input: parseJson<McpServerInput>(row.payload, { name: "", transport: "stdio" }),
-			enabled: Number(row.enabled) === 1,
-		}));
-	}
-
-	saveMcpServer(id: string, input: McpServerInput): void {
-		this.db
-			.prepare(
-				`INSERT INTO mcp_servers (id, payload, updated_at) VALUES (?, ?, ?)
-				 ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`,
-			)
-			.run(id, JSON.stringify(input), Date.now());
-	}
-
-	deleteMcpServer(id: string): void {
-		this.db.prepare("DELETE FROM mcp_servers WHERE id = ?").run(id);
-		this.db.prepare("DELETE FROM mcp_tools WHERE server_id = ?").run(id);
-	}
-
-	listToolOverrides(serverId: string): Map<string, boolean> {
-		const rows = this.db.prepare("SELECT tool_name, enabled FROM mcp_tools WHERE server_id = ?").all(serverId) as Raw[];
-		return new Map(rows.map((row) => [String(row.tool_name), Number(row.enabled) === 1] as const));
-	}
-
-	setToolEnabled(serverId: string, toolName: string, enabled: boolean): void {
-		this.db
-			.prepare(
-				`INSERT INTO mcp_tools (server_id, tool_name, enabled) VALUES (?, ?, ?)
-				 ON CONFLICT(server_id, tool_name) DO UPDATE SET enabled = excluded.enabled`,
-			)
-			.run(serverId, toolName, enabled ? 1 : 0);
-	}
-
-	// --- plugin state ---------------------------------------------------
-
-	getPluginState<T>(pluginId: string, key: string): T | undefined {
-		const row = this.db
-			.prepare("SELECT value FROM plugin_state WHERE plugin_id = ? AND key = ?")
-			.get(pluginId, key) as Raw | undefined;
-		return parseJson<T | undefined>(row?.value, undefined);
-	}
-
-	setPluginState(pluginId: string, key: string, value: unknown): void {
-		this.db
-			.prepare(
-				`INSERT INTO plugin_state (plugin_id, key, value) VALUES (?, ?, ?)
-				 ON CONFLICT(plugin_id, key) DO UPDATE SET value = excluded.value`,
-			)
-			.run(pluginId, key, JSON.stringify(value));
 	}
 }

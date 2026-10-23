@@ -80,6 +80,14 @@ const MIGRATIONS: readonly string[] = [
 	)
 	WHERE id = 'main' AND plugin_id = 'agents' AND instr(config, 'act') > 0;
 	`,
+	// alpha4 moves chat and MCP data to their plugins' own databases and drops the
+	// unused plugin KV table. No data is migrated: the old rows are discarded.
+	`
+	DROP TABLE IF EXISTS chat_messages;
+	DROP TABLE IF EXISTS mcp_servers;
+	DROP TABLE IF EXISTS mcp_tools;
+	DROP TABLE IF EXISTS plugin_state;
+	`,
 ];
 
 export type Db = DatabaseSync;

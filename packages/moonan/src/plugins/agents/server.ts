@@ -1,4 +1,6 @@
-import { defineServerPlugin } from "@moonan_ai/plugin-sdk";
+import { defineFacet, local, method } from "@earendil-works/chord";
+import { Type } from "typebox";
+import { AgentDefinitions, Panels, type AgentDefinition } from "@moonan_ai/contracts";
 
 /**
  * The director prompt. Users edit it in Agent 管理 → 高级; this is the shipped
@@ -13,23 +15,46 @@ export const MAIN_SYSTEM_PROMPT = `你是一个角色扮演场景的导演，你
 3. 思考内容应聚焦于剧情走向分析和回复内容规划，不要在思考中进行角色扮演式的内心戏表演
 `;
 
+export const MAIN_AGENT_ID = "main";
+
+/**
+ * A registries-only facet: the object it serves exists solely so that this plugin has
+ * a `lifetime: "host"` object to register the agent definition from.
+ */
+const Root = local("moonan.agents.root", {
+	version: 1,
+	input: Type.Object({}),
+	members: { noop: method() },
+});
+
+const definition: AgentDefinition = {
+	id: MAIN_AGENT_ID,
+	pluginId: "agents",
+	name: "{{botname}}",
+	description: "在这里配置角色的人设",
+	systemPrompt: MAIN_SYSTEM_PROMPT,
+	variables: [
+		{ key: "botname", label: "角色名字", type: "text", value: "月见", global: true },
+		{
+			key: "soul",
+			label: "角色人设",
+			type: "textarea",
+			value: "",
+			global: true,
+			placeholder: "她是谁、经历过什么、说话方式如何、有什么秘密……",
+		},
+	],
+};
+
 /** Registers the one built-in agent. Everything else about it is edited by the user. */
-export default defineServerPlugin("agents", ({ agents }) => {
-	agents.register({
-		id: "main",
-		name: "{{botname}}",
-		description: "在这里配置角色的人设",
-		systemPrompt: MAIN_SYSTEM_PROMPT,
-		variables: [
-			{ key: "botname", label: "角色名字", type: "text", value: "月见", global: true },
-			{
-				key: "soul",
-				label: "角色人设",
-				type: "textarea",
-				value: "",
-				global: true,
-				placeholder: "她是谁、经历过什么、说话方式如何、有什么秘密……",
-			},
-		],
-	});
+export default defineFacet((api) => {
+	api.serve(
+		Root,
+		(_input, _principal, self) => {
+			self.register(AgentDefinitions, { [MAIN_AGENT_ID]: definition });
+			self.register(Panels, { agents: { id: "agents", titleKey: "nav.agents", order: 30 } });
+			return { noop: () => undefined };
+		},
+		{ lifetime: "host" },
+	);
 });

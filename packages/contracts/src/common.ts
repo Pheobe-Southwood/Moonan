@@ -172,6 +172,15 @@ export const McpServerStateSchema = Type.Object({
 });
 export type McpServerState = Static<typeof McpServerStateSchema>;
 
+/** A top-level panel the shell renders. The client maps `id` to a component. */
+export const PanelInfoSchema = Type.Object({
+	id: Type.String(),
+	/** i18n key the shell renders as the tab label. */
+	titleKey: Type.String(),
+	order: Type.Number(),
+});
+export type PanelInfo = Static<typeof PanelInfoSchema>;
+
 export const PluginInfoSchema = Type.Object({
 	id: Type.String(),
 	name: Type.String(),

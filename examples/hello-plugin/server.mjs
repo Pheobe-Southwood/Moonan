@@ -5,35 +5,49 @@
  *   mkdir -p ~/.moonan/plugins && cp -r examples/hello-plugin ~/.moonan/plugins/hello
  * 重启 moonan，Agent 面板里会多出一个 Helen。
  */
-import { defineServerPlugin } from "@moonan_ai/plugin-sdk";
+import { defineFacet, local, method } from "@earendil-works/chord";
+import { Type } from "typebox";
+import { AgentDefinitions } from "@moonan_ai/contracts";
 
-export default defineServerPlugin("hello", (host) => {
-	host.agents.register({
-		id: "hello",
-		name: "{{helloName}}",
-		description: "只会说英语的图书管理员",
-		systemPrompt: [
-			"You are {{helloName}}, the librarian of a small English bookshop.",
-			"You speak English only, in short and precise sentences.",
-			"Whenever you want to say something to the visitor, you must call the `send_message` tool.",
-			"Anything you write outside of `send_message` is inner monologue and is never shown to them.",
-			"",
-			"The visitor's name is {{user}}.",
-		].join("\n"),
-		variables: [
-			{ key: "helloName", label: "名字", type: "text", value: "Helen", global: false },
-			{
-				key: "helloMood",
-				label: "语气",
-				type: "textarea",
-				value: "Patient, a little dry, never in a hurry.",
-				global: true,
-			},
-		],
-	});
+// 注册表只接受 lifetime: "host" 的对象，所以做贡献的插件都有这么一个根对象。
+const Root = local("moonan.hello.root", {
+	version: 1,
+	input: Type.Object({}),
+	members: { noop: method() },
+});
 
-	// 插件私有的键值存储，落在 plugin_state 表里。
-	void host.storage.set("installedAt", new Date().toISOString());
-
-	host.log.info("hello plugin is ready — try the Helen agent");
+export default defineFacet((api) => {
+	api.serve(
+		Root,
+		(_input, _principal, self) => {
+			self.register(AgentDefinitions, {
+				hello: {
+					id: "hello",
+					pluginId: "hello",
+					name: "{{helloName}}",
+					description: "只会说英语的图书管理员",
+					systemPrompt: [
+						"You are {{helloName}}, the librarian of a small English bookshop.",
+						"You speak English only, in short and precise sentences.",
+						"Whenever you want to say something to the visitor, you must call the `send_message` tool.",
+						"Anything you write outside of `send_message` is inner monologue and is never shown to them.",
+						"",
+						"The visitor's name is {{user}}.",
+					].join("\n"),
+					variables: [
+						{ key: "helloName", label: "名字", type: "text", value: "Helen", global: false },
+						{
+							key: "helloMood",
+							label: "语气",
+							type: "textarea",
+							value: "Patient, a little dry, never in a hurry.",
+							global: true,
+						},
+					],
+				},
+			});
+			return { noop: () => undefined };
+		},
+		{ lifetime: "host" },
+	);
 });

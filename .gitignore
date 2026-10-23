@@ -13,3 +13,4 @@ test-results/
 e2e/artifacts/
 *.tsbuildinfo
 .DS_Store
+.tmp-*/

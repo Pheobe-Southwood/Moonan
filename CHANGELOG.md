@@ -1,5 +1,19 @@
 # 变更日志 · Changelog
 
+## 0.0.1-alpha4
+
+这次是破坏性重构：内核不再认识「对话」「MCP」「日志」，它们都成了普通插件。
+
+- **插件 API 重写**：删除 `@moonan_ai/plugin-sdk`、`defineServerPlugin` 与整个 `ServerHost`。插件导出 `defineFacet(...)`，用注册表贡献 Agent、工具、工具组与面板，用能力契约（`HostPaths`、`AgentAdmin`、`TranscriptAdmin`、`ModelAdmin`、`AppAdmin`）使用内核能力。
+- **数据归属**：对话气泡搬到 `plugins-data/chat.db`，MCP 配置搬到 `plugins-data/mcp.db`，各自由插件用 `self.resource` 打开与迁移；内核库只保留设置、人设、转录与凭据。
+- **破坏性迁移**：`chat_messages`、`mcp_servers`、`mcp_tools`、`plugin_state` 四张旧表被删除，**旧对话与 MCP 配置不迁移、不可恢复**。升级前请备份 `~/.moonan`。
+- **回合语义**：`AgentContract.send` 不再等待整个回合，只入队并立即返回；回合跑在 `api.root` 里，重载时使用旧代码跑完。`self.task` 只保留可重启的后台活（对话合批）。
+- **流式更新**：手写的 50 ms 定时器换成 `@earendil-works/chord/output` 的 `Progress`。
+- **插件热重载**：新增 `POST /api/plugins/reload`，可带 `{"id":"chat"}`；状态、进行中的回合与插件数据库连接都会保留。
+- **面板**：前端导航改由服务端 `panels` 注册表驱动；未知面板显示占位而不是崩掉。
+- **内置插件加载**：内置与磁盘插件走同一条 `nodeLoader` 模块路径。
+- **MCP 去内核化**：`McpService` 与 `@earendil-works/pi-mcp` 依赖从 `@moonan_ai/core` 移到内置 `mcp` 插件。
+
 ## 0.0.1-alpha3
 
 - 对话工具 `act` 更名为 `send_message`：它向 WebUI 的对话窗口发送一条气泡，模型其余文本仍然是内心独白。

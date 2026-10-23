@@ -1,6 +1,6 @@
 {
   "name": "@moonan_ai/testing",
-  "version": "0.0.1-alpha3",
+  "version": "0.0.1-alpha4",
   "description": "Moonan 的测试替身：假 OpenAI 服务与假 MCP 服务。",
   "type": "module",
   "license": "MIT",

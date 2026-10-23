@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
 // Dependency order: a package is published after everything it depends on.
-const order = ["packages/contracts", "packages/plugin-sdk", "packages/core", "packages/testing", "packages/moonan"];
+const order = ["packages/contracts", "packages/core", "packages/testing", "packages/moonan"];
 
 const args = process.argv.slice(2);
 const tagIndex = args.indexOf("--tag");

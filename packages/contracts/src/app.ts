@@ -1,6 +1,6 @@
 import { hostNamed, method, remote } from "@earendil-works/chord";
 import { Type } from "typebox";
-import { PluginInfoSchema } from "./common.js";
+import { PanelInfoSchema, PluginInfoSchema } from "./common.js";
 
 /** App-wide status: who the person is, what language the UI speaks, what plugins loaded. */
 export const AppContract = remote("moonan.app", {
@@ -14,6 +14,8 @@ export const AppContract = remote("moonan.app", {
 				locale: Type.String(),
 				version: Type.String(),
 				plugins: Type.Array(PluginInfoSchema),
+				/** Contributed through the panels registry, ordered by `order`. */
+				panels: Type.Array(PanelInfoSchema),
 			},
 			methods: {
 				update: method(

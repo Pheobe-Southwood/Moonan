@@ -1,6 +1,6 @@
 # 插件
 
-一个插件由两半组成：服务端的 **facet**（用 chord 注册跨进程对象）和可选的浏览器资源 `web.js`。五个内置面板本身就是插件，所以插件 API 只要够内置面板用，就够第三方用。
+一个插件就是**一个 chord facet 模块**：默认导出 `defineFacet(...)` 的产物，可以服务跨进程对象、贡献注册表条目、使用内核的能力契约。五个内置面板本身就是插件，所以插件 API 只要够内置面板用，就够第三方用。
 
 ## 装在哪里
 
@@ -30,60 +30,94 @@
 ## 写一个服务端插件
 
 ```js
-import { defineServerPlugin } from "@moonan_ai/plugin-sdk";
+import { defineFacet, local, method } from "@earendil-works/chord";
+import { Type } from "typebox";
+import { AgentDefinitions } from "@moonan_ai/contracts";
 
-export default defineServerPlugin("hello", (host) => {
-	host.agents.register({
-		id: "hello",
-		name: "{{helloName}}",
-		description: "只会说英语的图书管理员",
-		systemPrompt: "You are {{helloName}}, a librarian. Speak English only.",
-		variables: [{ key: "helloName", label: "名字", type: "text", value: "Helen", global: false }],
-	});
-	host.log.info("hello is ready");
+// 注册表只接受 lifetime: "host" 的对象，所以每个做贡献的插件都有这么一个根对象。
+const Root = local("moonan.hello.root", {
+	version: 1,
+	input: Type.Object({}),
+	members: { noop: method() },
+});
+
+export default defineFacet((api) => {
+	api.serve(
+		Root,
+		(_input, _principal, self) => {
+			self.register(AgentDefinitions, {
+				hello: {
+					id: "hello",
+					pluginId: "hello",
+					name: "{{helloName}}",
+					description: "只会说英语的图书管理员",
+					systemPrompt: "You are {{helloName}}, a librarian. Speak English only.",
+					variables: [{ key: "helloName", label: "名字", type: "text", value: "Helen", global: false }],
+				},
+			});
+			return { noop: () => undefined };
+		},
+		{ lifetime: "host" },
+	);
 });
 ```
 
-`setup` 在宿主安装插件时同步执行；返回 Promise 时不会阻塞启动，但拒绝会记录错误。
-
 完整例子见 [`examples/hello-plugin`](../examples/hello-plugin)。
 
-## ServerHost
+## 内核认识什么：注册表
 
-| 成员 | 作用 |
+| 注册表 | 值 | 说明 |
+|---|---|---|
+| `AgentDefinitions` | `AgentDefinition` | 声明一个 Agent；`id` 全局唯一，`pluginId` 由插件自报 |
+| `AgentTools` | `{ tool, agents? }` | 静态工具；`agents` 省略表示所有 Agent 可用 |
+| `AgentToolGroups` | `{ tools: () => AgentTool[], agents? }` | 运行时会变的工具集（MCP 用它）；内核在每个回合开始时重读 |
+| `Panels` | `{ id, titleKey, order }` | 顶层面板；前端按 `id` 找组件 |
+
+注册表是**声明式**的：`self.register` 在工厂里一次写全，重载时整表替换。值不会序列化，可以带函数（`AgentToolGroups` 就是靠这一点）。
+
+## 内核给什么：能力契约
+
+全是 `local()` 契约，由内核以 `{ lifetime: "host" }` 提供，插件用 `self.get(...)` 拿，进程内直接调用：
+
+| 契约 | 能做什么 |
 |---|---|
-| `chord` | 这个插件自己的 `FacetApi`：`serve(contract, factory)`、`root(fn)`、`signal` |
-| `agents` | 注册 Agent 与工具、给 Agent 发消息 |
-| `chat` | 读写对话气泡 |
-| `logs` | 分页读取模型视角的日志 |
-| `models` | 提供商与密钥、模型列表、自定义提供商 |
-| `mcp` | 添加 / 重连 / 删除 MCP 服务，开关工具 |
-| `app` | 用户昵称、语言、版本 |
-| `storage` | 这个插件私有的键值存储（落在 `plugin_state` 表） |
-| `log` | 带插件名前缀的日志 |
+| `HostPaths` | 读 `dataDir`，拼自己的数据库路径 |
+| `AgentAdmin` | `send` / `canSend` / `interrupt`；`send` 只入队，立即返回 |
+| `TranscriptAdmin` | 分页读模型视角的转录（`page` / `count`） |
+| `ModelAdmin` | 提供商列表、模型列表、密钥、自定义提供商、刷新 |
+| `AppAdmin` | 用户昵称、语言、版本 |
 
-`agents.send()` 只在 Agent 有模型时才会真正投递；用 `agents.canSend()` 先判断，免得每次都在日志里留一条错误。
+对话气泡、MCP 配置这类**插件自己的数据**不在内核里：每个插件在 `plugins-data/<id>.db` 里放自己的表。
 
-## 服务一个对象
+## 服务一个远程对象
 
-对象走 chord：契约定义在 `@moonan_ai/contracts`，服务端 `serve`，浏览器 `host.get`。
+跨进程对象要 `remote(name, { version, input, host, variants })`：
 
 ```js
-import { remote, hostNamed } from "@earendil-works/chord";
+import { hostNamed, method, remote } from "@earendil-works/chord";
 import { Type } from "typebox";
 
-export const HelloContract = remote({
+export const HelloContract = remote("hello.greeting", {
+	version: 1,
+	input: Type.Object({}),
 	host: hostNamed("moonan"),
-	shape: {
-		greeting: Type.Object({ text: Type.String(), at: Type.Number() }),
-	},
 	variants: {
-		hello: {
-			variant: "v1",
-			state: { greeting: Type.Object({ text: Type.String(), at: Type.Number() }) },
-			methods: { greet: { args: Type.Object({ name: Type.String() }), returns: Type.String() } },
+		v1: {
+			state: { text: Type.String(), at: Type.Number() },
+			methods: { greet: method(Type.Object({ name: Type.String() }), Type.String()) },
 		},
 	},
+});
+
+export default defineFacet((api) => {
+	api.serve(HelloContract, (_input, _principal, self) => {
+		const text = self.state("text", Type.String(), "hello");
+		return {
+			variant: "v1",
+			text,
+			greet: ({ name }) => `hello, ${name}`,
+		};
+	});
 });
 ```
 
@@ -94,15 +128,55 @@ export const HelloContract = remote({
 - 单元格只接受严格 JSON：值为 `undefined` 的属性会直接抛错。
 - 状态对外是 `Readable`：`ref.x.value` 取值，`ref.x.subscribe(fn)` 订阅，没有 `.get()`。
 - 在方法调用之外改状态要用 `chord.root(ctx => cell.change(ctx, next))`。
+- 长任务（一次对话回合）用 `api.root(...)` 起一个 root；`self.task` 只放**可重启**的后台活（重载时会被停掉并重启）。
+
+## 插件数据库
+
+用 `self.resource` 打开，用 chord 自带的迁移器，进程内只有这一个写者：
+
+```js
+import { join } from "node:path";
+import { mkdir } from "node:fs/promises";
+import { applySqliteMigrations } from "@earendil-works/chord/sqlite";
+import { openNodeSqliteDatabase } from "@earendil-works/chord/sqlite/node";
+import { HostPaths } from "@moonan_ai/contracts";
+
+const paths = self.get(HostPaths, {});
+const db = self.resource("db", {
+	version: 1,
+	deps: [paths],
+	open: async () => {
+		const dir = join(paths.dataDir.value, "plugins-data");
+		await mkdir(dir, { recursive: true });
+		const database = await openNodeSqliteDatabase(join(dir, "hello.db"));
+		await database.exec("PRAGMA journal_mode = WAL");
+		await applySqliteMigrations(database, [{ version: 1, statements: ["CREATE TABLE …"] }], {
+			table: "schema_migrations",
+		});
+		return database;
+	},
+	close: (database) => database.close(),
+});
+```
+
+资源带版本号：重载时版本不变就沿用同一个连接；改表结构时把 `version` 加一，旧连接先关、新代码再开。
 
 ## 浏览器那一半
 
-`web.js` 会被服务器在 `/plugins/<id>/web.js` 提供，`GET /api/plugins` 里带 `web` 字段。这一版的外壳只挂载内置面板，磁盘插件的 `web.js` 还没有面板位，服务端对象仍然可以通过任何 chord 客户端直接使用。
+`web.js` 会被服务器在 `/plugins/<id>/web.js` 提供，`GET /api/plugins` 里也带 `web` 字段。这一版的外壳只挂载内置面板：`Panels` 里出现未知 `id` 时显示占位面板，磁盘插件的 `web.js` 还没有面板位，服务端对象仍可以通过任何 chord 客户端直接使用。
 
 内置面板的写法就是目标形态：`packages/web/src/plugins/<id>/ui.tsx` 用 `useRemote(contract, input)` 拿引用，`useReadable` 订阅状态，`useAction` 调用方法。
 
+## 热重载
+
+```bash
+curl -X POST http://127.0.0.1:21315/api/plugins/reload -d '{"id":"hello"}'
+```
+
+不带 `id` 重载全部已加载插件。状态单元、进行中的回合、插件数据库连接都会被保留，详见[架构](architecture.md#热重载)。
+
 ## 模块解析
 
-插件目录在 `node_modules` 之外，因此 `@moonan_ai/contracts`、`@moonan_ai/plugin-sdk`、`@earendil-works/chord`、`typebox` 这四个裸标识符会被重定向到主进程正在用的那一份。这样全进程只有一个 chord 实例和一份 TypeBox，插件的对象才能注册进同一个 host。
+插件目录在 `node_modules` 之外，因此 `@moonan_ai/contracts`、`@earendil-works/chord`、`typebox` 这三个裸标识符会被重定向到主进程正在用的那一份。这样全进程只有一个 chord 实例和一份 TypeBox，插件的注册表令牌才能和内核的对上。
 
 其他依赖请随插件一起放在自己的目录里。

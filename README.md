@@ -44,8 +44,8 @@ By default Moonan listens on `0.0.0.0` so the UI is reachable over your LAN or T
 | **一个角色，一个 Agent** | 角色名、人设、系统提示词都是可编辑的变量，改完立刻生效。 |
 | **说与想分开** | 模型的心理描写留在日志里，只有 `send_message` 工具的输出会出现在对话窗口。 |
 | **消息自动合批** | 两秒内连发的几条消息会合成一条带时间戳的说明交给模型。 |
-| **明文、本地、可查** | 全部数据在一个 SQLite 文件里，密钥不加密、不上传，随时可以用任何客户端打开。 |
-| **插件就是 chord facet** | 内置的五个面板本身就是插件，外部插件放到 `~/.moonan/plugins` 即可加载。 |
+| **明文、本地、可查** | 数据在本机 SQLite 里：内核一个库，每个插件一个库。密钥不加密、不上传，随时可以用任何客户端打开。 |
+| **插件就是 chord facet** | 内置的五个面板本身就是插件；插件只通过注册表与能力契约接触内核，外部插件放到 `~/.moonan/plugins` 即可加载，`/api/plugins/reload` 热重载。 |
 
 ## 截图 · Screenshots
 
@@ -78,8 +78,9 @@ pnpm e2e        # Playwright，截图会写到 docs/screenshots
 
 ## 状态 · Status
 
-`0.0.1-alpha3`：五个内置面板、一个主 Agent、MCP 工具开关、完整的对话与日志。打开对话窗不会触发模型，只有用户消息才会开始一个回合。
-OAuth 登录、停止按钮、多 Agent 界面留到后续版本。
+`0.0.1-alpha4`：内核大解耦——对话、MCP、日志、面板全部下沉为插件，插件只通过注册表与能力契约接触内核；回合改为「立即确认 + 后台 root」，支持插件热重载。
+**升级会丢弃 alpha3 的聊天与 MCP 配置**，详见[数据](docs/data.md#alpha3--alpha4-的破坏性变更)。
+OAuth 登录、停止按钮、多 Agent 界面、外部 `web.js` 面板位留到后续版本。
 
 ## 许可 · License
 

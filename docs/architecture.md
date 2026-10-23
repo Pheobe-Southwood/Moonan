@@ -2,42 +2,46 @@
 
 ## 一句话
 
-一个 Node 进程持有一份 SQLite、一套 chord host 和若干个 pi-agent-core 实例；浏览器是一个 chord 客户端；插件在服务端注册 facet，在浏览器里贡献一个 React 面板。
+内核只保留三件事——模型网关、Agent 的记忆与运行、chord 宿主；对话、日志、MCP、面板都是插件；插件与内核之间只剩两条通道：**注册表**（贡献什么）与**能力契约**（能用什么）。
 
 ## 包
 
 | 包 | 职责 |
 |---|---|
 | `moonan` | CLI、HTTP/WS 服务器、五个内置插件 |
-| `@moonan_ai/core` | 存储、模型、运行时、chord 宿主 facet、插件加载 |
-| `@moonan_ai/contracts` | 所有跨进程契约（TypeBox + chord `remote`） |
-| `@moonan_ai/plugin-sdk` | 插件作者看到的接口：`defineServerPlugin`、`ServerHost` |
-| `@moonan_ai/web` | React 19 应用，五个面板，中英双语 |
+| `@moonan_ai/core` | 存储、模型、Agent 运行时、能力契约、chord 宿主、插件加载 |
+| `@moonan_ai/contracts` | 所有跨进程契约（TypeBox + chord `remote`）、注册表令牌、能力契约 |
+| `@moonan_ai/web` | React 19 应用，面板由服务端 `panels` 注册表驱动 |
 | `@moonan_ai/testing` | 假 OpenAI 服务、假 MCP 服务，测试与 e2e 用 |
 
-依赖方向是单向的：`moonan → core → contracts`，`web → contracts`，谁都不反向依赖。
+依赖方向是单向的：`moonan → core → contracts`，`web → contracts`。内核不认识「对话」「MCP」这些词。
 
 ## 进程
 
 ```
-┌─────────────────────────── Node ───────────────────────────┐
-│ HTTP :21315  ── /           静态文件（dist/web）             │
-│              ── /api/plugins  外部插件的 web.js              │
-│              ── /ws          chord 服务器                    │
-│                                                            │
-│ chord host "moonan"                                        │
-│   ├─ core facets: app / agent-index / agent                │
-│   └─ plugin facets: agents / providers / chat / mcp / logs │
-│                                                            │
-│ AgentRuntime ── pi-agent-core Agent（每个 Agent 一个）        │
-│ Store ── SQLite（明文 JSON 列）                              │
-└────────────────────────────────────────────────────────────┘
-                 ▲  WebSocket（JSON 帧）
-                 │
-        ┌────────┴────────┐
-        │  浏览器 chord    │  客户端 host（kind: "client"）
-        │  React 应用      │  每个面板持有自己的 Ref
-        └─────────────────┘
+┌─────────────────────────── Node ────────────────────────────┐
+│ HTTP :21315  ── /             静态文件（dist/web）            │
+│              ── /api/plugins  磁盘插件清单                    │
+│              ── /plugins/:id/web.js  磁盘插件的浏览器资源      │
+│              ── /api/plugins/reload  POST，热重载             │
+│              ── /ws           chord 服务器                    │
+│                                                             │
+│ chord host "moonan"                                         │
+│   ├─ 内核 facet：agent / agent-index / app                   │
+│   ├─ 能力 facet：host-paths / agent-admin / transcript-admin  │
+│   │              model-admin / app-admin                     │
+│   └─ 插件 facet：agents / providers / chat / mcp / logs       │
+│                                                             │
+│ AgentRuntime ── pi-agent-core Agent（每个 Agent 一个，懒建）  │
+│ Store ── moonan.db（设置、人设、转录、凭据）                  │
+│ 插件 ── plugins-data/<id>.db（各自的 SQLite）                 │
+└─────────────────────────────────────────────────────────────┘
+                  ▲  WebSocket（JSON 帧）
+                  │
+         ┌────────┴────────┐
+         │  浏览器 chord    │  客户端 host（kind: "client"）
+         │  React 应用      │  每个面板持有自己的 Ref
+         └─────────────────┘
 ```
 
 开发时 Vite 在 21315 提供页面，并把 `/ws`、`/api`、`/plugins` 代理到 21316 的 Node 进程。生产只有一个进程，21315 同时服务静态文件和 WebSocket。
@@ -45,15 +49,18 @@
 ## 一次对话的完整路径
 
 1. 浏览器 `ChatContract.post({ text })`。
-2. chat 插件写入 `chat_messages`，把气泡推进状态单元，启动 2 秒合批计时器。
-3. 计时器到点，把这一批拼成
-   `{用户昵称}通过webui给你发送了 N 条消息：\n[HH:MM] …`，交给 `AgentRuntime.send`。
-4. Agent 空闲时 `prompt()`，忙时先排队，等当前回合结束再作为下一轮处理——永不打断正在进行的回合。
-5. pi-agent-core 调模型（`pi-ai` 的 `streamSimple`），事件流回到 `AgentInstance`：
-   - `message_update` 的增量以 50 ms 节流写进 `live` 状态单元；
-   - `message_end` / `turn_end` 落库到 `agent_messages`。
-6. 模型调用 `send_message` 工具 → chat 插件再写一条 `chat_messages`（`direction: "out"`）并推给浏览器。
-7. 工具结果回给模型，回合继续，直到 `agent_end` 把状态改回 `idle`。
+2. chat 插件把气泡写进自己的 `plugins-data/chat.db`，`revision` 加一，并推入批次队列。
+3. `ChatContract` 对象挂在 `revision` 上，重新读一页气泡推给浏览器；`post` 到这里就返回了。
+4. chat 插件的 `task` 每 100 ms 检查队列，满 2 秒就拼成
+   `{用户昵称}通过webui给你发送了 N 条消息：\n[HH:MM] …`，调用 `AgentAdmin.send`。
+5. `AgentAdmin` 只把消息放进 Agent 对象的 `inbox` 状态单元，**立即返回**（ACK）。
+6. `inbox` 监听器在 commit 阶段启动，看到队列非空就 `api.root(...)` 开一个新回合：
+   取走一条消息 → `agent.prompt(...)`。
+7. pi-agent-core 调模型（`pi-ai` 的 `streamSimple`），事件流回到 `AgentInstance`：
+   - 增量写进内存，`Progress` 按 50 ms 与输出字节数合并提交到 `live` 状态单元；
+   - `message_end` / `turn_end` 用水位把新消息落进 `agent_messages`。
+8. 模型调用 `send_message` 工具 → chat 插件再写一条气泡（`direction: "out"`）并 `revision` 加一。
+9. 工具结果回给模型，回合继续，直到 `agent_end` 把状态改回 `idle`；`inbox` 里还有消息就再开一轮。
 
 模型输出的普通文本是「内心独白」，只出现在日志面板；用户能看到的一切都必须经过 `send_message`。打开或切回对话窗不在这条路径上：它只读取已有气泡，不会向 Agent 发送提示词。
 
@@ -61,33 +68,54 @@
 
 - 服务端对象的 `state` 是 `Cell`，chord 负责增量同步到浏览器。
 - 浏览器把 `Readable` 交给 React：`value` + `subscribe`。
-- pi-agent 的事件不经过 chord 调用，所以单元格更新用 `api.root(ctx => cell.change(ctx, …))`，并按 50 ms 合并，避免每个 token 一次事务。
+- 方法执行期间用方法的 `ctx` 改单元格；pi 的事件不在 chord 调用树里，所以用 `api.root(ctx => cell.change(ctx, …))`，并用 `@earendil-works/chord/output` 的 `Progress` 限流。
 
 ## 断线
 
 chord 的链路不会续接：连接断开，所有引用释放。因此：
 
-- 服务端在启动时把 app、agent-index 和每个 Agent 对象**钉住**，浏览器断开不会中断正在跑的回合；
+- 内核启动时把 app、agent-index 和每个 Agent 对象**持有**到进程结束（`host.get` 拿到的引用会保存并在关闭时 `release()`）；浏览器断开不会中断正在跑的回合；
+- 需要掩过短暂断开的对象带 `linger`（Agent 对象 30 秒、ChatContract 30 秒）；
 - 浏览器每次重连都新建一个客户端 host，并递增 `generation`，让所有钩子重新取引用；
-- 对话消息有两条来源：初始快照来自数据库，之后靠状态增量。两者都在，所以断线期间 `send_message` 写入的气泡在重连后仍会出现。
+- 对话气泡有两条来源：`ChatContract.messages` 的初始快照与 `revision` 触发的重读。断线期间写入的气泡，重连后仍会出现。
+
+## 热重载
+
+`POST /api/plugins/reload`（可带 `{"id": "chat"}`）触发 `host.reload([moduleUrl])`：
+
+1. **Prepare**：新代码的工厂在每个存活对象上重跑一次，只做声明；状态单元被保留，任务和监听器还没启动。
+2. **Commit**：注册表整表替换；`task`、监听器用新代码重启；`lifetime: "host"` 对象重新注册自己的贡献。
+3. **进行中的回合**是 `api.root` 启动的 root，会被「祖父化」——它在旧代码上跑完，继续写共享的单元格。
+4. 新代码的 `AgentInstance` 不会 `dispose` 旧实例；旧实例跑完回合后自毁（僵尸队列），进程退出时兜底。
+5. 插件数据库是 `self.resource`，版本不变就不重开；chat 的 `pending` 单元格保留，新代码接着合批。
+6. 转录按水位追加，新旧两代代码不会写出重复行。
+
+不保证的部分：连续两次重载时，第一次遗留的 root 会在 `taskStopDeadline`（默认 5 秒）后被中止；需要迁移单元格版本的重载最多等 5 秒，超时则本次重载中止（回合不丢，重试即可）。
 
 ## 插件加载
 
-1. 内置插件在 `moonan/src/plugins/*`，编译进主包，启动时 `host.install(facet)`。
-2. 外部插件在 `~/.moonan/plugins/<id>/`，需要 `plugin.json`（`id`、`name`、`version`、`server`、`web`）。
-3. 外部插件的模块解析由 `module.registerHooks` 兜底：`@moonan_ai/contracts`、`@moonan_ai/plugin-sdk`、`@earendil-works/chord`、`typebox` 一律指向主进程里的那一份，保证只有一份 chord 和一份 TypeBox。
-4. 单个插件加载失败只会记录错误并把 `error` 放进插件列表，不会拖垮进程。
+1. 内置插件在 `moonan/src/plugins/*`，磁盘插件在 `~/.moonan/plugins/<id>/`；两者都走 `host.load([moduleUrl])` + `nodeLoader`，唯一区别是 URL 从哪来。
+2. 内置模块用 `facetModuleUrl()` 解析：优先 `.js`（`dist`），源码树运行时退到 `.ts`（tsx）。
+3. 磁盘插件需要 `plugin.json`（`id`、`name`、`version`、`server`、`web`）。
+4. 磁盘插件的模块解析由 `module.registerHooks` 兜底：`@moonan_ai/contracts`、`@earendil-works/chord`、`typebox` 一律指向主进程里的那一份，保证全进程只有一份 chord 和一份 TypeBox（`@moonan_ai/plugin-sdk` 已删除）。
+5. 单个插件加载失败只会记录错误并把 `error` 放进插件列表，不会拖垮进程。
 
 ## 生命周期
 
 ```
 createMoonan()
-  ├─ 打开数据库、跑迁移
-  ├─ 建 ModelRegistry / AgentRuntime / AppService / McpService
-  ├─ 安装 core facets
-  ├─ 安装内置插件 → 注册主 Agent 与 send_message 工具
-  ├─ 扫描并加载外部插件
-  ├─ 钉住 app / agent-index / agent:* 引用
-  ├─ 后台连接已保存的 MCP 服务
+  ├─ 打开 moonan.db、跑迁移
+  ├─ 建 Store / ModelRegistry / AppService / AgentRuntime
+  ├─ 安装内核 facet 与能力 facet
+  ├─ 订阅 agents / agent-tools / agent-tool-groups / panels 注册表
+  ├─ 依次加载内置插件模块，再扫描并加载磁盘插件
+  ├─ 持有 app / agent-index / agent:* 引用（并因此激活每个 Agent 对象）
   └─ 启动 HTTP + WebSocket
+
+close()
+  ├─ 关 HTTP 与 WebSocket
+  ├─ 中止并释放全部 Agent 实例（含僵尸）
+  ├─ 释放持有的引用
+  ├─ 关闭 chord host（停 task、关资源）
+  └─ 关 moonan.db
 ```

@@ -1,4 +1,4 @@
-import { AppContract } from "@moonan_ai/contracts";
+import { AppContract, type PanelInfo } from "@moonan_ai/contracts";
 import { useEffect, useState, type ReactNode } from "react";
 import { useConnection } from "./chord/connection.js";
 import { useReadable, useRemote } from "./chord/hooks.js";
@@ -16,38 +16,54 @@ export interface TabProps {
 	user: string;
 }
 
-interface TabDefinition {
-	id: string;
-	label: string;
-	Component: (props: TabProps) => ReactNode;
+/**
+ * Panels come from the server's `panels` registry; the components stay here because
+ * Chord never ships code to the browser. An unknown id renders a placeholder instead
+ * of breaking the shell.
+ */
+const COMPONENTS: Record<string, (props: TabProps) => ReactNode> = {
+	chat: ChatTab,
+	logs: LogsTab,
+	agents: AgentsTab,
+	providers: ProvidersTab,
+	mcp: McpTab,
+};
+
+function UnknownPanel({ id }: { id: string }) {
+	const t = useT();
+	return (
+		<section className="panel">
+			<h2>{t("panel.unknown.title")}</h2>
+			<p className="muted">
+				{t("panel.unknown.body")} <code>{id}</code>
+			</p>
+		</section>
+	);
 }
 
-const TABS: TabDefinition[] = [
-	{ id: "chat", label: "nav.chat", Component: ChatTab },
-	{ id: "logs", label: "nav.logs", Component: LogsTab },
-	{ id: "agents", label: "nav.agents", Component: AgentsTab },
-	{ id: "providers", label: "nav.providers", Component: ProvidersTab },
-	{ id: "mcp", label: "nav.mcp", Component: McpTab },
-];
-
-function currentRoute(): string {
+function currentRoute(panels: PanelInfo[]): string {
 	const hash = location.hash.replace(/^#\/?/, "");
-	return TABS.some((tab) => tab.id === hash) ? hash : "chat";
+	return panels.some((panel) => panel.id === hash) ? hash : (panels[0]?.id ?? "");
 }
 
-function Shell({ app, locale, user, version }: TabProps & { version: string }) {
+function Shell({ app, locale, user, version, panels }: TabProps & { version: string; panels: PanelInfo[] }) {
 	const t = useT();
 	const { status } = useConnection();
-	const [route, setRoute] = useState(currentRoute);
+	const [route, setRoute] = useState(() => currentRoute(panels));
+	const active = panels.find((panel) => panel.id === route) ?? panels[0];
+	const activeId = active?.id ?? "";
 
 	useEffect(() => {
-		const onHash = () => setRoute(currentRoute());
+		const onHash = () => setRoute(currentRoute(panels));
 		window.addEventListener("hashchange", onHash);
 		return () => window.removeEventListener("hashchange", onHash);
-	}, []);
+	}, [panels]);
 
-	const active = TABS.find((tab) => tab.id === route) ?? (TABS[0] as TabDefinition);
-	const Component = active.Component;
+	useEffect(() => {
+		if (!active && panels.length > 0) setRoute(panels[0]?.id ?? "");
+	}, [active, panels]);
+
+	const Component = COMPONENTS[activeId];
 
 	return (
 		<div className="shell">
@@ -57,18 +73,18 @@ function Shell({ app, locale, user, version }: TabProps & { version: string }) {
 					<small>{version || t("brand.tagline")}</small>
 				</div>
 				<nav className="tabs" aria-label="Primary">
-					{TABS.map((tab) => (
+					{panels.map((panel) => (
 						<button
-							key={tab.id}
+							key={panel.id}
 							type="button"
 							className="tab"
-							data-active={tab.id === active.id}
+							data-active={panel.id === activeId}
 							onClick={() => {
-								location.hash = `#/${tab.id}`;
-								setRoute(tab.id);
+								location.hash = `#/${panel.id}`;
+								setRoute(panel.id);
 							}}
 						>
-							{t(tab.label)}
+							{t(panel.titleKey)}
 						</button>
 					))}
 				</nav>
@@ -88,8 +104,14 @@ function Shell({ app, locale, user, version }: TabProps & { version: string }) {
 					</button>
 				</div>
 			</header>
-			<main className={active.id === "chat" ? "main main--flush" : "main"}>
-				<Component app={app} locale={locale} user={user} />
+			<main className={activeId === "chat" ? "main main--flush" : "main"}>
+				{Component ? (
+					<Component app={app} locale={locale} user={user} />
+				) : active ? (
+					<UnknownPanel id={active.id} />
+				) : (
+					<div className="loading">{t("panel.unknown.title")}</div>
+				)}
 			</main>
 		</div>
 	);
@@ -101,6 +123,7 @@ function Bootstrapped() {
 	const locale = useReadable<Locale>(app?.locale, "zh");
 	const user = useReadable<string>(app?.user, "你");
 	const version = useReadable<string>(app?.version, "");
+	const panels = useReadable<PanelInfo[]>(app?.panels, []);
 
 	if (!host || !app) {
 		return <div className="loading">Moonan / 连接中</div>;
@@ -108,7 +131,13 @@ function Bootstrapped() {
 
 	return (
 		<LocaleProvider locale={locale === "en" ? "en" : "zh"}>
-			<Shell app={app} locale={locale === "en" ? "en" : "zh"} user={user} version={version} />
+			<Shell
+				app={app}
+				locale={locale === "en" ? "en" : "zh"}
+				user={user}
+				version={version}
+				panels={panels}
+			/>
 		</LocaleProvider>
 	);
 }
