@@ -240,6 +240,19 @@ const db = self.resource("db", {
 
 资源带版本号：重载时版本不变就沿用同一个连接；改表结构时把 `version` 加一，旧连接先关、新代码再开。
 
+### 单元格也有版本
+
+`self.state(name, schema, initial, { version, migrate })`：单元格按**名字**跨重载存活，重载不会重跑 `init`。因此改单元格的**值结构**时必须把 `version` 加一，否则 chord 会以 schema 不匹配拒绝这次重载；旧值需要转换时提供 `migrate(old, from)`。
+
+```ts
+const pending = self.state("pending", Type.Array(BubbleSchema), [], {
+	version: 2,
+	migrate: (old, from) => (from < 2 ? upgradeBubbles(old) : (old as Bubble[])),
+});
+```
+
+alpha5 没有改动任何单元格的值结构（`PluginInfo` 只是多了一个可选字段），所以没有 `migrate` 函数；这条规则留给下一次真正改结构的版本。
+
 ## 热重载
 
 ```bash
