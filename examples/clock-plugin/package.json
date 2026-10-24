@@ -1,0 +1,14 @@
+{
+  "name": "@moonan_ai/example-clock",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A Moonan plugin with no AI in it: a live clock over Chord, plus one HTTP route.",
+  "license": "MIT",
+  "dependencies": {
+    "@earendil-works/chord": "1.4.0",
+    "@moonan_ai/sdk": "workspace:*",
+    "react": "^19.3.1",
+    "typebox": "1.3.27"
+  }
+}

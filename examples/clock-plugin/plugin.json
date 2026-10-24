@@ -1,0 +1,7 @@
+{
+	"id": "clock",
+	"name": "时钟 · Clock",
+	"version": "0.1.0",
+	"server": "server.mjs",
+	"web": "web.js"
+}

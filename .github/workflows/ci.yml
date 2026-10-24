@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      - name: Check the published entry points exist
+        run: |
+          missing=0
+          check() { test -f "$1" || { echo "missing: $1"; missing=1; }; }
+          check packages/sdk/dist/index.js
+          check packages/sdk/dist/web.js
+          check packages/substrate/dist/index.js
+          check packages/substrate/dist/cli.js
+          # The shell ships inside the substrate package: `npx @moonan_ai/moonan` must serve a UI.
+          check packages/substrate/dist/web/index.html
+          # A plugin imported at runtime resolves these through the import map, so all of
+          # them have to exist by these exact names.
+          for runtime in react jsx-runtime react-dom chord chord-output typebox typebox-value sdk sdk-web; do
+            check "packages/web/dist/runtime/$runtime.js"
+          done
+          grep -q 'type="importmap"' packages/web/dist/index.html || { echo "importmap missing"; missing=1; }
+          # Every runtime bundle must be self-contained: a leftover bare import means a second
+          # copy of React or Chord at runtime, which shows up as a hook error or a panel that
+          # silently never appears.
+          if grep -qE 'from "(react|react-dom|@earendil-works/chord|typebox|@moonan_ai)' packages/web/dist/runtime/*.js; then
+            echo "runtime bundles still contain bare imports"
+            grep -hoE 'from "[^"]+"' packages/web/dist/runtime/*.js | sort -u
+            missing=1
+          fi
+          exit $missing
+
+      - name: Test
+        run: pnpm test

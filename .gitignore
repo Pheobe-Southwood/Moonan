@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*
+!.env.example
+.data/
+.tmp-*/
+
+# Generated: the shared browser runtime and the entries esbuild synthesises for it.
+packages/web/public/runtime/
+packages/web/.runtime-entries/

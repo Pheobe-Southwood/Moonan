@@ -1,0 +1,59 @@
+{
+  "name": "@moonan_ai/moonan",
+  "version": "0.1.0",
+  "description": "Moonan substrate: a zero-data Chord host that loads plugins over a single port.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pheobe-Southwood/Moonan.git",
+    "directory": "packages/substrate"
+  },
+  "bin": {
+    "moonan": "./bin/moonan.js"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "bin",
+    "src"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-web.mjs",
+    "dev": "tsx watch src/cli.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.4.0",
+    "@moonan_ai/sdk": "workspace:*",
+    "typebox": "1.3.27",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@moonan_ai/web": "workspace:*",
+    "@types/node": "^22.20.5",
+    "@types/ws": "^8.18.2",
+    "vitest": "^5.0.5"
+  },
+  "keywords": [
+    "moonan",
+    "substrate",
+    "chord",
+    "plugin"
+  ],
+  "homepage": "https://github.com/Pheobe-Southwood/Moonan#readme",
+  "bugs": {
+    "url": "https://github.com/Pheobe-Southwood/Moonan/issues"
+  }
+}
