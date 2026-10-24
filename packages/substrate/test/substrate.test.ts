@@ -74,7 +74,8 @@ describe("the substrate", () => {
 	it("gives a chord client the manifest over the websocket", async () => {
 		const socket = new WebSocket(`${moonan.url.replace("http", "ws")}/ws`);
 		// Connected before `open` on purpose: the server greets as soon as it accepts, and a
-		// listener attached after that greeting loses it. See `connection.tsx`.
+		// client that subscribes later loses that `hello`. See `connection.tsx` for what a
+		// missing hello costs (no acknowledgements, so no flow control).
 		const client = createHost({ kind: "client", self: { id: "browser" } });
 		// `ws` speaks the structural WebSocketLike chord wants, event listeners included.
 		client.connect(webSocketLink(socket as never), { principal: { id: "browser" } });
@@ -87,8 +88,10 @@ describe("the substrate", () => {
 			const entries = manifest.plugins.value as PluginEntry[];
 			expect(entries.map((entry) => entry.id)).toContain("clock");
 			expect(manifest.version.value).toEqual(expect.any(String));
-			// A second call after the handshake settles: if the link had tripped a protocol
-			// violation it would already be closed here.
+			// What this proves: the handshake produced a link that still answers a second call a
+			// moment later. It does not prove the ordering rule above — a client that missed the
+			// hello stays connected, it just stops acknowledging (flow control), which no public
+			// call surface exposes.
 			await new Promise((resolve) => setTimeout(resolve, 150));
 			expect(socket.readyState).toBe(WebSocket.OPEN);
 			const again = await client.get(Manifest, {});
@@ -143,6 +146,8 @@ describe("the substrate", () => {
 		// The consumer's host object consumes a type that the *later* plugin serves. chord's
 		// `load` installs the whole batch before it activates host objects; loading one URL at
 		// a time would fail here with `unavailable/unknown_type`, decided by argument order.
+		// The consumer also declares `uses: [Shared]`, the facet-level statement of the same
+		// dependency: on a reload chord checks that the new provider still covers it.
 		const dir = await mkdtemp(join(root, "packages", "substrate", ".batch-"));
 		const write = async (name: string, text: string) => {
 			await mkdir(join(dir, name), { recursive: true });
@@ -162,7 +167,7 @@ export default defineFacet((api) => {
 		const shared = self.get(Shared, {});
 		return { ping: (ctx) => shared.ping(ctx) };
 	}, { lifetime: "host" });
-});
+}, { uses: [Shared] });
 `,
 		);
 		await write(
@@ -192,7 +197,7 @@ export default defineFacet((api) => {
 		}
 	});
 
-	it("bumps the manifest revision on the browser's own object", async () => {
+	it("converges every manifest instance on the new code version", async () => {
 		const current = (await (await fetch(`${moonan.url}/api/plugins`)).json()) as { revision: number };
 		const socket = new WebSocket(`${moonan.url.replace("http", "ws")}/ws`);
 		const client = createHost({ kind: "client", self: { id: "browser" } });
@@ -201,22 +206,27 @@ export default defineFacet((api) => {
 			socket.once("open", () => resolve());
 			socket.once("error", (error) => reject(error));
 		});
+		// chord keys objects by principal, so this is a different object from the browser's:
+		// the fan-out has to reach both, and neither is written by iterating a list here.
+		const hostManifest = await moonan.host.get(Manifest, {});
 		try {
 			const manifest = await client.get(Manifest, {});
 			const before = manifest.revision.value as number;
 			// A new instance starts at the current revision, not at zero: otherwise every
 			// reconnect would look like a code change and make the shell reload for nothing.
 			expect(before).toBe(current.revision);
-			// The browser's Manifest is its own object — chord keys objects by principal — so a
-			// revision written only to the host's copy would never reach this subscription.
-			const seen = new Promise<number>((resolve) => {
-				const stop = manifest.revision.subscribe((value: number) => {
-					if (value > before) {
-						stop();
-						resolve(value);
-					}
+			expect(hostManifest.revision.value).toBe(before);
+			const watch = (ref: typeof manifest, from: number) =>
+				new Promise<number>((resolve) => {
+					const stop = ref.revision.subscribe((value: number) => {
+						if (value > from) {
+							stop();
+							resolve(value);
+						}
+					});
 				});
-			});
+			const seen = watch(manifest, before);
+			const hostSeen = watch(hostManifest, before);
 			const response = await fetch(`${moonan.url}/api/plugins/reload`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
@@ -225,9 +235,13 @@ export default defineFacet((api) => {
 			expect(response.status).toBe(200);
 			const body = (await response.json()) as { revision: number };
 			expect(body.revision).toBeGreaterThan(before);
+			// The response reports `host.codeVersion` directly — chord delivers a listener's
+			// event through its publication queue, so the cells settle a moment later.
 			await expect(seen).resolves.toBeGreaterThan(before);
+			await expect(hostSeen).resolves.toBeGreaterThan(before);
 			manifest.release();
 		} finally {
+			hostManifest.release();
 			await client.close().catch(() => undefined);
 			socket.terminate();
 		}

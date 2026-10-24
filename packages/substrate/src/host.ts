@@ -1,9 +1,10 @@
-import { createHost, type Cell, type Host, type Ref, type ReloadReport } from "@earendil-works/chord";
+import { createHost, type Host, type Ref, type ReloadReport } from "@earendil-works/chord";
 import { nodeLoader } from "@earendil-works/chord/node";
 import { Manifest, PluginEntrySchema, type PluginEntry } from "@moonan_ai/sdk";
 import { Type } from "typebox";
 import { createLogger, type Logger } from "./logger.js";
 import { installSharedModuleHooks, resolvePluginRef, scanPluginDirectory } from "./plugins.js";
+import { createSignal } from "./signal.js";
 import { describe, errorMessage, type PluginRecord, type Principal } from "./types.js";
 
 export interface SubstrateOptions {
@@ -16,17 +17,21 @@ export interface SubstrateOptions {
 	logger?: Logger;
 }
 
-/** One live `Manifest` object's cells: a remote type has one object per principal. */
-interface ManifestCells {
-	plugins: Cell<PluginEntry[]>;
-	revision: Cell<number>;
+/** What every `Manifest` instance converges on, and what a new instance starts from. */
+interface ManifestSnapshot {
+	readonly revision: number;
+	readonly plugins: PluginEntry[];
 }
 
 export interface Substrate {
 	host: Host<Principal>;
 	/** Resolution order; entries carry `error` rather than disappearing when they fail. */
 	plugins: PluginRecord[];
-	/** Committed manifest revision. Bumped once per reload that committed a code version. */
+	/**
+	 * chord's code version of this host (`host.codeVersion`): 1 at startup, one higher after
+	 * every reload that committed. A browser and an external tool both use it to tell whether
+	 * a new code version exists.
+	 */
 	readonly revision: number;
 	/**
 	 * Re-installs plugin modules: a Chord reload for the ones already loaded, a plain load
@@ -101,6 +106,11 @@ export async function createSubstrate(options: SubstrateOptions): Promise<Substr
 				// re-runs the factory and reports this plugin's own error instead of the batch's.
 				// It costs one code version per healthy plugin, which is acceptable on an error
 				// path and buys an honest per-plugin message.
+				//
+				// Only true for an activation failure. A facet whose `setup` throws after it
+				// already served a type is not rolled back by chord either, so this retry gets
+				// "`<type>` is already served" instead — a known limit of this isolation, not a
+				// second plugin error.
 				plugin.loaded = true;
 				try {
 					await host.reload([plugin.server!]);
@@ -116,30 +126,46 @@ export async function createSubstrate(options: SubstrateOptions): Promise<Substr
 	await loadPlugins();
 
 	/**
-	 * Every live `Manifest` instance, by principal.
+	 * The one thing the substrate announces, and the only state the base carries.
 	 *
-	 * A remote type is instantiated per principal (chord keys objects by principal), so the
-	 * browser's object is not the host's. A reload has to bump the revision on all of them,
-	 * or an open page would never learn that the code changed.
+	 * chord instantiates a remote type per principal, so the host has its own `Manifest`
+	 * object and every browser shares another one. Fanning a new snapshot out to them is
+	 * chord's job, not this file's: each instance declares `self.on("manifest", …)` in its own
+	 * factory, chord runs that handler in the object's own root, and an object that is gone
+	 * takes its listener with it. Nothing here iterates instances or prunes dead ones.
+	 *
+	 * Created per substrate, not per module: two substrates in one process (tests) must not
+	 * deliver each other's reloads.
 	 */
-	const activations = new Map<string, ManifestCells>();
-	let revision = 0;
+	const manifestChanges = createSignal<ManifestSnapshot>({
+		revision: host.codeVersion,
+		plugins: plugins.map(describe),
+	});
 
 	await host.install({
 		name: "moonan:manifest",
 		setup(api) {
-			api.serve(Manifest, (_input, principal, self) => {
+			api.serve(Manifest, (_input, _principal, self) => {
+				// Seed from the snapshot, and expect the same value again when the listener
+				// starts: a signal replays its current value, so nothing announced between this
+				// factory and that moment is lost.
+				const initial = manifestChanges.value;
 				const version = self.state("version", Type.String(), options.version);
-				const entries = self.state("plugins", Type.Array(PluginEntrySchema), plugins.map(describe));
-				const revisionCell = self.state("revision", Type.Number(), revision);
-				activations.set(JSON.stringify(principal), { plugins: entries, revision: revisionCell });
-				return { variant: "v1" as const, version, plugins: entries, revision: revisionCell };
+				const entries = self.state("plugins", Type.Array(PluginEntrySchema), initial.plugins);
+				const revision = self.state("revision", Type.Number(), initial.revision);
+				self.on("manifest", manifestChanges, (next, ctx) => {
+					entries.replace(ctx, next.plugins, { diff: true });
+					if (next.revision !== revision.value) revision.replace(ctx, next.revision);
+				});
+				return { variant: "v1" as const, version, plugins: entries, revision };
 			});
 		},
 	});
 
-	// Hold the manifest for the life of the process: a browser disconnect must not dispose
-	// the one object every reconnect needs.
+	// Activate the substrate's own contract once at startup, so a mistake in it fails here
+	// with a logged error instead of in every browser. This is not what keeps the manifest
+	// alive: the object a browser needs belongs to the browser principal and is created when
+	// that browser first holds it.
 	let manifest: Ref<typeof Manifest> | undefined;
 	try {
 		manifest = await host.get(Manifest, {});
@@ -148,28 +174,14 @@ export async function createSubstrate(options: SubstrateOptions): Promise<Substr
 	}
 
 	/**
-	 * Publishes the plugin list, and — when a code version committed — a new revision.
+	 * Announces the current snapshot.
 	 *
-	 * `replace` rather than `change` on the revision: every instance converges on the same
-	 * absolute value, so one created after a reload starts with the current one instead of
-	 * dropping a live page back to zero.
+	 * `revision` is chord's code version, read after the commit; the plugin list is what the
+	 * loader knows now. Delivery is chord's publication queue, so this returns before the
+	 * instances have written their cells — nothing may read a cell to answer a request.
 	 */
-	const syncManifest = async (bumpRevision: boolean): Promise<void> => {
-		if (bumpRevision) revision += 1;
-		const next = plugins.map(describe);
-		for (const [key, cells] of [...activations]) {
-			try {
-				await host.root((ctx) => {
-					cells.plugins.replace(ctx, next, { diff: true });
-					if (bumpRevision) cells.revision.replace(ctx, revision);
-				});
-			} catch (error) {
-				// The object this instance belonged to is gone: its browser disconnected. Anything
-				// else means the write path itself is broken and should not pass silently.
-				if ((error as { code?: string }).code === "gone") activations.delete(key);
-				else logger.error("manifest sync failed", error);
-			}
-		}
+	const publishManifest = (): void => {
+		manifestChanges.set({ revision: host.codeVersion, plugins: plugins.map(describe) });
 	};
 
 	const reload = async (id?: string): Promise<{ reloaded: string[]; report?: ReloadReport }> => {
@@ -195,9 +207,10 @@ export async function createSubstrate(options: SubstrateOptions): Promise<Substr
 
 		const report = reloadable.length > 0 ? await host.reload(reloadable) : undefined;
 		const committed = reloadable.length > 0 || recovered;
-		// The revision is what a browser reload follows: it is not a commit participant, so a
-		// committed code version is only visible to it as a state change (docs/architecture).
-		if (committed || retry.length > 0) await syncManifest(committed);
+		// A commit moved `host.codeVersion`; a recovery only changed the plugin list. Either way
+		// the browser listens to this snapshot, and a browser reloads its own facets from it
+		// (docs/architecture). Reading the version here, not from a cell: delivery is queued.
+		if (committed || retry.length > 0) publishManifest();
 
 		const reloaded = targets.filter((plugin) => plugin.loaded).map((plugin) => plugin.id);
 		return { reloaded, ...(report ? { report } : {}) };
@@ -210,7 +223,6 @@ export async function createSubstrate(options: SubstrateOptions): Promise<Substr
 			// already released
 		}
 		manifest = undefined;
-		activations.clear();
 		await host.close().catch((error: unknown) => logger.error("host close failed", error));
 	};
 
@@ -218,7 +230,7 @@ export async function createSubstrate(options: SubstrateOptions): Promise<Substr
 		host,
 		plugins,
 		get revision() {
-			return revision;
+			return host.codeVersion;
 		},
 		reload,
 		close,

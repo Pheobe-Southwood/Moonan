@@ -45,7 +45,7 @@ _Avoid_: 页面, page, 标签页, tab, 视图
 _Avoid_: 路由表, 菜单
 
 **共享运行时（Shared Runtime）**
-`/runtime/*.js`：由基座预先打好的 React、Chord、TypeBox 与 SDK 各一份 ESM。多一份 React 会让 hooks 报错，多一份 Chord 会让注册表令牌对不上。
+`/runtime/*.js`：由基座预先打好的 React、Chord、TypeBox 与 SDK 各一份 ESM。多一份 React 会让 hooks 报错；多一份 Chord 会让页面里出现第二个协议与对象身份世界（注册表按**名字**认表，同名不会因此失配，但两个宿主的对象互不可见）。
 _Avoid_: vendor, 依赖包, 外部依赖
 
 **插件来源（Plugin source）**

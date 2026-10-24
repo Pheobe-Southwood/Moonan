@@ -73,21 +73,40 @@ POST /api/plugins/reload  { "id": "clock" }   ← id 省略则全部
   │
   ├── 从未加载成功的插件 → host.load()         （重载无法修复「没装上」）
   ├── 已加载的插件       → host.reload([url])  （prepare → gate → commit → retire）
-  ├── 提交成功           → Manifest.revision += 1（写进每一份活着的实例）
+  ├── 提交成功           → chord 的 code version +1，基座直接读 host.codeVersion
+  ├── 广播一份快照       → 每个活着的 Manifest 实例在自己的 root 里写自己的 cell
   └── 响应 { ok, reloadBrowser: true, revision, reloaded }
 ```
 
-`reloadBrowser: true` 说的是「浏览器切面过期了」，不是「整页刷新」。浏览器不是 Chord 的重载参与者，它靠状态变化得知新代码：外壳订阅 `Manifest.revision`，一变就 `host.reload(webUrls, { remove })`。这是 Chord 允许的 **client-local reload**——`kind: "client"` 的宿主可以本地换切面，只是它的代码版本不跨连接传播。整页刷新只留给协议版本失配。
+`revision` 就是 **chord 的 code version**（`host.codeVersion`）：启动时是 1，每次提交 +1。基座不再自己数一个整数——那份信息 chord 本来就有，而且 `ReloadReport.codeVersion` 已经在响应里。一次「恢复加载」（启动时失败的插件被 `host.load` 装上）不改变 code version，因为那不算一次提交；这时变的是 `plugins` 数组，浏览器照样会换切面。
 
-`Manifest` 是远程对象，Chord 按 principal 为每个调用方各建一份（宿主的、每个浏览器的）。`revision` 必须写进每一份活着的实例，否则页面上的那份永远停在旧值——`syncManifest` 就是做这件事的；写失败说明那个实例的对象已经随浏览器断开被回收，从表里删掉即可。
+`reloadBrowser: true` 说的是「浏览器切面过期了」，不是「整页刷新」。浏览器不参与 chord 的 **cluster** 重载协调，但 `kind: "client"` 的宿主可以本地 reload 自己的切面（代码版本不跨连接传播）——chord 对过期契约的补救也正是「reload its web facets」。整页刷新只留给协议版本失配。
 
 旧代码的根还在跑时，旧实现继续为它服务；根结束后，那一版才退休。这是 Chord 自带的事务语义，基座没有额外做什么。
+
+## 一次广播
+
+`Manifest` 是远程对象，chord 按 principal 建实例：**宿主自己的一个，以及所有浏览器共用的一个**（`acceptWebSockets` 给每个连接同一个 principal）。基座不遍历这些实例：
+
+```text
+reload 提交
+  │
+  ├── publishManifest()：manifestChanges.set({ revision: host.codeVersion, plugins })
+  │        └── 一个 Subscribable，只保存当前值并通知订阅者
+  └── 每个 Manifest 实例在自己工厂里声明的 self.on("manifest", …)
+           └── chord 在自己的 root 里把新值写进那个实例的 cell
+```
+
+对象随浏览器断开被回收时，监听器随对象一起消失——不需要谁去修剪一本「还活着哪些实例」的账。新实例的初值取自 `manifestChanges.value`，所以它不会从 0 开始，也不会漏掉广播期间发生的变化。
+
+投递走 chord 的发布队列，**是异步的**：`POST /api/plugins/reload` 的 `revision` 直接取 `host.codeVersion`，不从 cell 读；也不要假定 `reload()` 返回时页面上的 cell 已经更新。
 
 ## 一次面板出现
 
 ```text
 浏览器外壳启动
   │
+  ├── 先建 link，再等 socket open（服务端的 hello 在建连时就发出，晚订阅就永远收不到）
   ├── 连 /ws，建 kind:"client" 宿主（整页只建一次）
   ├── host.hold(Manifest) → 引用立刻返回，可能仍是 loading
   ├── 一次 host.load([...web 切面 URL])：整批装完再激活
@@ -95,6 +114,8 @@ POST /api/plugins/reload  { "id": "clock" }   ← id 省略则全部
   ├── 外壳订阅 Panels，按 order 排序渲染标签页
   └── Manifest.revision 变化 → host.reload(同批 URL, { remove })
 ```
+
+第一条值得单独说：**建 link 必须在 socket `open` 之前**。服务端在 `Connection` 构造时就发 `hello`，客户端晚一步订阅就永远收不到；收不到 `hello` 的客户端不知道对端会 ack，于是自己从不发 ack，服务端的流控窗口再也不排空——表现为「状态不再到达」，而不是一条报错。`webSocketLink` 会在 open 前缓存出站帧，所以提前建 link 没有代价。
 
 断线不重建宿主：`host.connect` 换掉 link，Chord 会把每个远程引用重新 hold，值在重新水合前保持可读（状态 `loading`）。浏览器切面与 `Panels` 注册表留在原地。
 

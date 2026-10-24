@@ -28,7 +28,7 @@ node packages/substrate/bin/moonan.js --plugin ./examples/clock-plugin
 - 时钟每秒跳一次：服务端的 `self.task` 在改 state。
 - 点「调用 tick()」：一次 Chord 方法调用，往返。
 - 点「GET /api/clock」：同一条端口上的普通 HTTP 路由，由 `Routes` 注册表提供。
-- 服务端热重载不会刷新页面，浏览器不是 Chord 的重载参与者：
+- 服务端热重载不会刷新页面：浏览器不参与 chord 的 cluster 重载协调，但它会在自己的宿主里本地 reload 切面——`Manifest.revision` 一变就换：
 
 ```bash
 curl -X POST http://127.0.0.1:21315/api/plugins/reload \

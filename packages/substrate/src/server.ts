@@ -16,7 +16,7 @@ export interface WebServerOptions {
 	/** Absent when the shell has not been built: the API and the WebSocket still work. */
 	webDist?: string;
 	plugins: () => PluginRecord[];
-	/** Committed manifest revision: what an external tool compares to know a reload landed. */
+	/** chord's code version: what a browser and an external tool compare to know a commit landed. */
 	revision: () => number;
 	reload: (id?: string) => Promise<{ reloaded: string[]; report?: ReloadReport }>;
 	logger: Logger;
@@ -96,7 +96,15 @@ function within(base: string, relative: string): string | undefined {
  */
 export async function startWebServer(options: WebServerOptions): Promise<WebServerHandle> {
 	const wss = new WebSocketServer({ noServer: true });
-	acceptWebSockets(wss, options.host, { principal: () => ({ id: "browser" }) });
+	acceptWebSockets(wss, options.host, {
+		// No authentication by design (README): every connection acts as the same principal, so
+		// all browsers share one instance of every remote type they hold.
+		principal: () => ({ id: "browser" }),
+		// chord closes a link whose peer announced another protocol version, and the peer closes
+		// too after reloading its page. Log it here, or a stale tab disappears without a trace.
+		onProtocolMismatch: ({ local, peer }) =>
+			options.logger.warn(`a client speaks protocol ${peer ?? "(none)"} while this server speaks ${local}: it has to reload`),
+	});
 
 	const plugins = options.plugins;
 
@@ -154,10 +162,11 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 			const id = typeof body?.id === "string" ? body.id : undefined;
 			try {
 				const result = await options.reload(id);
-				// A committed reload bumps the manifest revision; the shell watches it and swaps
-				// its browser facets with `host.reload` — a browser is not a reload participant in
-				// chord, so it learns about new code from state, not from a commit frame. The flag
-				// says "browser facets are stale", not "reload the page": only a protocol mismatch
+				// A committed reload moves chord's code version, which is what `revision` reports.
+				// The shell watches the same number as a state member and swaps its browser facets
+				// with `host.reload`: a browser takes no part in *cluster* reload coordination, so
+				// it learns about new code from state, not from a commit frame. The flag means
+				// "browser facets are stale", not "reload the page" — only a protocol mismatch
 				// reloads the page.
 				sendJson(response, 200, { ok: true, reloadBrowser: true, revision: options.revision(), ...result });
 			} catch (error) {

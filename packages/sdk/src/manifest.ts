@@ -38,9 +38,15 @@ export const Manifest = remote("moonan.manifest", {
 				version: Type.String(),
 				plugins: Type.Array(PluginEntrySchema),
 				/**
-				 * Bumped on every committed reload. A browser is not a reload participant in chord,
-				 * so this state member is the only signal that a new code version exists: the shell
-				 * watches it and swaps its own facets with `host.reload` instead of reloading the page.
+				 * chord's code version (`host.codeVersion`): 1 at startup, one higher after every
+				 * reload that committed.
+				 *
+				 * A browser takes no part in cluster reload coordination, so this member is how it
+				 * is told that the code behind its facets changed: the shell watches it and swaps
+				 * its own facets with `host.reload` instead of reloading the page — chord's remedy
+				 * for an outdated web facet is "reload its web facets". A reference whose contract
+				 * no longer fits says `upgrade_required` instead, which means "this object changed
+				 * under you", not "a new build exists".
 				 */
 				revision: Type.Number(),
 			},
