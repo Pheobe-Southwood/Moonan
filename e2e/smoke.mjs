@@ -27,6 +27,7 @@ async function main() {
 	const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, deviceScaleFactor: 1.5 });
 	const errors = [];
 	const console_ = [];
+	page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
 	page.on("console", (message) => {
 		console_.push(`${message.type()}: ${message.text()}`);
 		if (message.type() === "error") errors.push(message.text());

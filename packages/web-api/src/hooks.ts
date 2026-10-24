@@ -33,6 +33,7 @@ export function useRemote(host: unknown, contract: any, input: Record<string, un
 		}
 		let cancelled = false;
 		let held: AnyRef | null = null;
+		console.info("[chord-debug] get start", String(contract?.name ?? contract));
 		let settled = false;
 		// A get that never settles means the object is stuck activating; say so instead
 		// of leaving a panel silently inert.
@@ -44,6 +45,7 @@ export function useRemote(host: unknown, contract: any, input: Record<string, un
 			.then((acquired) => {
 				settled = true;
 				clearTimeout(slow);
+				console.info("[chord-debug] get ok", String(contract?.name ?? contract), cancelled);
 				if (cancelled) {
 					(acquired as unknown as { release(): void }).release();
 					return;
@@ -57,6 +59,7 @@ export function useRemote(host: unknown, contract: any, input: Record<string, un
 				console.error("[chord] get failed", error);
 			});
 		return () => {
+			console.info("[chord-debug] get cleanup", String(contract?.name ?? contract));
 			cancelled = true;
 			settled = true;
 			clearTimeout(slow);
