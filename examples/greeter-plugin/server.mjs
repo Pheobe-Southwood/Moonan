@@ -31,7 +31,8 @@ export default defineFacet(
 			(_input, _principal, self) => {
 				// 拿到的就是 clock 插件 serve 出来的那个对象。
 				const clock = self.get(Clock, {});
-				return { text: () => `你好，现在是 ${clock.now()}` };
+				// 契约方法的调用是异步的（哪怕提供方是本地对象）。
+				return { text: async () => `你好，现在是 ${await clock.now()}` };
 			},
 			{ lifetime: "host" },
 		);
