@@ -5,9 +5,10 @@ import type { Facet, FacetLoader } from "@earendil-works/chord";
  * `nodeLoader` in the two details that matter:
  *
  * - a facet's **name is its URL without a query**. `host.reload([url])` finds facets by
- *   name, so a name that carried `?v=…` could never be replaced;
- * - every import is cache-busted with a fresh `?v=<n>`, so a reload really loads new code
- *   instead of reusing the module the page already has.
+ *   name, so a name that carried a cache-busting query could never be replaced;
+ * - every import is cache-busted with a fresh query, so a reload really loads new code
+ *   instead of reusing the module the page already has. (chord's own parameter is
+ *   `chord2-reload`; the technique is shared, the parameter name is not.)
  *
  * A relative import inside a browser facet is not rewritten (browsers have no module
  * hooks), so a facet is expected to be a single file — the plugin format already says
