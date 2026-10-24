@@ -2,7 +2,7 @@ import { AgentContract, AgentIndexContract } from "@moonan_ai/contracts";
 import { ChatContract } from "./contract.js";
 import { useEffect, useRef, useState } from "react";
 import { Button, ErrorNote, useAction, useReadable, useRemote, useT, type PanelProps } from "@moonan_ai/web-api";
-import { messages } from "./i18n.js";
+import { messages as translations } from "./i18n.js";
 
 const MAIN_AGENT = "main";
 
@@ -27,7 +27,7 @@ function formatTime(timestamp: number): string {
 }
 
 export function ChatTab({ host, user }: PanelProps) {
-	const t = useT(messages);
+	const t = useT(translations);
 	const index = useRemote(host, AgentIndexContract, {});
 	const agents = useReadable<AgentSummary[]>(index?.agents, []);
 	const summary = agents.find((agent) => agent.id === MAIN_AGENT);

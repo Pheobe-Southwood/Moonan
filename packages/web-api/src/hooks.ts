@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
  * for the app, so refs are deliberately untyped here; contracts still type the server. */
 type AnyRef = Record<string, any>;
 
-/** The browser chord host, as passed to every panel: `unknown` keeps React props honest. */
-type Host = { get(contract: any, input: any): Promise<AnyRef> } | null | undefined;
+/** The browser chord host; a panel receives it as `unknown`, so cast once here. */
+type Host = { get(contract: any, input: any): Promise<AnyRef> };
 
 function safeValue<T>(readable: any, fallback: T): T {
 	try {
@@ -21,18 +21,19 @@ function safeValue<T>(readable: any, fallback: T): T {
  * every reconnect (chord links never resume), so `host` in the dependency list is
  * what re-acquires the reference; it is released on unmount or host change.
  */
-export function useRemote(host: Host, contract: any, input: Record<string, unknown>): AnyRef | null {
+export function useRemote(host: unknown, contract: any, input: Record<string, unknown>): AnyRef | null {
 	const key = JSON.stringify(input);
 	const [ref, setRef] = useState<AnyRef | null>(null);
 
 	useEffect(() => {
-		if (!host) {
+		const client = host as Host | null | undefined;
+		if (!client) {
 			setRef(null);
 			return;
 		}
 		let cancelled = false;
 		let held: AnyRef | null = null;
-		host
+		client
 			.get(contract, JSON.parse(key) as never)
 			.then((acquired) => {
 				if (cancelled) {

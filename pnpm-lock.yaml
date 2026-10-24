@@ -202,6 +202,9 @@ importers:
       '@earendil-works/chord':
         specifier: 1.4.0
         version: 1.4.0
+      '@earendil-works/pi-agent-core':
+        specifier: 1.4.0
+        version: 1.4.0(@aws-sdk/credential-provider-node@3.972.87)(@smithy/signature-v4@5.7.4)(ws@8.22.0)
       '@earendil-works/pi-mcp':
         specifier: 1.4.0
         version: 1.4.0

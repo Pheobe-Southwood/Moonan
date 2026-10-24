@@ -38,8 +38,9 @@
   },
   "dependencies": {
     "@earendil-works/chord": "1.4.0",
-    "@moonan_ai/contracts": "workspace:*",
-    "@earendil-works/pi-mcp": "1.4.0"
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-mcp": "1.4.0",
+    "@moonan_ai/contracts": "workspace:*"
   },
   "peerDependencies": {
     "@moonan_ai/web-api": "*",
