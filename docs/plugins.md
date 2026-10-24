@@ -68,9 +68,28 @@ export default defineFacet((api) => {
 
 ## 契约要在两边各写一份
 
-浏览器切面拿不到服务端的模块（它是另一个进程、另一套打包），所以契约写两遍。两份不需要共享模块——Chord 认的是**指纹**：名字、版本、成员结构。写了不一致的 schema，浏览器会得到 `contract_mismatch`。
+浏览器切面拿不到服务端的模块（它是另一个进程、另一套打包），所以契约写两遍。两份不需要共享模块——Chord 认的是**指纹**：名字、版本、成员结构，以及这个类型住在哪个宿主（`host: hostNamed(...)` 也在指纹里，移动类型是破坏性改动）。写了不一致的 schema，浏览器会得到 `contract_mismatch`。
 
 这是刻意的取舍：它换来的是插件可以零构建。有构建的插件当然可以把契约抽成第三个文件、两边 import 同一份；基座对两种写法一视同仁。
+
+## 声明你消费的契约
+
+服务端切面如果消费另一个插件的类型，用 `defineFacet` 的第二个参数把它列出来：
+
+```js
+export default defineFacet((api) => {
+	api.serve(Consumer, (_input, _p, self) => {
+		const shared = self.get(Shared, {});
+		return { ping: (ctx) => shared.ping(ctx) };
+	}, { lifetime: "host" });
+}, { uses: [Shared] });
+```
+
+reload 时 chord 会用它检查新的提供者是否仍覆盖你手里的那份契约；不覆盖就拒绝这次 reload，而不是让一个半坏的插件继续跑。
+
+**只在同一个宿主里生效。** `uses` 检查的是「这次 reload 改到的、由本宿主提供的类型」。所以你写在服务端切面里是有效的（都在 `moonan` 宿主上）；浏览器切面消费服务端类型**不属于此列**——那个类型不在浏览器宿主上，这一条会被跳过，跨宿主的契约靠版本与 `contract_mismatch` 兜底。
+
+`uses` 认的也是指纹，所以不需要共享模块：把契约再写一份丢进去即可。
 
 ## 浏览器切面
 
@@ -96,8 +115,10 @@ export default defineFacet((api) => {
 ```
 
 - 组件收到的 props **只有 `host`**。外壳不传状态、不传语言、不传用户——它没有这些东西。
-- `useRemote` 走的是 Chord 的 `host.hold`：引用**同步**返回，可能仍是 `loading`。用 `useRefStatus` 读它的 `status` 决定渲染过渡态；`loading` 时状态成员会抛 `not_ready`，`useReadable` 的 fallback 只是占位，不是数据。
-- 浏览器切面应当是一个**单个 ESM 文件**。浏览器没有模块 hook，重载时只有入口 URL 的 `?v=` 会变，相对 import 的子文件仍命中缓存——把切面拆成多文件，热重载就只换掉入口。
+- `useRemote` 走的是 Chord 的 `host.hold`：引用**同步**返回，可能仍是 `loading`。它返回 chord 的 `Ref<C>`，所以成员是有类型的：单 variant 契约直接 `clock.at`；**多 variant 契约要先按 `ref.variant` 收窄**，否则 TypeScript 不知道该 variant 有哪些成员。
+- `useRefStatus` 读它的 `status` 决定渲染过渡态；`loading` 时状态成员会抛 `not_ready`，`useReadable` 的 fallback 只是占位，不是数据。（`not_ready` / `not_in_variant` 会安静地降级为 fallback；其他错误会被打成 `console.error`，不会被 fallback 掩盖。）
+- `useReadable` 接受任何 chord `Readable<T>`——cell、derivation、别人对象的 state 成员都行，不限于本插件自己的契约。
+- 浏览器切面应当是一个**单个 ESM 文件**。浏览器没有模块 hook，重载时只有入口 URL 的缓存参数会变，相对 import 的子文件仍命中缓存——把切面拆成多文件，热重载就只换掉入口。
 - `title` 是纯字符串，外壳原样显示。面板自己决定写什么语言。
 - `order` 决定标签顺序，同值保持注册顺序。
 - 你不需要打包。`import "react"`、`import "@moonan_ai/sdk/web"` 由外壳的 import map 指到 `/runtime/*.js`：整个页面只有一份 React、一份 Chord。多一份 React 会让 hooks 报错——而且表现为「面板不出现」，不是一条明确的报错。

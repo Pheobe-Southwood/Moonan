@@ -1,6 +1,16 @@
-import { defineRegistry } from "@earendil-works/chord";
-import type { Host, RefStatus } from "@earendil-works/chord";
+import {
+	defineRegistry,
+	isChordError,
+	type AnyContract,
+	type Host,
+	type InputOf,
+	type Readable,
+	type Ref,
+	type RefStatus,
+} from "@earendil-works/chord";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+
+export type { InputOf, Readable, Ref, RefStatus } from "@earendil-works/chord";
 
 /**
  * What the shell hands to a panel: the browser chord host, and nothing else.
@@ -31,25 +41,21 @@ export interface PanelContribution {
  */
 export const Panels = defineRegistry<PanelContribution>("moonan.panels", { conflict: "error" });
 
-/* Chord's generics do not survive the React boundary in a form worth writing down, and
- * this package emits no `.d.ts` for the app. References are deliberately loose here; the
- * contract types the provider side, which is where a mistake is expensive. */
-type AnyRef = {
-	readonly status?: RefStatus;
-	readonly onStatus?: (listener: (status: RefStatus, error: unknown) => void) => () => void;
-	release(): void;
-	readonly [member: string]: any;
-};
-/** The one host method a UI needs: `hold`, chord's synchronous form for UI runtimes. */
-type AnyHost = { hold(contract: any, input: any): AnyRef };
-
-function safeValue<T>(readable: any, fallback: T): T {
+/**
+ * Reads a state member, falling back while it has no value yet.
+ *
+ * `hold` returns before the object is live, and chord reports that as `not_ready` when the
+ * member is read — a transition, not a failure. `not_in_variant` is the other expected one:
+ * the provider's variant does not carry this member. Anything else is a bug in the read
+ * path and is reported rather than hidden behind the fallback.
+ */
+function readOr<T>(readable: Readable<T> | undefined, fallback: T): T {
+	if (!readable) return fallback;
 	try {
-		const value = readable?.value as T | undefined;
-		return value === undefined ? fallback : value;
-	} catch {
-		// `not_ready` until the reference is live and the member has its first snapshot —
-		// exactly the state a `hold` reference starts in.
+		return readable.value;
+	} catch (error) {
+		if (isChordError(error, "not_ready") || isChordError(error, "not_in_variant")) return fallback;
+		console.error("[chord] reading state failed", error);
 		return fallback;
 	}
 }
@@ -64,21 +70,26 @@ function safeValue<T>(readable: any, fallback: T): T {
  * acquire/release pair symmetrical under StrictMode's mount → unmount → mount (a
  * reference taken during render would leak the discarded one).
  */
-export function useRemote(host: unknown, contract: any, input: Record<string, unknown>): AnyRef | null {
+export function useRemote<C extends AnyContract>(
+	host: Host<unknown> | null | undefined,
+	contract: C,
+	input: InputOf<C>,
+): Ref<C> | null {
+	// The input is a plain JSON address, and a panel commonly passes a fresh `{}` each
+	// render. Key on its content so identity churn does not re-acquire the reference.
 	const key = JSON.stringify(input);
-	const [ref, setRef] = useState<AnyRef | null>(null);
+	const [ref, setRef] = useState<Ref<C> | null>(null);
 	const [attempt, setAttempt] = useState(0);
 	const retries = useRef(0);
 
 	useLayoutEffect(() => {
-		const client = host as AnyHost | null | undefined;
-		if (!client) {
+		if (!host) {
 			setRef(null);
 			return;
 		}
-		let held: AnyRef;
+		let held: Ref<C>;
 		try {
-			held = client.hold(contract, JSON.parse(key) as never);
+			held = host.hold(contract, JSON.parse(key) as InputOf<C>);
 		} catch (error) {
 			// A type this host cannot place (an unknown name, a local type it does not serve).
 			console.error("[chord] hold failed", error);
@@ -93,8 +104,8 @@ export function useRemote(host: unknown, contract: any, input: Record<string, un
 	}, [host, contract, key, attempt]);
 
 	useEffect(() => {
-		if (!ref?.onStatus) return;
-		return ref.onStatus((status) => {
+		if (!ref) return;
+		return ref.onStatus((status: RefStatus) => {
 			// A reconnect re-holds in place (`loading`, last values readable) and needs nothing.
 			// `gone` is terminal for this reference — the object was forced away while held —
 			// and chord's guidance for a UI is to take a new one. Bounded, so a provider that
@@ -118,7 +129,7 @@ export function useRemote(host: unknown, contract: any, input: Record<string, un
  * guessing. `gone` is the state that needs a new reference — a forced disposal, a host
  * that closed, a contract the provider no longer serves.
  */
-export function useRefStatus(ref: AnyRef | null): RefStatus | null {
+export function useRefStatus<C extends AnyContract>(ref: Ref<C> | null): RefStatus | null {
 	const [status, setStatus] = useState<RefStatus | null>(() => ref?.status ?? null);
 
 	// Layout effect: the reference is acquired in one, and this is what turns that commit
@@ -128,16 +139,16 @@ export function useRefStatus(ref: AnyRef | null): RefStatus | null {
 			setStatus(null);
 			return;
 		}
-		setStatus(ref.status ?? null);
-		return ref.onStatus?.((next) => setStatus(next));
+		setStatus(ref.status);
+		return ref.onStatus((next: RefStatus) => setStatus(next));
 	}, [ref]);
 
 	return status;
 }
 
 /** Renders the current value of a chord `Readable`, and every later one. */
-export function useReadable<T>(readable: any, fallback: T): T {
-	const [value, setValue] = useState<T>(() => safeValue(readable, fallback));
+export function useReadable<T>(readable: Readable<T> | undefined, fallback: T): T {
+	const [value, setValue] = useState<T>(() => readOr(readable, fallback));
 
 	useLayoutEffect(() => {
 		if (!readable) {
@@ -145,7 +156,7 @@ export function useReadable<T>(readable: any, fallback: T): T {
 			return;
 		}
 		let cancelled = false;
-		setValue(safeValue(readable, fallback));
+		setValue(readOr(readable, fallback));
 		const stop = readable.subscribe((next: T) => {
 			if (!cancelled) setValue(next);
 		});

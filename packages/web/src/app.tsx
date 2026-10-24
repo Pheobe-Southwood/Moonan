@@ -1,3 +1,4 @@
+import type { Host } from "@earendil-works/chord";
 import { Manifest, type PluginEntry } from "@moonan_ai/sdk";
 import { useReadable, useRefStatus, useRemote, type PanelContribution } from "@moonan_ai/sdk/web";
 import { useEffect, useRef, useState } from "react";
@@ -16,7 +17,7 @@ function currentRoute(panels: PanelContribution[]): string {
 	return panels.some((panel) => panel.id === hash) ? hash : (panels[0]?.id ?? "");
 }
 
-function Shell({ host, version, panels }: { host: unknown; version: string; panels: PanelContribution[] }) {
+function Shell({ host, version, panels }: { host: Host<unknown>; version: string; panels: PanelContribution[] }) {
 	const { status } = useConnection();
 	const [route, setRoute] = useState(() => currentRoute(panels));
 	const active = panels.find((panel) => panel.id === route) ?? panels[0];
@@ -66,7 +67,7 @@ function Shell({ host, version, panels }: { host: unknown; version: string; pane
 			</header>
 			<main className="main">
 				{Active ? (
-					<Active host={host as never} />
+					<Active host={host} />
 				) : (
 					<div className="empty">
 						<h2>没有插件</h2>

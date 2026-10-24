@@ -24,13 +24,17 @@ export {
 	type Facet,
 	type FacetApi,
 	type Host,
+	type InputOf,
 	type JsonValue,
 	type LocalContract,
+	type Readable,
 	type Ref,
+	type RefStatus,
 	type Registry,
 	type RegistryTable,
 	type RegistryView,
 	type RemoteContract,
+	type Shape,
 } from "@earendil-works/chord";
 
 /** The schema builder every contract is written with. */

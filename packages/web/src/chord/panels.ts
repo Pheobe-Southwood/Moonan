@@ -1,3 +1,4 @@
+import type { Host, RegistryTable } from "@earendil-works/chord";
 import { Panels, type PanelContribution } from "@moonan_ai/sdk/web";
 import { useEffect, useState } from "react";
 
@@ -8,7 +9,7 @@ import { useEffect, useState } from "react";
  * installs its whole table in one commit, which is why a single subscribe is enough: the
  * listener sees the completed table, never a half-loaded one.
  */
-export function usePanels(host: unknown): PanelContribution[] {
+export function usePanels(host: Host<unknown> | null): PanelContribution[] {
 	const [panels, setPanels] = useState<PanelContribution[]>([]);
 
 	useEffect(() => {
@@ -16,15 +17,15 @@ export function usePanels(host: unknown): PanelContribution[] {
 			setPanels([]);
 			return;
 		}
-		const view = (host as { registry(registry: unknown): any }).registry(Panels);
-		const read = (table: ReadonlyMap<string, PanelContribution>) =>
+		const view = host.registry(Panels);
+		const read = (table: RegistryTable<PanelContribution>) =>
 			setPanels(
 				[...table.values()]
 					.map((panel, index) => ({ panel, index }))
 					.sort((left, right) => (left.panel.order ?? 0) - (right.panel.order ?? 0) || left.index - right.index)
 					.map(({ panel }) => panel),
 			);
-		read(view.table() as ReadonlyMap<string, PanelContribution>);
+		read(view.table());
 		const stop = view.subscribe(read);
 		return () => stop();
 	}, [host]);
