@@ -152,6 +152,10 @@ async function main() {
 		console.error("sockets:", sockets);
 		console.error("console errors:", errors);
 		console.error("body:", (await page.locator("body").innerText().catch(() => "")).slice(0, 800));
+		// The right-hand pane is where a failed action shows its error; without it a
+		// timeout only says "locator not found".
+		console.error("main:", (await page.locator("main").innerText().catch(() => "")).slice(0, 1_500));
+		console.error("banners:", await page.locator(".banner").allInnerTexts().catch(() => []));
 		throw error;
 	} finally {
 		await browser.close();
