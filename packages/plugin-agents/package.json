@@ -15,11 +15,6 @@
       "development": "./src/server.ts",
       "default": "./dist/server.js"
     },
-    "./contract": {
-      "types": "./src/contract.ts",
-      "development": "./src/contract.ts",
-      "default": "./dist/contract.js"
-    },
     "./web": {
       "types": "./src/web.tsx",
       "development": "./src/web.tsx",

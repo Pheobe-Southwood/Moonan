@@ -65,27 +65,33 @@ jobs:
 
       - name: Check the published entry points exist
         run: |
-          test -f packages/contracts/dist/index.js
-          test -f packages/web-api/dist/index.js
-          test -f packages/core/dist/index.js
-          test -f packages/testing/dist/index.js
+          missing=0
+          check() { test -f "$1" || { echo "missing: $1"; missing=1; }; }
+          check packages/contracts/dist/index.js
+          check packages/web-api/dist/index.js
+          check packages/core/dist/index.js
+          check packages/testing/dist/index.js
           for plugin in agents providers chat mcp logs; do
-            test -f "packages/plugin-$plugin/dist/server.js"
-            test -f "packages/plugin-$plugin/dist/contract.js"
-            test -f "packages/plugin-$plugin/dist/web.js"
+            check "packages/plugin-$plugin/dist/server.js"
+            check "packages/plugin-$plugin/dist/web.js"
           done
-          test -f packages/moonan/dist/index.js
-          test -f packages/moonan/dist/web/index.html
+          # agents owns no contract of its own; the other four export one.
+          for plugin in providers chat mcp logs; do
+            check "packages/plugin-$plugin/dist/contract.js"
+          done
+          check packages/moonan/dist/index.js
+          check packages/moonan/dist/web/index.html
           # The shell and its import map must ship together: a plugin loaded at runtime
           # imports /runtime/*.js, so a build without them is broken at first click.
           for runtime in react jsx-runtime react-dom chord chord-output typebox typebox-value contracts web-api; do
-            test -f "packages/web/dist/runtime/$runtime.js"
+            check "packages/web/dist/runtime/$runtime.js"
           done
-          grep -q 'type="importmap"' packages/web/dist/index.html
+          grep -q 'type="importmap"' packages/web/dist/index.html || { echo "importmap missing"; missing=1; }
           # Every runtime entry must be self-contained: a leftover bare import means a
           # second copy of React/Chord at runtime, which shows up as a hook error.
           if grep -qE 'from "(react|react-dom|@earendil-works/chord|typebox|@moonan_ai)' packages/web/dist/runtime/*.js; then
             echo "runtime bundles still contain bare imports"
             grep -hoE 'from "[^"]+"' packages/web/dist/runtime/*.js | sort -u
-            exit 1
+            missing=1
           fi
+          exit $missing

@@ -13,10 +13,23 @@ import { build, context } from "esbuild";
  * React and one copy of Chord. Bundling `react-dom` with `react` external does not work
  * — its CJS build calls `require("react")`, which esbuild cannot turn into an ESM import.
  */
+// React ships CJS, so its entries re-export explicitly: `export *` from a CJS module
+// gives a runtime namespace, not the static named exports that `import { useState }`
+// needs. The ESM packages below (`chord`, `typebox`, `contracts`, `web-api`) are fine
+// with `export *`.
+const REACT_NAMES = [
+	"Children", "Component", "Fragment", "Profiler", "PureComponent", "StrictMode", "Suspense",
+	"cloneElement", "createContext", "createElement", "createFactory", "createRef", "forwardRef",
+	"isValidElement", "lazy", "memo", "startTransition", "use", "useCallback", "useContext",
+	"useDebugValue", "useDeferredValue", "useEffect", "useId", "useImperativeHandle",
+	"useInsertionEffect", "useLayoutEffect", "useMemo", "useReducer", "useRef", "useState",
+	"useSyncExternalStore", "useTransition", "version",
+];
+
 const entries = {
-	react: 'export * from "react";',
-	"jsx-runtime": 'export * from "react/jsx-runtime";',
-	"react-dom": 'export * from "react-dom";\nexport * from "react-dom/client";',
+	react: `import React from "react";\nexport default React;\nexport const { ${REACT_NAMES.join(", ")} } = React;`,
+	"jsx-runtime": 'import runtime from "react/jsx-runtime";\nexport const Fragment = runtime.Fragment;\nexport const jsx = runtime.jsx;\nexport const jsxs = runtime.jsxs;\nexport default runtime;',
+	"react-dom": 'import ReactDOM from "react-dom";\nimport client from "react-dom/client";\nexport const createRoot = client.createRoot;\nexport const hydrateRoot = client.hydrateRoot;\nexport const createPortal = ReactDOM.createPortal;\nexport const flushSync = ReactDOM.flushSync;\nexport const version = ReactDOM.version;\nexport default ReactDOM;',
 	typebox: 'export * from "typebox";',
 	// Chord imports this deep entry directly; a plugin may want it too.
 	"typebox-value": 'export * from "typebox/value";',
