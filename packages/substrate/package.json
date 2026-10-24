@@ -1,6 +1,6 @@
 {
   "name": "@moonan_ai/moonan",
-  "version": "0.1.0",
+  "version": "0.0.2-alpha1",
   "description": "Moonan substrate: a zero-data Chord host that loads plugins over a single port.",
   "type": "module",
   "license": "MIT",

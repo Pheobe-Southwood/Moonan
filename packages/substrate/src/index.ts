@@ -6,7 +6,7 @@ import { createSubstrate, type Substrate } from "./host.js";
 import { createLogger, type Logger } from "./logger.js";
 import { startWebServer, type WebServerHandle } from "./server.js";
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.0.2-alpha1";
 
 export interface StartOptions {
 	port?: number;
@@ -65,6 +65,7 @@ export async function start(options: StartOptions = {}): Promise<Moonan> {
 		version,
 		...(webDist ? { webDist } : {}),
 		plugins: () => substrate.plugins,
+		revision: () => substrate.revision,
 		reload: substrate.reload,
 		logger: logger.child("http"),
 	});
@@ -78,6 +79,9 @@ export async function start(options: StartOptions = {}): Promise<Moonan> {
 		},
 		get plugins() {
 			return substrate.plugins;
+		},
+		get revision() {
+			return substrate.revision;
 		},
 		reload: substrate.reload,
 		close: async () => {

@@ -1,6 +1,6 @@
 import { defineRegistry } from "@earendil-works/chord";
-import type { Host } from "@earendil-works/chord";
-import { useEffect, useState, type ReactNode } from "react";
+import type { Host, RefStatus } from "@earendil-works/chord";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 /**
  * What the shell hands to a panel: the browser chord host, and nothing else.
@@ -34,78 +34,112 @@ export const Panels = defineRegistry<PanelContribution>("moonan.panels", { confl
 /* Chord's generics do not survive the React boundary in a form worth writing down, and
  * this package emits no `.d.ts` for the app. References are deliberately loose here; the
  * contract types the provider side, which is where a mistake is expensive. */
-type AnyRef = Record<string, any>;
-type AnyHost = { get(contract: any, input: any): Promise<AnyRef> };
+type AnyRef = {
+	readonly status?: RefStatus;
+	readonly onStatus?: (listener: (status: RefStatus, error: unknown) => void) => () => void;
+	release(): void;
+	readonly [member: string]: any;
+};
+/** The one host method a UI needs: `hold`, chord's synchronous form for UI runtimes. */
+type AnyHost = { hold(contract: any, input: any): AnyRef };
 
 function safeValue<T>(readable: any, fallback: T): T {
 	try {
 		const value = readable?.value as T | undefined;
 		return value === undefined ? fallback : value;
 	} catch {
-		// `not_ready` while the reference is still hydrating.
+		// `not_ready` until the reference is live and the member has its first snapshot —
+		// exactly the state a `hold` reference starts in.
 		return fallback;
 	}
 }
 
 /**
- * Acquires a remote reference from the browser host.
+ * Acquires a reference from the browser host with `host.hold`.
  *
- * Chord links never resume, so every reconnect builds a new host; `host` is in the
- * dependency list precisely because that is the event that must re-acquire. The
- * reference is released on unmount or when the host is replaced.
+ * `hold` is the API chord designates for UI runtimes: synchronous, possibly still
+ * `loading`, and re-held by the runtime itself when the link comes back, so a reconnect
+ * costs no new reference. It is acquired in a layout effect rather than during render:
+ * that keeps the impossible-to-render intermediate commit off the screen, and makes the
+ * acquire/release pair symmetrical under StrictMode's mount → unmount → mount (a
+ * reference taken during render would leak the discarded one).
  */
 export function useRemote(host: unknown, contract: any, input: Record<string, unknown>): AnyRef | null {
 	const key = JSON.stringify(input);
 	const [ref, setRef] = useState<AnyRef | null>(null);
+	const [attempt, setAttempt] = useState(0);
+	const retries = useRef(0);
 
-	useEffect(() => {
+	useLayoutEffect(() => {
 		const client = host as AnyHost | null | undefined;
 		if (!client) {
 			setRef(null);
 			return;
 		}
-		let cancelled = false;
-		let held: AnyRef | null = null;
-		let settled = false;
-		// A `get` that never settles means the object is stuck activating. Say so, rather
-		// than leaving the panel silently inert.
-		const slow = setTimeout(() => {
-			if (!settled) console.warn(`[chord] get still pending after 10s: ${String(contract?.name ?? contract)}`);
-		}, 10_000);
-		client
-			.get(contract, JSON.parse(key) as never)
-			.then((acquired) => {
-				settled = true;
-				clearTimeout(slow);
-				if (cancelled) {
-					(acquired as unknown as { release(): void }).release();
-					return;
-				}
-				held = acquired as unknown as AnyRef;
-				setRef(held);
-			})
-			.catch((error: unknown) => {
-				settled = true;
-				clearTimeout(slow);
-				console.error("[chord] get failed", error);
-			});
-		return () => {
-			cancelled = true;
-			settled = true;
-			clearTimeout(slow);
-			held?.release();
+		let held: AnyRef;
+		try {
+			held = client.hold(contract, JSON.parse(key) as never);
+		} catch (error) {
+			// A type this host cannot place (an unknown name, a local type it does not serve).
+			console.error("[chord] hold failed", error);
 			setRef(null);
+			return;
+		}
+		setRef(held);
+		return () => {
+			setRef(null);
+			held.release();
 		};
-	}, [host, contract, key]);
+	}, [host, contract, key, attempt]);
+
+	useEffect(() => {
+		if (!ref?.onStatus) return;
+		return ref.onStatus((status) => {
+			// A reconnect re-holds in place (`loading`, last values readable) and needs nothing.
+			// `gone` is terminal for this reference — the object was forced away while held —
+			// and chord's guidance for a UI is to take a new one. Bounded, so a provider that
+			// keeps answering `gone` cannot spin the page.
+			if (status === "live") {
+				retries.current = 0;
+			} else if (status === "gone" && retries.current < 3) {
+				retries.current += 1;
+				setAttempt((value) => value + 1);
+			}
+		});
+	}, [ref]);
 
 	return ref;
+}
+
+/**
+ * Follows a reference's status: `loading | live | released | gone`.
+ *
+ * `hold` returns before the object is live, so a panel renders from this instead of
+ * guessing. `gone` is the state that needs a new reference — a forced disposal, a host
+ * that closed, a contract the provider no longer serves.
+ */
+export function useRefStatus(ref: AnyRef | null): RefStatus | null {
+	const [status, setStatus] = useState<RefStatus | null>(() => ref?.status ?? null);
+
+	// Layout effect: the reference is acquired in one, and this is what turns that commit
+	// into a painted one. With a passive effect the first paint would still say "loading".
+	useLayoutEffect(() => {
+		if (!ref) {
+			setStatus(null);
+			return;
+		}
+		setStatus(ref.status ?? null);
+		return ref.onStatus?.((next) => setStatus(next));
+	}, [ref]);
+
+	return status;
 }
 
 /** Renders the current value of a chord `Readable`, and every later one. */
 export function useReadable<T>(readable: any, fallback: T): T {
 	const [value, setValue] = useState<T>(() => safeValue(readable, fallback));
 
-	useEffect(() => {
+	useLayoutEffect(() => {
 		if (!readable) {
 			setValue(fallback);
 			return;

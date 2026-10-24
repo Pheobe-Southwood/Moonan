@@ -16,6 +16,8 @@ export interface WebServerOptions {
 	/** Absent when the shell has not been built: the API and the WebSocket still work. */
 	webDist?: string;
 	plugins: () => PluginRecord[];
+	/** Committed manifest revision: what an external tool compares to know a reload landed. */
+	revision: () => number;
 	reload: (id?: string) => Promise<{ reloaded: string[]; report?: ReloadReport }>;
 	logger: Logger;
 }
@@ -134,6 +136,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 		if (pathname === "/api/plugins") {
 			sendJson(response, 200, {
 				version: options.version,
+				revision: options.revision(),
 				// Runtime-loaded browser facets are Moonan's own extension: chord ships no
 				// browser loader, so the shape of this response is not a stable protocol yet.
 				experimental: true,
@@ -151,9 +154,12 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 			const id = typeof body?.id === "string" ? body.id : undefined;
 			try {
 				const result = await options.reload(id);
-				// Browsers are not reload participants in chord: only a page reload picks up
-				// new browser facets, which is what the flag tells the client to do.
-				sendJson(response, 200, { ok: true, reloadBrowser: true, ...result });
+				// A committed reload bumps the manifest revision; the shell watches it and swaps
+				// its browser facets with `host.reload` — a browser is not a reload participant in
+				// chord, so it learns about new code from state, not from a commit frame. The flag
+				// says "browser facets are stale", not "reload the page": only a protocol mismatch
+				// reloads the page.
+				sendJson(response, 200, { ok: true, reloadBrowser: true, revision: options.revision(), ...result });
 			} catch (error) {
 				options.logger.error("plugin reload failed", error);
 				sendJson(response, 400, { error: errorMessage(error) });

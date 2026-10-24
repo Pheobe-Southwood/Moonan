@@ -29,9 +29,9 @@ node packages/substrate/bin/moonan.js
      包   → import.meta.resolve(包名)，由包自己的 exports 决定
      失败 → 记在记录的 error 上，不抛出
 3. 建宿主
-4. 逐个 host.load([url])
-     成功 → loaded = true
-     失败 → 记 error，序列继续
+4. 一次 host.load(全部 URL)：先装完所有切面，再统一激活宿主对象
+     成功 → 全部 loaded = true
+     失败 → 逐个 host.load 只为定位是哪一个，记 error，序列继续
 5. 装 manifest 切面，把最终的插件列表写进它的 state
 6. host.get(Manifest, {}) 拿到引用并一直持有
 7. 开端口
@@ -73,10 +73,13 @@ POST /api/plugins/reload  { "id": "clock" }   ← id 省略则全部
   │
   ├── 从未加载成功的插件 → host.load()         （重载无法修复「没装上」）
   ├── 已加载的插件       → host.reload([url])  （prepare → gate → commit → retire）
-  └── 响应 { ok, reloadBrowser: true, reloaded }
+  ├── 提交成功           → Manifest.revision += 1（写进每一份活着的实例）
+  └── 响应 { ok, reloadBrowser: true, revision, reloaded }
 ```
 
-`reloadBrowser: true` 是必要的：**浏览器不是 Chord 的重载参与者**。服务端换掉代码后，页面上跑的还是旧模块，只有刷新页面才会重新 `import()`。客户端看到这个标志就刷新。
+`reloadBrowser: true` 说的是「浏览器切面过期了」，不是「整页刷新」。浏览器不是 Chord 的重载参与者，它靠状态变化得知新代码：外壳订阅 `Manifest.revision`，一变就 `host.reload(webUrls, { remove })`。这是 Chord 允许的 **client-local reload**——`kind: "client"` 的宿主可以本地换切面，只是它的代码版本不跨连接传播。整页刷新只留给协议版本失配。
+
+`Manifest` 是远程对象，Chord 按 principal 为每个调用方各建一份（宿主的、每个浏览器的）。`revision` 必须写进每一份活着的实例，否则页面上的那份永远停在旧值——`syncManifest` 就是做这件事的；写失败说明那个实例的对象已经随浏览器断开被回收，从表里删掉即可。
 
 旧代码的根还在跑时，旧实现继续为它服务；根结束后，那一版才退休。这是 Chord 自带的事务语义，基座没有额外做什么。
 
@@ -85,16 +88,19 @@ POST /api/plugins/reload  { "id": "clock" }   ← id 省略则全部
 ```text
 浏览器外壳启动
   │
-  ├── 连 /ws，建 kind:"client" 宿主
-  ├── host.get(Manifest) → 插件列表
-  ├── 对每个有 web 的插件：host.load(["/plugins/<id>/web.js?v=<generation>"])
+  ├── 连 /ws，建 kind:"client" 宿主（整页只建一次）
+  ├── host.hold(Manifest) → 引用立刻返回，可能仍是 loading
+  ├── 一次 host.load([...web 切面 URL])：整批装完再激活
   │     └── 插件切面把自己注册进 Panels 注册表
-  └── 外壳订阅 Panels，按 order 排序渲染标签页
+  ├── 外壳订阅 Panels，按 order 排序渲染标签页
+  └── Manifest.revision 变化 → host.reload(同批 URL, { remove })
 ```
+
+断线不重建宿主：`host.connect` 换掉 link，Chord 会把每个远程引用重新 hold，值在重新水合前保持可读（状态 `loading`）。浏览器切面与 `Panels` 注册表留在原地。
 
 外壳从头到尾不知道「时钟」是什么，也没导入过它。它只知道有一个注册表，以及注册表里现在有什么。
 
-插件模块里的 `import "react"`、`import "@moonan_ai/sdk/web"` 由 `index.html` 的 import map 解析到 `/runtime/*.js`。**这就是为什么插件不需要打包**：它的依赖由外壳预先提供，而且只有一份。多一份 React 会让 hooks 报错，多一份 Chord 会让注册表令牌对不上——两种失败都表现为「面板没出现」，而不是一条报错。
+插件模块里的 `import "react"`、`import "@moonan_ai/sdk/web"` 由 `index.html` 的 import map 解析到 `/runtime/*.js`。**这就是为什么插件不需要打包**：它的依赖由外壳预先提供，而且只有一份。多一份 React 会让 hooks 报错，多一份 Chord 会把两个协议与对象身份世界放进同一个页面——两种失败都表现为「面板没出现」，而不是一条报错。
 
 ## 零数据落在哪里
 

@@ -1,6 +1,6 @@
 {
   "name": "@moonan_ai/web",
-  "version": "0.1.0",
+  "version": "0.0.2-alpha1",
   "description": "Moonan 的浏览器外壳与共享运行时（构建产物随基座发布）。",
   "type": "module",
   "license": "MIT",

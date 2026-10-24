@@ -1,5 +1,5 @@
 import { Manifest, type PluginEntry } from "@moonan_ai/sdk";
-import { useReadable, useRemote, type PanelContribution } from "@moonan_ai/sdk/web";
+import { useReadable, useRefStatus, useRemote, type PanelContribution } from "@moonan_ai/sdk/web";
 import { useEffect, useRef, useState } from "react";
 import { useConnection } from "./chord/connection.js";
 import { usePanels } from "./chord/panels.js";
@@ -80,49 +80,80 @@ function Shell({ host, version, panels }: { host: unknown; version: string; pane
 }
 
 function Bootstrapped() {
-	const { host, generation, error } = useConnection();
+	const { host, error } = useConnection();
 	const manifest = useRemote(host, Manifest, {});
+	const manifestStatus = useRefStatus(manifest);
+	const revision = useReadable<number>(manifest?.revision, 0);
 	const version = useReadable<string>(manifest?.version, "");
 	const entries = useReadable<PluginEntry[]>(manifest?.plugins, []);
 	const panels = usePanels(host);
 
 	// The web facets to load, as one string: it is the dependency that says "the set
-	// changed", so a reload of the shell does not re-import every plugin for nothing.
+	// changed". A manifest revision change means the server committed new code — a browser
+	// is not a reload participant, so this state member is the only signal it gets.
 	const webSignature = entries
 		.filter((entry) => entry.web)
 		.map((entry) => entry.web)
 		.join("|");
+	const signature = `${webSignature}#${revision}`;
 
-	const loadedFor = useRef("");
-	const [loadedKey, setLoadedKey] = useState("");
+	// What this shell has installed, and under which revision. Kept in a ref so a reload
+	// can diff the facet set without making the effect depend on its own result.
+	const installed = useRef<{ urls: string[]; revision: number } | null>(null);
+	const [installedSignature, setInstalledSignature] = useState("");
 	const [failures, setFailures] = useState<string[]>([]);
+	const live = manifestStatus === "live";
+
+	// Hydration gates the shell; a reconnect does not. A dropped link puts the reference back
+	// to `loading` while its last values stay readable, and unmounting the panels for that
+	// would release every reference the drop was supposed to preserve.
+	const [everLive, setEverLive] = useState(false);
+	useEffect(() => {
+		if (live) setEverLive(true);
+	}, [live]);
 
 	useEffect(() => {
-		if (!host) return;
-		const key = `${generation}:${webSignature}`;
-		if (loadedFor.current === key) return;
-		loadedFor.current = key;
+		if (!host || !live) return;
+		const previous = installed.current;
+		if (previous && previous.revision === revision && previous.urls.join("|") === webSignature) return;
+
+		const urls = webSignature ? webSignature.split("|") : [];
+		installed.current = { urls, revision };
 		let cancelled = false;
+
 		void (async () => {
 			const failed: string[] = [];
-			for (const url of webSignature ? webSignature.split("|") : []) {
-				try {
-					await host.load([url]);
-				} catch (cause) {
-					// One broken plugin must not take the shell — or the other panels — down.
-					const message = `${url}: ${cause instanceof Error ? cause.message : String(cause)}`;
-					console.error("[chord] web facet failed to load", cause);
-					failed.push(message);
+			const removed = previous ? previous.urls.filter((url) => !urls.includes(url)) : [];
+			try {
+				// One batch, as chord intends: every facet is installed before any host object
+				// activates, so a facet may consume a type installed by a later one.
+				if (previous === null) await host.load(urls);
+				else await host.reload(urls, removed.length > 0 ? { remove: removed } : {});
+			} catch (cause) {
+				// A batch fails as a whole; isolate so one broken facet does not hide the rest.
+				console.error("[chord] facet batch failed", cause);
+				for (const url of urls) {
+					try {
+						if (previous === null) await host.load([url]);
+						else await host.reload([url]);
+					} catch (facetError) {
+						const message = facetError instanceof Error ? facetError.message : String(facetError);
+						// The batch already installed this facet; its activation is what failed.
+						if (message.includes("is already installed")) continue;
+						console.error("[chord] web facet failed to load", facetError);
+						failed.push(`${url}: ${message}`);
+					}
 				}
 			}
 			if (cancelled) return;
 			setFailures(failed);
-			setLoadedKey(key);
+			setInstalledSignature(signature);
 		})();
+
 		return () => {
 			cancelled = true;
 		};
-	}, [host, generation, webSignature]);
+	}, [host, live, webSignature, revision, signature]);
 
 	if (error) {
 		// The shell that would know the user's language is exactly what failed to negotiate.
@@ -134,11 +165,12 @@ function Bootstrapped() {
 		);
 	}
 
-	if (!host || !manifest) {
+	if (!host || !(live || everLive)) {
 		return <div className="loading">Moonan / 连接中</div>;
 	}
 
-	if (loadedKey !== `${generation}:${webSignature}`) {
+	// Only the first install gates the shell; a later revision swaps facets in place.
+	if (!installedSignature) {
 		return <div className="loading">Moonan …</div>;
 	}
 

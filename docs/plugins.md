@@ -26,7 +26,7 @@ my-plugin/
 {
 	"id": "clock",
 	"name": "时钟 · Clock",
-	"version": "0.1.0",
+	"version": "0.0.2-alpha1",
 	"server": "server.mjs",
 	"web": "web.js"
 }
@@ -96,6 +96,8 @@ export default defineFacet((api) => {
 ```
 
 - 组件收到的 props **只有 `host`**。外壳不传状态、不传语言、不传用户——它没有这些东西。
+- `useRemote` 走的是 Chord 的 `host.hold`：引用**同步**返回，可能仍是 `loading`。用 `useRefStatus` 读它的 `status` 决定渲染过渡态；`loading` 时状态成员会抛 `not_ready`，`useReadable` 的 fallback 只是占位，不是数据。
+- 浏览器切面应当是一个**单个 ESM 文件**。浏览器没有模块 hook，重载时只有入口 URL 的 `?v=` 会变，相对 import 的子文件仍命中缓存——把切面拆成多文件，热重载就只换掉入口。
 - `title` 是纯字符串，外壳原样显示。面板自己决定写什么语言。
 - `order` 决定标签顺序，同值保持注册顺序。
 - 你不需要打包。`import "react"`、`import "@moonan_ai/sdk/web"` 由外壳的 import map 指到 `/runtime/*.js`：整个页面只有一份 React、一份 Chord。多一份 React 会让 hooks 报错——而且表现为「面板不出现」，不是一条明确的报错。

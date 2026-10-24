@@ -1,4 +1,4 @@
-import { Panels, useReadable, useRemote } from "@moonan_ai/sdk/web";
+import { Panels, useReadable, useRefStatus, useRemote } from "@moonan_ai/sdk/web";
 import { Type, defineFacet, hostNamed, local, method, remote } from "@moonan_ai/sdk";
 import { createElement as h, useState } from "react";
 
@@ -50,9 +50,13 @@ const S = {
 
 function ClockPanel({ host }) {
 	const clock = useRemote(host, Clock, {});
+	// `hold` returns before the object is live: the status is what says whether the value
+	// below is real yet, instead of a `0` that would render as 1970.
+	const status = useRefStatus(clock);
+	const live = status === "live";
 	const at = useReadable(clock?.at, 0);
 	// Formatted here, in the browser's own zone and locale: the server only ever sends an instant.
-	const label = at ? new Date(at).toLocaleTimeString(undefined, { hour12: false }) : "--:--:--";
+	const label = live ? new Date(at).toLocaleTimeString(undefined, { hour12: false }) : "--:--:--";
 	const [busy, setBusy] = useState(false);
 
 	const tick = async () => {
@@ -73,14 +77,18 @@ function ClockPanel({ host }) {
 		h(
 			"p",
 			{ style: S.hint },
-			clock ? `Chord 状态已同步 · ${new Date(at).toISOString()}` : "等待 Clock 对象…",
+			live
+				? `Chord 状态已同步 · ${new Date(at).toISOString()}`
+				: status === "gone"
+					? "Clock 对象已不可用"
+					: "等待 Clock 对象…",
 		),
 		h(
 			"div",
 			{ style: S.row },
 			h(
 				"button",
-				{ type: "button", style: S.button, onClick: tick, disabled: !clock || busy },
+				{ type: "button", style: S.button, onClick: tick, disabled: !live || busy },
 				busy ? "请求中…" : "调用 tick()",
 			),
 			h(

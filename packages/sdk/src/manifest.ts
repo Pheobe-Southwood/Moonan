@@ -37,6 +37,12 @@ export const Manifest = remote("moonan.manifest", {
 				/** The substrate's own version, so a client can tell which build it is talking to. */
 				version: Type.String(),
 				plugins: Type.Array(PluginEntrySchema),
+				/**
+				 * Bumped on every committed reload. A browser is not a reload participant in chord,
+				 * so this state member is the only signal that a new code version exists: the shell
+				 * watches it and swaps its own facets with `host.reload` instead of reloading the page.
+				 */
+				revision: Type.Number(),
 			},
 		},
 	},

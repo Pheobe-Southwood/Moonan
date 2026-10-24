@@ -1,26 +1,37 @@
 import type { Facet, FacetLoader } from "@earendil-works/chord";
 
 /**
- * Chord ships only a Node loader: browsers are not reload participants, so a browser
- * facet is imported once per page load. The query string defeats the module cache when a
- * reconnect builds a fresh host, which is what keeps two hosts from sharing one facet.
+ * Chord ships only a Node loader, so the browser needs its own. It mirrors chord's
+ * `nodeLoader` in the two details that matter:
  *
- * This is Moonan's own extension of Chord, not part of its protocol — which is why the
- * substrate reports `experimental: true` alongside the plugin list.
+ * - a facet's **name is its URL without a query**. `host.reload([url])` finds facets by
+ *   name, so a name that carried `?v=…` could never be replaced;
+ * - every import is cache-busted with a fresh `?v=<n>`, so a reload really loads new code
+ *   instead of reusing the module the page already has.
+ *
+ * A relative import inside a browser facet is not rewritten (browsers have no module
+ * hooks), so a facet is expected to be a single file — the plugin format already says
+ * `web.js` is the browser facet.
  */
-export function browserFacetLoader(generation: number): FacetLoader {
+export function browserFacetLoader(): FacetLoader {
+	let sequence = 0;
 	return async (modules) => {
 		const facets: Facet[] = [];
 		for (const module of modules) {
-			const url = new URL(String(module), location.href);
-			url.searchParams.set("v", String(generation));
+			const base = new URL(String(module), location.href);
+			base.search = "";
+			base.hash = "";
+			const name = base.href;
+
+			const url = new URL(name);
+			url.searchParams.set("v", String((sequence += 1)));
 			const loaded = (await import(/* @vite-ignore */ url.href)) as { default?: Facet };
 			const definition = loaded.default;
 			if (definition === undefined || typeof definition.setup !== "function") {
-				throw new TypeError(`${url.href}: default export must be a facet (defineFacet)`);
+				throw new TypeError(`${name}: default export must be a facet (defineFacet)`);
 			}
 			facets.push({
-				name: url.href,
+				name,
 				setup: definition.setup,
 				...(definition.uses ? { uses: definition.uses } : {}),
 			});

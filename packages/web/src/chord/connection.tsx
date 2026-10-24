@@ -7,7 +7,7 @@ export type ConnectionStatus = "connecting" | "open" | "closed" | "error";
 export interface ConnectionValue {
 	status: ConnectionStatus;
 	host: Host<unknown> | null;
-	/** Bumped on every (re)connect; references must be re-acquired when it changes. */
+	/** Bumped only when the host itself is replaced; references are re-acquired on that change alone. */
 	generation: number;
 	/** Set when the server refused this client's protocol version. */
 	error: string | null;
@@ -36,9 +36,13 @@ function reloadOnce(): boolean {
 }
 
 /**
- * Chord links never resume: when one closes, every reference taken over it is gone. The
- * shell therefore throws the client host away and builds a new one per connection,
- * bumping `generation` so hooks re-acquire their references.
+ * One client host for the life of the page; only the link is rebuilt.
+ *
+ * Chord does not resume a link, but `host.connect` replaces the link of a host that lost
+ * one: every remote binding is re-held over the new link and keeps its last values
+ * readable until the new snapshots arrive (`RemoteBinding.detached`), and the browser
+ * facets installed in this host — the Panels registry among them — stay installed.
+ * Rebuilding the host per reconnect would throw all of that away to gain nothing.
  */
 export function ConnectionProvider({ children }: { children: ReactNode }) {
 	const [value, setValue] = useState<ConnectionValue>(INITIAL);
@@ -46,49 +50,44 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
 	useEffect(() => {
 		let disposed = false;
 		let socket: WebSocket | null = null;
-		let host: Host<unknown> | null = null;
 		let retry: ReturnType<typeof setTimeout> | undefined;
 		let attempt = 0;
-		let generation = 0;
 		// A mismatch is terminal for this page: reload or show the banner, never reconnect.
 		let mismatched = false;
+
+		const host = createHost({
+			kind: "client",
+			self: { id: "browser" },
+			loader: browserFacetLoader(),
+			onError: (error: unknown) => console.error("[chord]", error),
+		});
 
 		const scheduleReconnect = () => {
 			const delay = Math.min(5_000, 400 * 2 ** attempt);
 			attempt += 1;
-			retry = setTimeout(open, delay);
+			retry = setTimeout(() => connect(), delay);
 		};
 
-		const open = () => {
-			if (disposed) return;
-			setValue((current) => ({ ...current, status: "connecting" }));
+		const connect = () => {
+			if (disposed || mismatched) return;
+			setValue((current) => (current.status === "error" ? current : { ...current, status: "connecting" }));
 
 			const next = new WebSocket(socketUrl());
 			socket = next;
-			generation += 1;
 
-			// Build the host and the link *before* the socket opens, not inside the `open`
-			// handler. The server greets as soon as it accepts, and that greeting can be
-			// dispatched in the same tick as `open` — a listener attached afterwards never sees
-			// it, and the first frame that carries an ack is then a protocol violation that
-			// kills the link. `WebSocketLink` buffers our outgoing frames until open, so
-			// connecting early costs nothing.
-			const created = createHost({
-				kind: "client",
-				self: { id: "browser" },
-				loader: browserFacetLoader(generation),
-				onError: (error: unknown) => console.error("[chord]", error),
-			});
-			created.connect(webSocketLink(next), {
+			// The link is created before the socket opens on purpose: the server greets as soon
+			// as it accepts, and a listener attached in an `open` handler can miss that greeting,
+			// which turns the next ack into a protocol violation. `webSocketLink` buffers our
+			// outgoing frames until open, so connecting early costs nothing.
+			host.connect(webSocketLink(next), {
 				principal: { id: "browser" },
 				onProtocolMismatch: () => {
 					mismatched = true;
 					if (reloadOnce()) return;
-					setValue({ status: "error", host: null, generation, error: "protocol_mismatch" });
+					setValue({ status: "error", host: null, generation: 0, error: "protocol_mismatch" });
+					void host.close().catch(() => undefined);
 				},
 			});
-			host = created;
-			setValue({ status: "connecting", host: created, generation, error: null });
 
 			next.addEventListener("open", () => {
 				if (disposed || socket !== next) return;
@@ -99,14 +98,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
 			next.addEventListener("close", () => {
 				if (disposed || socket !== next) return;
 				socket = null;
-				const previous = host;
-				host = null;
-				if (previous) void previous.close().catch(() => undefined);
-				setValue((current) =>
-					current.status === "error"
-						? current
-						: { status: "closed", host: null, generation: current.generation, error: null },
-				);
+				setValue((current) => (current.status === "error" ? current : { ...current, status: "closed" }));
 				if (!mismatched) scheduleReconnect();
 			});
 
@@ -115,13 +107,14 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
 			});
 		};
 
-		open();
+		setValue({ status: "connecting", host, generation: 1, error: null });
+		connect();
 
 		return () => {
 			disposed = true;
 			if (retry) clearTimeout(retry);
 			socket?.close();
-			if (host) void host.close().catch(() => undefined);
+			void host.close().catch(() => undefined);
 		};
 	}, []);
 

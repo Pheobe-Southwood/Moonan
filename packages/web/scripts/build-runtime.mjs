@@ -9,8 +9,9 @@ import { build, context } from "esbuild";
  * A plugin's browser facet is `import()`ed at runtime, so it cannot be bundled with the
  * shell: it has to resolve `react`, `@earendil-works/chord` and `@moonan_ai/sdk` through
  * the import map instead. That only works if the shell and every plugin share one copy
- * of each — a second React makes hooks throw, a second Chord makes the `Panels` token
- * different, and both failures look like "the panel does not appear" rather than an error.
+ * of each — a second React makes hooks throw, and a second Chord would put two protocol
+ * and identity worlds in one page. Both failures look like "the panel does not appear"
+ * rather than an error.
  *
  * So every entry below is built in **one pass with splitting**: shared code lands in
  * `chunk-*.js` and both the shell and the plugins reach the same module instance.

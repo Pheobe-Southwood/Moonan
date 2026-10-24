@@ -23,6 +23,11 @@ let hooksInstalled = false;
  * get a second copy: one TypeBox and one Chord per process keeps schema identity and the
  * host implementation single. Registries and contracts would still match by name and
  * fingerprint, so a duplicate is not fatal; it is just a second set of state nobody needs.
+ *
+ * Chord has no equivalent: `nodeLoader` imports a facet, but it does not take over bare
+ * specifiers, so a plugin's `import "@earendil-works/chord"` is whatever the plugin's own
+ * `node_modules` resolves. This hook is the substrate making the shared specifiers
+ * explicit — the Node-side twin of the browser's import map.
  */
 export function installSharedModuleHooks(extra: Record<string, string> = {}): void {
 	if (hooksInstalled) return;

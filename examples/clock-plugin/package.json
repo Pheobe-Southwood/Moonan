@@ -1,6 +1,6 @@
 {
   "name": "@moonan_ai/example-clock",
-  "version": "0.1.0",
+  "version": "0.0.2-alpha1",
   "private": true,
   "type": "module",
   "description": "A Moonan plugin with no AI in it: a live clock over Chord, plus one HTTP route.",
