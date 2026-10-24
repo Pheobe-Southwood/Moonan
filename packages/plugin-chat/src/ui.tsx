@@ -53,9 +53,11 @@ export function ChatTab({ host, user }: PanelProps) {
 
 	const submit = async () => {
 		const text = draft.trim();
+		console.info("[chat-debug] submit", { text, hasChat: Boolean(chat) });
 		if (!text || !chat) return;
 		setDraft("");
-		await send.run(text);
+		const result = await send.run(text);
+		console.info("[chat-debug] posted", { result });
 	};
 
 	return (
