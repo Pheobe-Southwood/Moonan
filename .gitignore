@@ -15,3 +15,4 @@ e2e/artifacts/
 .DS_Store
 .tmp-*/
 packages/web/public/runtime/
+packages/web/.runtime-entries/

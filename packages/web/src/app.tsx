@@ -103,7 +103,6 @@ function Shell({ host, app, locale, user, version, panels }: ShellProps) {
 
 function Bootstrapped() {
 	const { host, generation, error } = useConnection();
-	const t = useT();
 	const app = useRemote(host, AppContract, {});
 	const locale = useReadable<Locale>(app?.locale, "zh");
 	const user = useReadable<string>(app?.user, "你");
@@ -145,10 +144,12 @@ function Bootstrapped() {
 	}, [host, generation, webSignature]);
 
 	if (error) {
+		// The locale is unknown this early, and the shell that would know it is
+		// exactly what failed to negotiate, so these two strings stay literal.
 		return (
 			<section className="panel">
-				<h2>{t("upgrade.title")}</h2>
-				<p className="muted">{t("upgrade.body")}</p>
+				<h2>界面版本不匹配 · UI version mismatch</h2>
+				<p className="muted">服务端已经更新，请刷新页面。Reload the page to continue.</p>
 			</section>
 		);
 	}
@@ -163,9 +164,7 @@ function Bootstrapped() {
 	return (
 		<LocaleProvider locale={resolvedLocale}>
 			{loadError ? <div className="banner">{loadError}</div> : null}
-			{ready && panels.length === 0 ? (
-				<div className="loading">{t("panel.empty")}</div>
-			) : (
+			{ready ? (
 				<Shell
 					host={host}
 					app={app}
@@ -174,6 +173,8 @@ function Bootstrapped() {
 					version={version}
 					panels={panels}
 				/>
+			) : (
+				<div className="loading">Moonan …</div>
 			)}
 		</LocaleProvider>
 	);

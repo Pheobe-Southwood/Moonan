@@ -82,3 +82,10 @@ jobs:
             test -f "packages/web/dist/runtime/$runtime.js"
           done
           grep -q 'type="importmap"' packages/web/dist/index.html
+          # Every runtime entry must be self-contained: a leftover bare import means a
+          # second copy of React/Chord at runtime, which shows up as a hook error.
+          if grep -qE 'from "(react|react-dom|@earendil-works/chord|typebox|@moonan_ai)' packages/web/dist/runtime/*.js; then
+            echo "runtime bundles still contain bare imports"
+            grep -hoE 'from "[^"]+"' packages/web/dist/runtime/*.js | sort -u
+            exit 1
+          fi

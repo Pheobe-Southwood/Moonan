@@ -15,9 +15,9 @@ export function usePanels(host: unknown): PanelContribution[] {
 			return;
 		}
 		const view = (host as { registry(registry: unknown): any }).registry(Panels);
-		const read = (table: Map<string, PanelContribution>) =>
+		const read = (table: ReadonlyMap<string, PanelContribution>) =>
 			setPanels([...table.values()].sort((left, right) => left.order - right.order));
-		read(view.table() as Map<string, PanelContribution>);
+		read(view.table() as ReadonlyMap<string, PanelContribution>);
 		const stop = view.subscribe(read);
 		return () => stop();
 	}, [host]);
