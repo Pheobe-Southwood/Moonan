@@ -26,7 +26,9 @@ async function main() {
 	const browser = await chromium.launch({ headless: process.env.PW_HEADLESS !== "false" });
 	const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, deviceScaleFactor: 1.5 });
 	const errors = [];
+	const console_ = [];
 	page.on("console", (message) => {
+		console_.push(`${message.type()}: ${message.text()}`);
 		if (message.type() === "error") errors.push(message.text());
 	});
 	page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
@@ -151,6 +153,7 @@ async function main() {
 		console.error("--- diagnostics ---");
 		console.error("sockets:", sockets);
 		console.error("console errors:", errors);
+		console.error("console:", console_.slice(-40));
 		console.error("body:", (await page.locator("body").innerText().catch(() => "")).slice(0, 800));
 		// The right-hand pane is where a failed action shows its error; without it a
 		// timeout only says "locator not found".

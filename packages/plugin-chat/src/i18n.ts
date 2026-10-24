@@ -3,6 +3,10 @@ import type { Messages } from "@moonan_ai/web-api";
 /** Strings this panel owns; the shell never has to know they exist. */
 export const messages: Messages = {
 	zh: {
+		"status.idle": "空闲",
+		"status.queued": "排队",
+		"status.streaming": "生成中",
+		"status.error": "出错",
 		"chat.open_agents": "Agent",
 		"chat.empty.title": "还没有开始",
 		"chat.empty.body": "在下面输入第一句话。短时间内连续发送的消息会合并成一批。",
@@ -16,6 +20,10 @@ export const messages: Messages = {
 		"chat.tools": "工具",
 	},
 	en: {
+		"status.idle": "Idle",
+		"status.queued": "Queued",
+		"status.streaming": "Streaming",
+		"status.error": "Error",
 		"chat.open_agents": "Agents",
 		"chat.empty.title": "Nothing yet",
 		"chat.empty.body": "Type the first line below. Messages sent within a moment are batched together.",

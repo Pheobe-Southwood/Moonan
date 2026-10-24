@@ -33,9 +33,17 @@ export function useRemote(host: unknown, contract: any, input: Record<string, un
 		}
 		let cancelled = false;
 		let held: AnyRef | null = null;
+		let settled = false;
+		// A get that never settles means the object is stuck activating; say so instead
+		// of leaving a panel silently inert.
+		const slow = setTimeout(() => {
+			if (!settled) console.warn(`[chord] get still pending after 10s: ${String(contract?.name ?? contract)}`);
+		}, 10_000);
 		client
 			.get(contract, JSON.parse(key) as never)
 			.then((acquired) => {
+				settled = true;
+				clearTimeout(slow);
 				if (cancelled) {
 					(acquired as unknown as { release(): void }).release();
 					return;
@@ -44,10 +52,14 @@ export function useRemote(host: unknown, contract: any, input: Record<string, un
 				setRef(held);
 			})
 			.catch((error: unknown) => {
+				settled = true;
+				clearTimeout(slow);
 				console.error("[chord] get failed", error);
 			});
 		return () => {
 			cancelled = true;
+			settled = true;
+			clearTimeout(slow);
 			held?.release();
 			setRef(null);
 		};
