@@ -136,7 +136,7 @@ export function LogsTab({ host }: PanelProps) {
 		<div>
 			<div className="page-head">
 				<div>
-					<p className="eyebrow">{t("nav.logs")}</p>
+					<p className="eyebrow">{t("logs.eyebrow")}</p>
 					<h1>{t("logs.title")}</h1>
 					<p className="lede">模型看到和说出的每一条内容，包括工具调用。用户可见的对话不在这里。</p>
 				</div>

@@ -132,7 +132,7 @@ export function AgentsTab({ host, user }: PanelProps) {
 
 			<div className="split" style={{ marginTop: 32 }}>
 				<aside>
-					<h3>{t("nav.agents")}</h3>
+					<h3>{t("agents.list")}</h3>
 					<div className="list">
 						{agents.map((agent) => (
 							<div className="list-item" key={agent.id} data-selected={agent.id === MAIN_AGENT}>
@@ -219,7 +219,7 @@ export function AgentsTab({ host, user }: PanelProps) {
 					<div className="section">
 						<h3>{t("agents.model")}</h3>
 						<div className="row-2">
-							<Field label={t("nav.providers")} htmlFor="agent-provider">
+							<Field label={t("agents.provider")} htmlFor="agent-provider">
 								<Select
 									id="agent-provider"
 									value={providerId}

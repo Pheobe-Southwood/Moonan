@@ -78,7 +78,7 @@ export function ChatTab({ host, user }: PanelProps) {
 				<div className="banner">
 					{t("chat.model_missing")} — {t("chat.model_missing.body")}{" "}
 					<button type="button" className="link" onClick={() => (location.hash = "#/agents")}>
-						{t("nav.agents")}
+						{t("chat.open_agents")}
 					</button>
 				</div>
 			) : null}
