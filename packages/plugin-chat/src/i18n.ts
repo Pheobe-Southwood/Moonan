@@ -3,7 +3,7 @@ import type { Messages } from "@moonan_ai/web-api";
 /** Strings this panel owns; the shell never has to know they exist. */
 export const messages: Messages = {
 	zh: {
-		""chat.open_agents"": "Agent",
+		"chat.open_agents": "Agent",
 		"chat.empty.title": "还没有开始",
 		"chat.empty.body": "在下面输入第一句话。短时间内连续发送的消息会合并成一批。",
 		"chat.placeholder": "说点什么…",
@@ -16,7 +16,7 @@ export const messages: Messages = {
 		"chat.tools": "工具",
 	},
 	en: {
-		""chat.open_agents"": "Agents",
+		"chat.open_agents": "Agents",
 		"chat.empty.title": "Nothing yet",
 		"chat.empty.body": "Type the first line below. Messages sent within a moment are batched together.",
 		"chat.placeholder": "Say something…",

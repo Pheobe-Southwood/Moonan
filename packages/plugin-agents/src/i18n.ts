@@ -3,8 +3,8 @@ import type { Messages } from "@moonan_ai/web-api";
 /** Strings this panel owns; the shell never has to know they exist. */
 export const messages: Messages = {
 	zh: {
-		""agents.list"": "Agent",
-		""agents.provider"": "提供商",
+		"agents.list": "Agent",
+		"agents.provider": "提供商",
 		"agents.eyebrow": "Agent 管理",
 		"agents.title": "你的角色",
 		"agents.lede": "名字、人设、模型都在这里。保存后立即生效，正在进行的对话会重新载入。",
@@ -27,8 +27,8 @@ export const messages: Messages = {
 		"agents.no_model": "需要选择模型",
 	},
 	en: {
-		""agents.list"": "Agents",
-		""agents.provider"": "Provider",
+		"agents.list": "Agents",
+		"agents.provider": "Provider",
 		"agents.eyebrow": "Agent manager",
 		"agents.title": "Your character",
 		"agents.lede": "Name, persona and model live here. Changes apply immediately and reload a running conversation.",

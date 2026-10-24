@@ -3,7 +3,7 @@ import type { Messages } from "@moonan_ai/web-api";
 /** Strings this panel owns; the shell never has to know they exist. */
 export const messages: Messages = {
 	zh: {
-		""logs.eyebrow"": "日志",
+		"logs.eyebrow": "日志",
 		"logs.empty": "这一轮还没有产生任何记录。",
 		"logs.title": "完整记录",
 		"status.idle": "空闲",
@@ -19,7 +19,7 @@ export const messages: Messages = {
 		"logs.live": "实时",
 	},
 	en: {
-		""logs.eyebrow"": "Logs",
+		"logs.eyebrow": "Logs",
 		"logs.empty": "Nothing recorded in this conversation yet.",
 		"logs.title": "Transcript",
 		"status.idle": "Idle",
