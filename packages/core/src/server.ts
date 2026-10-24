@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { extname, join, resolve, sep } from "node:path";
+import { basename, extname, join, resolve, sep } from "node:path";
 import { type Host, acceptWebSockets } from "@earendil-works/chord";
 import { WebSocketServer } from "ws";
 import type { Logger } from "./util.js";
@@ -118,10 +118,13 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 		if (pathname === "/api/plugins") {
 			sendJson(response, 200, {
 				version: options.version,
+				// Runtime-loaded browser facets are Moonan's own extension: chord ships no
+				// browser loader, so this is marked experimental until that changes.
+				experimental: true,
 				plugins: options.plugins().map((plugin) => ({
 					id: plugin.id,
 					name: plugin.name,
-					web: `/plugins/${plugin.id}/web.js`,
+					web: `/plugins/${plugin.id}/${basename(plugin.file)}`,
 				})),
 			});
 			return;
@@ -136,7 +139,9 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 			const id = typeof body?.id === "string" ? body.id : undefined;
 			try {
 				const report = await options.reload(id);
-				sendJson(response, 200, report ?? { ok: true });
+				// Browsers are not reload participants in chord; the page must be reloaded
+				// to pick up the new web facets.
+				sendJson(response, 200, { ok: true, reloadBrowser: true, report });
 			} catch (error) {
 				options.logger.error("plugin reload failed", error);
 				sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });

@@ -1,21 +1,24 @@
 import { hostNamed, method, remote } from "@earendil-works/chord";
 import { Type } from "typebox";
-import { PanelInfoSchema, PluginInfoSchema } from "./common.js";
+import { PluginInfoSchema } from "./common.js";
 
-/** App-wide status: who the person is, what language the UI speaks, what plugins loaded. */
+/**
+ * App-wide status: who the person is, what language the UI speaks, what plugins loaded.
+ *
+ * v2 drops `panels`: a panel is a browser concern, registered by the plugin's web
+ * facet in the shell's own registry, so the kernel no longer has an opinion about it.
+ */
 export const AppContract = remote("moonan.app", {
-	version: 1,
+	version: 2,
 	input: Type.Object({}),
 	host: hostNamed("moonan"),
 	variants: {
-		v1: {
+		v2: {
 			state: {
 				user: Type.String(),
 				locale: Type.String(),
 				version: Type.String(),
 				plugins: Type.Array(PluginInfoSchema),
-				/** Contributed through the panels registry, ordered by `order`. */
-				panels: Type.Array(PanelInfoSchema),
 			},
 			methods: {
 				update: method(

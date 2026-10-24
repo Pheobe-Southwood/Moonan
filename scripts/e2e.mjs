@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,12 +38,13 @@ const script = (request) => {
 };
 
 const dataDir = await mkdtemp(join(tmpdir(), "moonan-e2e-"));
+// A third-party plugin installed the way a person would: a directory under plugins/.
+await cp(join(root, "examples/panel-plugin"), join(dataDir, "plugins", "panel-demo"), { recursive: true });
 const fake = await startFakeOpenAI({ script, chunkDelayMs: 12 });
 const stack = await startStack({
 	quiet: true,
 	dataDir,
-	nodePort: 21317,
-	webPort: 21318,
+	port: 21318,
 });
 
 const child = spawn(process.execPath, [join(root, "e2e/smoke.mjs")], {

@@ -1,0 +1,67 @@
+{
+  "name": "@moonan_ai/plugin-logs",
+  "version": "0.0.1-alpha5",
+  "description": "Moonan 日志插件：模型转录的只读面板。",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pheobe-Southwood/Moonan.git",
+    "directory": "packages/plugin-logs"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/server.ts",
+      "development": "./src/server.ts",
+      "default": "./dist/server.js"
+    },
+    "./contract": {
+      "types": "./src/contract.ts",
+      "development": "./src/contract.ts",
+      "default": "./dist/contract.js"
+    },
+    "./web": {
+      "types": "./src/web.tsx",
+      "development": "./src/web.tsx",
+      "default": "./dist/web.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.4.0",
+    "@moonan_ai/contracts": "workspace:*"
+  },
+  "peerDependencies": {
+    "@moonan_ai/web-api": "*",
+    "react": ">=19.0.0",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@moonan_ai/web-api": "workspace:*",
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "react": "^19.3.1",
+    "typebox": "1.3.27"
+  },
+  "keywords": [
+    "moonan",
+    "plugin",
+    "roleplay"
+  ],
+  "homepage": "https://github.com/Pheobe-Southwood/Moonan#readme",
+  "bugs": {
+    "url": "https://github.com/Pheobe-Southwood/Moonan/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -5,8 +5,10 @@ import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
+export const WEB_DIST = join(root, "packages/web/dist");
+
 /** Poll until something answers; a slow first compile is fine, a closed port is not. */
-async function waitForHttp(url, isAlive, timeoutMs = 120_000) {
+async function waitForHttp(url, isAlive, timeoutMs = 180_000) {
 	const deadline = Date.now() + timeoutMs;
 	for (;;) {
 		try {
@@ -21,21 +23,35 @@ async function waitForHttp(url, isAlive, timeoutMs = 120_000) {
 	}
 }
 
+function viteBin() {
+	return [
+		join(root, "packages/web/node_modules/vite/bin/vite.js"),
+		join(root, "node_modules/vite/bin/vite.js"),
+	].find((candidate) => existsSync(candidate));
+}
+
 /**
- * Dev stack: the Node server owns chord/WS/data on `nodePort`, Vite serves the
- * web app on `webPort` and proxies /ws, /api and /plugins to it.
+ * One server, one port: the Node process owns chord, the WebSocket, the data and the
+ * built web app. There is no second dev server, because a plugin's browser facet is
+ * fetched over HTTP from the same origin as the WebSocket — a proxy would only add a
+ * way for the two to disagree.
  *
- * Both children bind 127.0.0.1 explicitly: on some hosts `localhost` resolves to
- * ::1 first, which leaves 127.0.0.1 refused.
+ * `watch` adds the three compilers a browser facet needs: TypeScript for the plugin
+ * packages, Vite for the shell and esbuild for the shared runtime modules.
  */
 export async function startStack(options = {}) {
-	const nodePort = options.nodePort ?? 21316;
-	const webPort = options.webPort ?? 21315;
+	const port = options.port ?? 21315;
 	const dataDir = options.dataDir ?? join(root, ".data");
 	const quiet = options.quiet ?? false;
+	const watch = options.watch ?? false;
+	const webDist = options.webDist ?? WEB_DIST;
 	const children = [];
 	const logs = [];
 	let stopping = false;
+
+	if (!existsSync(join(webDist, "index.html"))) {
+		throw new Error(`${webDist} has no index.html — run \`pnpm build\` first`);
+	}
 
 	const launch = (name, command, args, extra = {}) => {
 		const { cwd = root, ...env } = extra;
@@ -73,36 +89,48 @@ export async function startStack(options = {}) {
 		);
 	};
 
-	launch("server", process.execPath, [
-		"--conditions=development",
-		"--import",
-		"tsx",
+	const serverArgs = ["--conditions=development", "--import", "tsx"];
+	if (watch) serverArgs.push("--watch");
+	serverArgs.push(
 		"packages/moonan/src/cli.ts",
 		"--port",
-		String(nodePort),
+		String(port),
 		"--hostname",
 		"127.0.0.1",
 		"--data-dir",
 		dataDir,
-	]);
-
-	const viteBin = [join(root, "packages/web/node_modules/vite/bin/vite.js"), join(root, "node_modules/vite/bin/vite.js")].find(
-		(candidate) => existsSync(candidate),
+		"--web-dist",
+		webDist,
 	);
-	launch("web", process.execPath, [viteBin ?? "vite", "--host", "127.0.0.1", "--port", String(webPort), "--strictPort"], {
-		MOONAN_NODE_PORT: String(nodePort),
-		cwd: join(root, "packages/web"),
-	});
+	launch("server", process.execPath, serverArgs);
 
-	const url = `http://127.0.0.1:${webPort}`;
+	if (watch) {
+		launch("types", "pnpm", [
+			"-r",
+			"--parallel",
+			"--filter",
+			"@moonan_ai/contracts",
+			"--filter",
+			"@moonan_ai/web-api",
+			"--filter",
+			"@moonan_ai/plugin-*",
+			"dev",
+		]);
+		launch("runtime", process.execPath, ["packages/web/scripts/build-runtime.mjs", "--watch"]);
+		const vite = viteBin();
+		if (!vite) throw new Error("vite is not installed — run `pnpm install`");
+		launch("web", process.execPath, [vite, "build", "--watch"], { cwd: join(root, "packages/web") });
+	}
+
+	const url = `http://127.0.0.1:${port}`;
 	const isAlive = () => children.every((child) => child.exitCode === null);
 	try {
 		await waitForHttp(`${url}/`, isAlive);
-		await waitForHttp(`http://127.0.0.1:${nodePort}/api/plugins`, isAlive);
+		await waitForHttp(`${url}/api/plugins`, isAlive);
 	} catch (error) {
 		await stopAll();
 		throw new Error(`${error instanceof Error ? error.message : String(error)}\n${logs.slice(-40).join("\n")}`);
 	}
 
-	return { url, nodePort, webPort, dataDir, logs, stop: stopAll };
+	return { url, port, dataDir, webDist, logs, stop: stopAll };
 }

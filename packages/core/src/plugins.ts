@@ -30,7 +30,7 @@ let hooksInstalled = false;
  * resolve. Point the shared specifiers at the copies this process already uses,
  * which also guarantees one chord/typebox instance across the boundary.
  */
-export function installSharedModuleHooks(): void {
+export function installSharedModuleHooks(extra: Record<string, string> = {}): void {
 	if (hooksInstalled) return;
 	// Vitest already routes `.ts` through its own loader; a shim on top of that makes
 	// Node load the source file itself, which fails. Tests import from source anyway.
@@ -44,6 +44,10 @@ export function installSharedModuleHooks(): void {
 			// optional dependency in some deployments
 		}
 	}
+	// Whatever the app itself has installed (the plugin packages, their contract
+	// subpaths) resolves from the host process, so a disk plugin can depend on a
+	// published plugin's contract without its own node_modules.
+	for (const [specifier, url] of Object.entries(extra)) shims.set(specifier, url);
 	registerHooks({
 		resolve(specifier, context, nextResolve) {
 			const shim = shims.get(specifier);

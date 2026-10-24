@@ -1,6 +1,6 @@
 {
   "name": "@moonan_ai/moonan",
-  "version": "0.0.1-alpha4",
+  "version": "0.0.1-alpha5",
   "description": "Immersive AI roleplay with a flexible plugin system.",
   "type": "module",
   "license": "MIT",
@@ -40,12 +40,22 @@
     "@earendil-works/pi-mcp": "1.4.0",
     "@moonan_ai/contracts": "workspace:*",
     "@moonan_ai/core": "workspace:*",
+    "@moonan_ai/plugin-agents": "workspace:*",
+    "@moonan_ai/plugin-chat": "workspace:*",
+    "@moonan_ai/plugin-logs": "workspace:*",
+    "@moonan_ai/plugin-mcp": "workspace:*",
+    "@moonan_ai/plugin-providers": "workspace:*",
     "typebox": "1.3.27"
   },
   "devDependencies": {
     "@moonan_ai/testing": "workspace:*",
     "@moonan_ai/web": "workspace:*",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "@moonan_ai/web-api": "workspace:*",
+    "@moonan_ai/plugin-providers": "workspace:*",
+    "@moonan_ai/plugin-chat": "workspace:*",
+    "@moonan_ai/plugin-mcp": "workspace:*",
+    "@moonan_ai/plugin-logs": "workspace:*"
   },
   "keywords": [
     "moonan",

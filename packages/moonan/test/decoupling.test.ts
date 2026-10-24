@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createHost, webSocketLink } from "@earendil-works/chord";
-import { AgentContract, ChatContract, LogsContract, ProvidersContract } from "@moonan_ai/contracts";
+import { AgentContract, ProvidersContract } from "@moonan_ai/contracts";
+import { ChatContract } from "@moonan_ai/plugin-chat/contract";
+import { LogsContract } from "@moonan_ai/plugin-logs/contract";
 import { createMoonan, type Moonan } from "@moonan_ai/core";
 import { startFakeOpenAI, type FakeOpenAI } from "@moonan_ai/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -64,7 +66,7 @@ async function pickModel(): Promise<void> {
 beforeAll(async () => {
 	dataDir = await mkdtemp(join(tmpdir(), "moonan-decouple-"));
 	fake = await startFakeOpenAI();
-	moonan = await createMoonan({ dataDir, port: 0, version: VERSION, builtinPlugins });
+	moonan = await createMoonan({ dataDir, port: 0, version: VERSION, builtinPlugins: builtinPlugins() });
 	await connect(moonan);
 	await pickModel();
 }, 60_000);
@@ -124,7 +126,7 @@ describe("data ownership", () => {
 		socket.close();
 		await moonan.close();
 
-		moonan = await createMoonan({ dataDir, port: 0, version: VERSION, builtinPlugins });
+		moonan = await createMoonan({ dataDir, port: 0, version: VERSION, builtinPlugins: builtinPlugins() });
 		await connect(moonan);
 		const chat = await host.get(ChatContract, { agent: AGENT });
 		await waitFor(() => (chat.messages.value as { direction: string }[]).length > 0, 10_000, "restored bubbles");

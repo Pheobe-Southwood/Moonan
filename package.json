@@ -1,6 +1,6 @@
 {
   "name": "moonan-workspace",
-  "version": "0.0.1-alpha4",
+  "version": "0.0.1-alpha5",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.7.0",
@@ -12,11 +12,12 @@
     "typecheck": "pnpm -r --parallel typecheck",
     "test": "pnpm -r --parallel --if-present test",
     "build": "pnpm -r build",
-    "e2e": "node --conditions=development --import tsx scripts/e2e.mjs"
+    "e2e": "pnpm build && node scripts/e2e.mjs"
   },
   "devDependencies": {
     "@moonan_ai/testing": "workspace:*",
     "@types/node": "^22.20.5",
+    "esbuild": "0.28.2",
     "playwright-core": "1.58.0",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",

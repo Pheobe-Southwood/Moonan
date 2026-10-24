@@ -1,52 +1,38 @@
-import { AppContract, type PanelInfo } from "@moonan_ai/contracts";
-import { useEffect, useState, type ReactNode } from "react";
+import { AppContract, type PluginInfo } from "@moonan_ai/contracts";
+import {
+	ConnDot,
+	LocaleProvider,
+	useReadable,
+	useRemote,
+	useT,
+	type Locale,
+	type PanelContribution,
+} from "@moonan_ai/web-api";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useConnection } from "./chord/connection.js";
-import { useReadable, useRemote } from "./chord/hooks.js";
-import { LocaleProvider, useT, type Locale } from "./i18n.js";
-import { ChatTab } from "./plugins/chat/ui.js";
-import { LogsTab } from "./plugins/logs/ui.js";
-import { AgentsTab } from "./plugins/agents/ui.js";
-import { ProvidersTab } from "./plugins/providers/ui.js";
-import { McpTab } from "./plugins/mcp/ui.js";
-import { ConnDot } from "./ui.js";
-
-export interface TabProps {
-	app: any;
-	locale: Locale;
-	user: string;
-}
+import { usePanels } from "./chord/panels.js";
 
 /**
- * Panels come from the server's `panels` registry; the components stay here because
- * Chord never ships code to the browser. An unknown id renders a placeholder instead
- * of breaking the shell.
+ * The shell knows no panel: every tab is registered by a plugin's web facet into the
+ * browser host's `Panels` registry, then loaded at runtime. Adding a panel means
+ * shipping a plugin, not editing this file.
  */
-const COMPONENTS: Record<string, (props: TabProps) => ReactNode> = {
-	chat: ChatTab,
-	logs: LogsTab,
-	agents: AgentsTab,
-	providers: ProvidersTab,
-	mcp: McpTab,
-};
-
-function UnknownPanel({ id }: { id: string }) {
-	const t = useT();
-	return (
-		<section className="panel">
-			<h2>{t("panel.unknown.title")}</h2>
-			<p className="muted">
-				{t("panel.unknown.body")} <code>{id}</code>
-			</p>
-		</section>
-	);
-}
-
-function currentRoute(panels: PanelInfo[]): string {
+function currentRoute(panels: PanelContribution[]): string {
 	const hash = location.hash.replace(/^#\/?/, "");
 	return panels.some((panel) => panel.id === hash) ? hash : (panels[0]?.id ?? "");
 }
 
-function Shell({ app, locale, user, version, panels }: TabProps & { version: string; panels: PanelInfo[] }) {
+interface ShellProps {
+	host: unknown;
+	app: any;
+	locale: Locale;
+	user: string;
+	version: string;
+	panels: PanelContribution[];
+	children?: ReactNode;
+}
+
+function Shell({ host, app, locale, user, version, panels }: ShellProps) {
 	const t = useT();
 	const { status } = useConnection();
 	const [route, setRoute] = useState(() => currentRoute(panels));
@@ -63,7 +49,7 @@ function Shell({ app, locale, user, version, panels }: TabProps & { version: str
 		if (!active && panels.length > 0) setRoute(panels[0]?.id ?? "");
 	}, [active, panels]);
 
-	const Component = COMPONENTS[activeId];
+	const Active = active?.component;
 
 	return (
 		<div className="shell">
@@ -84,7 +70,7 @@ function Shell({ app, locale, user, version, panels }: TabProps & { version: str
 								setRoute(panel.id);
 							}}
 						>
-							{t(panel.titleKey)}
+							{panel.title[locale] ?? panel.id}
 						</button>
 					))}
 				</nav>
@@ -105,12 +91,10 @@ function Shell({ app, locale, user, version, panels }: TabProps & { version: str
 				</div>
 			</header>
 			<main className={activeId === "chat" ? "main main--flush" : "main"}>
-				{Component ? (
-					<Component app={app} locale={locale} user={user} />
-				) : active ? (
-					<UnknownPanel id={active.id} />
+				{Active ? (
+					<Active host={host} user={user} locale={locale} />
 				) : (
-					<div className="loading">{t("panel.unknown.title")}</div>
+					<div className="loading">{t("panel.empty")}</div>
 				)}
 			</main>
 		</div>
@@ -118,26 +102,79 @@ function Shell({ app, locale, user, version, panels }: TabProps & { version: str
 }
 
 function Bootstrapped() {
-	const { host } = useConnection();
-	const app = useRemote(AppContract, {});
+	const { host, generation, error } = useConnection();
+	const t = useT();
+	const app = useRemote(host, AppContract, {});
 	const locale = useReadable<Locale>(app?.locale, "zh");
 	const user = useReadable<string>(app?.user, "你");
 	const version = useReadable<string>(app?.version, "");
-	const panels = useReadable<PanelInfo[]>(app?.panels, []);
+	const plugins = useReadable<PluginInfo[]>(app?.plugins, []);
+	const panels = usePanels(host);
+
+	// Load every plugin's web facet once per host. A broken module is reported and
+	// skipped: one bad plugin must not take the shell down with it.
+	const webSignature = plugins
+		.filter((plugin) => plugin.web)
+		.map((plugin) => plugin.web)
+		.join("|");
+	const loadedFor = useRef("");
+	const [loadedKey, setLoadedKey] = useState("");
+	const [loadError, setLoadError] = useState<string | null>(null);
+
+	useEffect(() => {
+		if (!host) return;
+		const key = `${generation}:${webSignature}`;
+		if (loadedFor.current === key) return;
+		loadedFor.current = key;
+		let cancelled = false;
+		void (async () => {
+			for (const url of webSignature ? webSignature.split("|") : []) {
+				try {
+					await host.load([url]);
+				} catch (cause) {
+					const message = `${url}: ${cause instanceof Error ? cause.message : String(cause)}`;
+					console.error("[chord] web facet failed to load", cause);
+					if (!cancelled) setLoadError(message);
+				}
+			}
+			if (!cancelled) setLoadedKey(key);
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [host, generation, webSignature]);
+
+	if (error) {
+		return (
+			<section className="panel">
+				<h2>{t("upgrade.title")}</h2>
+				<p className="muted">{t("upgrade.body")}</p>
+			</section>
+		);
+	}
 
 	if (!host || !app) {
 		return <div className="loading">Moonan / 连接中</div>;
 	}
 
+	const ready = loadedKey === `${generation}:${webSignature}`;
+	const resolvedLocale: Locale = locale === "en" ? "en" : "zh";
+
 	return (
-		<LocaleProvider locale={locale === "en" ? "en" : "zh"}>
-			<Shell
-				app={app}
-				locale={locale === "en" ? "en" : "zh"}
-				user={user}
-				version={version}
-				panels={panels}
-			/>
+		<LocaleProvider locale={resolvedLocale}>
+			{loadError ? <div className="banner">{loadError}</div> : null}
+			{ready && panels.length === 0 ? (
+				<div className="loading">{t("panel.empty")}</div>
+			) : (
+				<Shell
+					host={host}
+					app={app}
+					locale={resolvedLocale}
+					user={user}
+					version={version}
+					panels={panels}
+				/>
+			)}
 		</LocaleProvider>
 	);
 }

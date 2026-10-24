@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { type Host, createHost } from "@earendil-works/chord";
 import { nodeLoader } from "@earendil-works/chord/node";
 import {
@@ -25,10 +25,10 @@ export interface BuiltinPlugin {
 	id: string;
 	name: string;
 	version: string;
-	/** The module whose default export is the facet. Loaded through `nodeLoader`, like a disk plugin. */
-	module: string | URL;
-	/** True when the web app already bundles this plugin's UI. */
-	hasWeb: boolean;
+	/** The server facet module. Loaded through `nodeLoader`, exactly like a disk plugin. */
+	server: string | URL;
+	/** Absolute path of the browser module; the shell loads it as a web facet. */
+	web?: string;
 }
 
 export interface MoonanOptions {
@@ -37,8 +37,10 @@ export interface MoonanOptions {
 	builtinPlugins: BuiltinPlugin[];
 	port?: number;
 	hostname?: string;
-	/** Built web app. Omit in dev, where Vite serves the app on the same port. */
+	/** Built web app, served from the same port as the WebSocket. */
 	webDist?: string;
+	/** Bare specifiers a disk plugin may import and share with this process. */
+	sharedModules?: Record<string, string>;
 	logger?: Logger;
 }
 
@@ -67,7 +69,7 @@ export async function createMoonan(options: MoonanOptions): Promise<Moonan> {
 		sceneVariables: () => ({ user: app.get().user }),
 	});
 
-	installSharedModuleHooks();
+	installSharedModuleHooks(options.sharedModules);
 	const chordHost = createHost({ name: "moonan", self: { id: "local" }, loader: nodeLoader });
 
 	for (const facet of coreFacets({
@@ -117,10 +119,19 @@ export async function createMoonan(options: MoonanOptions): Promise<Moonan> {
 	const modules = new Map<string, string | URL>();
 
 	for (const plugin of options.builtinPlugins) {
-		modules.set(plugin.id, plugin.module);
+		modules.set(plugin.id, plugin.server);
+		const web = plugin.web ? `/plugins/${plugin.id}/${basename(plugin.web)}` : undefined;
+		if (plugin.web) webAssets.push({ id: plugin.id, name: plugin.name, file: plugin.web });
 		try {
-			await chordHost.load([plugin.module]);
-			pluginInfos.push({ id: plugin.id, name: plugin.name, version: plugin.version, source: "builtin", hasWeb: plugin.hasWeb });
+			await chordHost.load([plugin.server]);
+			pluginInfos.push({
+				id: plugin.id,
+				name: plugin.name,
+				version: plugin.version,
+				source: "builtin",
+				hasWeb: Boolean(web),
+				...(web ? { web } : {}),
+			});
 		} catch (error) {
 			logger.error(`builtin plugin "${plugin.id}" failed to load`, error);
 			pluginInfos.push({
@@ -128,7 +139,8 @@ export async function createMoonan(options: MoonanOptions): Promise<Moonan> {
 				name: plugin.name,
 				version: plugin.version,
 				source: "builtin",
-				hasWeb: plugin.hasWeb,
+				hasWeb: Boolean(web),
+				...(web ? { web } : {}),
 				error: error instanceof Error ? error.message : String(error),
 			});
 		}
@@ -144,6 +156,7 @@ export async function createMoonan(options: MoonanOptions): Promise<Moonan> {
 				version: plugin.version,
 				source: "disk",
 				hasWeb: Boolean(plugin.web),
+				...(plugin.web ? { web: `/plugins/${plugin.id}/${basename(plugin.web)}` } : {}),
 			});
 			if (plugin.web) webAssets.push({ id: plugin.id, name: plugin.name, file: plugin.web });
 			logger.info(`disk plugin "${plugin.id}" loaded`);

@@ -84,7 +84,7 @@ beforeAll(async () => {
 	await writeFile(serverPath, PLUGIN);
 	await writeFile(join(dir, "step.txt"), "1");
 
-	moonan = await createMoonan({ dataDir, port: 0, version: VERSION, builtinPlugins });
+	moonan = await createMoonan({ dataDir, port: 0, version: VERSION, builtinPlugins: builtinPlugins() });
 	socket = new WebSocket(`ws://127.0.0.1:${moonan.port}/ws`);
 	await new Promise<void>((resolve, reject) => {
 		socket.addEventListener("open", () => resolve(), { once: true });
@@ -119,14 +119,16 @@ describe("hot reload", () => {
 		await waitFor(() => ref.count.value === 11, 10_000, "the new code's bump");
 	}, 60_000);
 
-	it("keeps the app contract and its panels after a reload", async () => {
+	it("keeps the app contract and the plugin list after a reload", async () => {
 		const { AppContract } = await import("@moonan_ai/contracts");
 		const app = await moonan.chordHost.get(AppContract, {});
-		expect(app.panels.value.map((panel) => panel.id)).toContain("chat");
+		// Panels are a browser concern now: the kernel only reports which plugins loaded.
+		expect("panels" in app).toBe(false);
+		expect(app.plugins.value.map((plugin) => plugin.id)).toContain("chat");
 		expect(app.plugins.value.some((plugin) => plugin.id === "hello")).toBe(true);
 
 		await moonan.chordHost.reload([serverPath]);
 		const again = await moonan.chordHost.get(AppContract, {});
-		expect(again.panels.value.map((panel) => panel.id)).toContain("logs");
+		expect(again.plugins.value.map((plugin) => plugin.id)).toContain("chat");
 	}, 60_000);
 });

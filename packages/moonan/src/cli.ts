@@ -13,6 +13,7 @@ const HELP = `moonan — 本地运行的 AI 角色扮演工作台
   --hostname <h>    监听地址，默认 0.0.0.0（局域网可访问）
                     只给本机用可以传 127.0.0.1
   --data-dir <dir>  数据目录，默认 ~/.moonan
+  --web-dist <dir>  已构建的前端目录（开发时用）
   --help            显示帮助
   --version         显示版本
 `;
@@ -33,6 +34,7 @@ interface CliOptions {
 	port?: number;
 	hostname?: string;
 	dataDir?: string;
+	webDist?: string;
 }
 
 function parse(argv: string[]): CliOptions | "help" | "version" {
@@ -61,6 +63,13 @@ function parse(argv: string[]): CliOptions | "help" | "version" {
 			const value = argv[index + 1];
 			if (!value) throw new Error("--data-dir 需要一个路径");
 			options.dataDir = value;
+			index += 1;
+			continue;
+		}
+		if (arg === "--web-dist") {
+			const value = argv[index + 1];
+			if (!value) throw new Error("--web-dist 需要一个路径");
+			options.webDist = value;
 			index += 1;
 			continue;
 		}
@@ -94,6 +103,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		...(parsed.port !== undefined ? { port: parsed.port } : {}),
 		...(parsed.hostname !== undefined ? { hostname: parsed.hostname } : {}),
 		dataDir: parsed.dataDir ?? defaultDataDir(),
+		...(parsed.webDist !== undefined ? { webDist: parsed.webDist } : {}),
 	});
 
 	console.log(`Moonan 正在运行: ${instance.url}`);

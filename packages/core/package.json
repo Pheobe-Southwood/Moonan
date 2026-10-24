@@ -1,6 +1,6 @@
 {
   "name": "@moonan_ai/core",
-  "version": "0.0.1-alpha4",
+  "version": "0.0.1-alpha5",
   "description": "Moonan 运行时：存储、模型、Agent 运行时与 chord 宿主。",
   "type": "module",
   "license": "MIT",

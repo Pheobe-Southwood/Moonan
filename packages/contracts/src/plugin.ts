@@ -1,6 +1,6 @@
 import { defineRegistry } from "@earendil-works/chord";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import type { PanelInfo, Variable } from "./common.js";
+import type { Variable } from "./common.js";
 
 /**
  * What a plugin contributes to the app. These tokens are the only channel between
@@ -46,10 +46,6 @@ export interface AgentToolGroup {
 	agents?: readonly string[];
 }
 
-/** A top-level panel in the web shell. The client maps `id` to a component. */
-export type PanelContribution = PanelInfo;
-
 export const AgentDefinitions = defineRegistry<AgentDefinition>("moonan.agents", { conflict: "error" });
 export const AgentTools = defineRegistry<AgentToolContribution>("moonan.agent-tools", { conflict: "error" });
 export const AgentToolGroups = defineRegistry<AgentToolGroup>("moonan.agent-tool-groups", { conflict: "error" });
-export const Panels = defineRegistry<PanelContribution>("moonan.panels", { conflict: "error" });

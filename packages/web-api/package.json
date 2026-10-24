@@ -1,0 +1,55 @@
+{
+  "name": "@moonan_ai/web-api",
+  "version": "0.0.1-alpha5",
+  "description": "Moonan 浏览器端插件 SDK：panels 注册表、panel 属性与 React 钩子。",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pheobe-Southwood/Moonan.git",
+    "directory": "packages/web-api"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
+  },
+  "peerDependencies": {
+    "@earendil-works/chord": "1.4.0",
+    "@moonan_ai/contracts": "*",
+    "react": ">=19.0.0",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@earendil-works/chord": "1.4.0",
+    "@moonan_ai/contracts": "workspace:*",
+    "@types/react": "^19.3.0",
+    "react": "^19.3.1",
+    "typebox": "1.3.27"
+  },
+  "keywords": [
+    "moonan",
+    "plugin",
+    "browser",
+    "react",
+    "panels"
+  ],
+  "homepage": "https://github.com/Pheobe-Southwood/Moonan#readme",
+  "bugs": {
+    "url": "https://github.com/Pheobe-Southwood/Moonan/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

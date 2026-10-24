@@ -66,8 +66,19 @@ jobs:
       - name: Check the published entry points exist
         run: |
           test -f packages/contracts/dist/index.js
-          test -f packages/plugin-sdk/dist/index.js
+          test -f packages/web-api/dist/index.js
           test -f packages/core/dist/index.js
           test -f packages/testing/dist/index.js
+          for plugin in agents providers chat mcp logs; do
+            test -f "packages/plugin-$plugin/dist/server.js"
+            test -f "packages/plugin-$plugin/dist/contract.js"
+            test -f "packages/plugin-$plugin/dist/web.js"
+          done
           test -f packages/moonan/dist/index.js
           test -f packages/moonan/dist/web/index.html
+          # The shell and its import map must ship together: a plugin loaded at runtime
+          # imports /runtime/*.js, so a build without them is broken at first click.
+          for runtime in react jsx-runtime react-dom chord chord-output typebox contracts web-api; do
+            test -f "packages/web/dist/runtime/$runtime.js"
+          done
+          grep -q 'type="importmap"' packages/web/dist/index.html

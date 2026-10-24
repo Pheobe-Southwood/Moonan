@@ -12,8 +12,6 @@ import {
 	HostPaths,
 	LiveMessageSchema,
 	ModelAdmin,
-	PanelInfoSchema,
-	Panels,
 	PluginInfoSchema,
 	TranscriptAdmin,
 } from "@moonan_ai/contracts";
@@ -123,13 +121,10 @@ function appFacet(deps: CoreFacetDeps): Facet<unknown> {
 		setup(api: FacetApi<unknown>) {
 			api.serve(AppContract, (_input, _principal, self) => {
 				const initial = deps.app.get();
-				const panelsView = api.registry(Panels);
-				const initialPanels = [...panelsView.table().values()].sort((left, right) => left.order - right.order);
 				const user = self.state("user", Type.String(), initial.user);
 				const locale = self.state("locale", Type.String(), initial.locale);
 				const version = self.state("version", Type.String(), initial.version);
 				const plugins = self.state("plugins", Type.Array(PluginInfoSchema), initial.plugins);
-				const panels = self.state("panels", Type.Array(PanelInfoSchema), initialPanels);
 				const unsubscribeApp = deps.app.subscribe((state) => {
 					void api
 						.root((ctx) => {
@@ -139,28 +134,13 @@ function appFacet(deps: CoreFacetDeps): Facet<unknown> {
 						})
 						.catch(() => undefined);
 				});
-				const unsubscribePanels = panelsView.subscribe((table) => {
-					void api
-						.root((ctx) => {
-							panels.replace(ctx, [...table.values()].sort((left, right) => left.order - right.order), { diff: true });
-						})
-						.catch(() => undefined);
-				});
-				api.signal.addEventListener(
-					"abort",
-					() => {
-						unsubscribeApp();
-						unsubscribePanels();
-					},
-					{ once: true },
-				);
+				api.signal.addEventListener("abort", unsubscribeApp, { once: true });
 				return {
-					variant: "v1" as const,
+					variant: "v2" as const,
 					user,
 					locale,
 					version,
 					plugins,
-					panels,
 					update: (patch: { user?: string; locale?: string }) => {
 						deps.app.update(patch);
 					},

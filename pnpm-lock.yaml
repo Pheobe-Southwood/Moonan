@@ -14,6 +14,9 @@ importers:
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       playwright-core:
         specifier: 1.58.0
         version: 1.58.0
@@ -84,6 +87,21 @@ importers:
       '@moonan_ai/core':
         specifier: workspace:*
         version: link:../core
+      '@moonan_ai/plugin-agents':
+        specifier: workspace:*
+        version: link:../plugin-agents
+      '@moonan_ai/plugin-chat':
+        specifier: workspace:*
+        version: link:../plugin-chat
+      '@moonan_ai/plugin-logs':
+        specifier: workspace:*
+        version: link:../plugin-logs
+      '@moonan_ai/plugin-mcp':
+        specifier: workspace:*
+        version: link:../plugin-mcp
+      '@moonan_ai/plugin-providers':
+        specifier: workspace:*
+        version: link:../plugin-providers
       typebox:
         specifier: 1.3.27
         version: 1.3.27
@@ -94,9 +112,143 @@ importers:
       '@moonan_ai/web':
         specifier: workspace:*
         version: link:../web
+      '@moonan_ai/web-api':
+        specifier: workspace:*
+        version: link:../web-api
       vitest:
         specifier: ^5.0.5
         version: 5.0.5(@types/node@22.20.5)(vite@8.3.4(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15))
+
+  packages/plugin-agents:
+    dependencies:
+      '@earendil-works/chord':
+        specifier: 1.4.0
+        version: 1.4.0
+      '@moonan_ai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@moonan_ai/web-api':
+        specifier: workspace:*
+        version: link:../web-api
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+      typebox:
+        specifier: 1.3.27
+        version: 1.3.27
+
+  packages/plugin-chat:
+    dependencies:
+      '@earendil-works/chord':
+        specifier: 1.4.0
+        version: 1.4.0
+      '@earendil-works/pi-agent-core':
+        specifier: 1.4.0
+        version: 1.4.0(@aws-sdk/credential-provider-node@3.972.87)(@smithy/signature-v4@5.7.4)(ws@8.22.0)
+      '@moonan_ai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@moonan_ai/web-api':
+        specifier: workspace:*
+        version: link:../web-api
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+      typebox:
+        specifier: 1.3.27
+        version: 1.3.27
+
+  packages/plugin-logs:
+    dependencies:
+      '@earendil-works/chord':
+        specifier: 1.4.0
+        version: 1.4.0
+      '@moonan_ai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@moonan_ai/web-api':
+        specifier: workspace:*
+        version: link:../web-api
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+      typebox:
+        specifier: 1.3.27
+        version: 1.3.27
+
+  packages/plugin-mcp:
+    dependencies:
+      '@earendil-works/chord':
+        specifier: 1.4.0
+        version: 1.4.0
+      '@earendil-works/pi-mcp':
+        specifier: 1.4.0
+        version: 1.4.0
+      '@moonan_ai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@moonan_ai/web-api':
+        specifier: workspace:*
+        version: link:../web-api
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+      typebox:
+        specifier: 1.3.27
+        version: 1.3.27
+
+  packages/plugin-providers:
+    dependencies:
+      '@earendil-works/chord':
+        specifier: 1.4.0
+        version: 1.4.0
+      '@moonan_ai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@moonan_ai/web-api':
+        specifier: workspace:*
+        version: link:../web-api
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+      typebox:
+        specifier: 1.3.27
+        version: 1.3.27
 
   packages/testing: {}
 
@@ -114,6 +266,9 @@ importers:
       '@moonan_ai/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@moonan_ai/web-api':
+        specifier: workspace:*
+        version: link:../web-api
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -136,6 +291,24 @@ importers:
       vite:
         specifier: ^8.3.4
         version: 8.3.4(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15)
+
+  packages/web-api:
+    devDependencies:
+      '@earendil-works/chord':
+        specifier: 1.4.0
+        version: 1.4.0
+      '@moonan_ai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+      typebox:
+        specifier: 1.3.27
+        version: 1.3.27
 
 packages:
 

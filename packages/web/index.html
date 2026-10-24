@@ -5,6 +5,26 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="color-scheme" content="light" />
 		<title>Moonan</title>
+		<!--
+			Shared runtime for plugins loaded at runtime. Every plugin bundle imports these
+			bare specifiers, and the import map is what makes one React instance (and one
+			Chord instance) serve the shell and every plugin. Built by scripts/build-runtime.mjs.
+		-->
+		<script type="importmap">
+			{
+				"imports": {
+					"react": "/runtime/react.js",
+					"react/jsx-runtime": "/runtime/jsx-runtime.js",
+					"react-dom": "/runtime/react-dom.js",
+					"react-dom/client": "/runtime/react-dom.js",
+					"@earendil-works/chord": "/runtime/chord.js",
+					"@earendil-works/chord/output": "/runtime/chord-output.js",
+					"typebox": "/runtime/typebox.js",
+					"@moonan_ai/contracts": "/runtime/contracts.js",
+					"@moonan_ai/web-api": "/runtime/web-api.js"
+				}
+			}
+		</script>
 	</head>
 	<body>
 		<div id="root"></div>

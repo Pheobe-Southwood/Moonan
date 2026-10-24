@@ -135,6 +135,12 @@ async function main() {
 		assert.ok((await page.locator(".switch").count()) >= 2, "expected MCP tool switches");
 		await shot(page, "mcp");
 
+		// --- third-party panel ---------------------------------------------
+		// Registered by a disk plugin's web facet at runtime; the shell never imports it.
+		await tab("示例面板").click();
+		await page.getByText("这个面板不在 shell 里").waitFor({ timeout: 20_000 });
+		await shot(page, "plugin-panel");
+
 		assert.deepEqual(errors, [], `console errors: ${errors.join(" | ")}`);
 		log("no console errors");
 	} catch (error) {

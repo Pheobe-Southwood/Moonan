@@ -2,7 +2,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHost, webSocketLink } from "@earendil-works/chord";
-import { AgentContract, ChatContract, LogsContract, ProvidersContract } from "@moonan_ai/contracts";
+import { AgentContract, ProvidersContract } from "@moonan_ai/contracts";
+import { ChatContract } from "@moonan_ai/plugin-chat/contract";
+import { LogsContract } from "@moonan_ai/plugin-logs/contract";
 import { createMoonan, type Moonan } from "@moonan_ai/core";
 import { startFakeOpenAI, type FakeOpenAI } from "@moonan_ai/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -30,7 +32,7 @@ beforeAll(async () => {
 	dataDir = await mkdtemp(join(tmpdir(), "moonan-reload-turn-"));
 	// Slow enough that the reload lands in the middle of the model stream.
 	fake = await startFakeOpenAI({ chunkDelayMs: 150 });
-	moonan = await createMoonan({ dataDir, port: 0, version: VERSION, builtinPlugins });
+	moonan = await createMoonan({ dataDir, port: 0, version: VERSION, builtinPlugins: builtinPlugins() });
 	socket = new WebSocket(`ws://127.0.0.1:${moonan.port}/ws`);
 	await new Promise<void>((resolve, reject) => {
 		socket.addEventListener("open", () => resolve(), { once: true });
@@ -69,7 +71,7 @@ describe("reload during a turn", () => {
 		await chat.post({ text: "你好" });
 		await waitFor(() => agent.phase.value === "streaming", 10_000, "the turn to start");
 
-		const chatUrl = builtinPlugins.find((plugin) => plugin.id === "chat")?.module;
+		const chatUrl = builtinPlugins().find((plugin) => plugin.id === "chat")?.server;
 		expect(chatUrl).toBeTruthy();
 		await moonan.chordHost.reload([chatUrl as URL]);
 

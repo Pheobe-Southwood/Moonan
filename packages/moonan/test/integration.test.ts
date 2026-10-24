@@ -3,7 +3,9 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHost, webSocketLink } from "@earendil-works/chord";
-import { AgentContract, ChatContract, McpContract, ProvidersContract } from "@moonan_ai/contracts";
+import { AgentContract, ProvidersContract } from "@moonan_ai/contracts";
+import { ChatContract } from "@moonan_ai/plugin-chat/contract";
+import { McpContract } from "@moonan_ai/plugin-mcp/contract";
 import { createMoonan, type Moonan } from "@moonan_ai/core";
 import { startFakeOpenAI, type FakeOpenAI } from "@moonan_ai/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -34,7 +36,7 @@ beforeAll(async () => {
 		dataDir,
 		port: 0,
 		version: VERSION,
-		builtinPlugins,
+		builtinPlugins: builtinPlugins(),
 	});
 
 	socket = new WebSocket(`ws://127.0.0.1:${moonan.port}/ws`);
