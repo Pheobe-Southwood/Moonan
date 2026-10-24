@@ -38,6 +38,7 @@ export function ChatTab({ host, user }: PanelProps) {
 
 	const [draft, setDraft] = useState("");
 	const feed = useRef<HTMLDivElement | null>(null);
+	const composer = useRef<HTMLTextAreaElement | null>(null);
 	const send = useAction(async (text: string) => {
 		if (!chat) return;
 		await chat.post({ text });
@@ -53,12 +54,16 @@ export function ChatTab({ host, user }: PanelProps) {
 
 	const submit = async () => {
 		const text = draft.trim();
-		console.info("[chat-debug] submit", { text, hasChat: Boolean(chat) });
+		// The composer is disabled until the contract resolves, but a keystroke that
+		// slips in between must not swallow the text.
 		if (!text || !chat) return;
 		setDraft("");
-		const result = await send.run(text);
-		console.info("[chat-debug] posted", { result });
+		await send.run(text);
 	};
+
+	useEffect(() => {
+		if (chat) composer.current?.focus();
+	}, [chat]);
 
 	return (
 		<div className="chat">
@@ -120,8 +125,10 @@ export function ChatTab({ host, user }: PanelProps) {
 
 			<div className="composer">
 				<textarea
+					ref={composer}
 					rows={1}
 					value={draft}
+					disabled={!chat}
 					placeholder={t("chat.placeholder")}
 					onChange={(event) => setDraft(event.target.value)}
 					onKeyDown={(event) => {

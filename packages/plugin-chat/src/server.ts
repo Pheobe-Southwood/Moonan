@@ -245,9 +245,7 @@ export default defineFacet((api) => {
 				variant: "v1" as const,
 				messages,
 				post: async ({ text }: { text: string }, ctx) => {
-					console.log("[chat-debug] contract post", text.slice(0, 20));
 					await store.post({ agent: input.agent, text }, ctx);
-					console.log("[chat-debug] contract post done");
 				},
 				page: ({ before, limit }: { before?: number; limit: number }, ctx) =>
 					store.page({ agent: input.agent, before, limit }, ctx),
