@@ -45,7 +45,8 @@ By default Moonan listens on `0.0.0.0` so the UI is reachable over your LAN or T
 | **说与想分开** | 模型的心理描写留在日志里，只有 `send_message` 工具的输出会出现在对话窗口。 |
 | **消息自动合批** | 两秒内连发的几条消息会合成一条带时间戳的说明交给模型。 |
 | **明文、本地、可查** | 数据在本机 SQLite 里：内核一个库，每个插件一个库。密钥不加密、不上传，随时可以用任何客户端打开。 |
-| **插件就是 chord facet** | 内置的五个面板本身就是插件；插件只通过注册表与能力契约接触内核，外部插件放到 `~/.moonan/plugins` 即可加载，`/api/plugins/reload` 热重载。 |
+| **插件就是 chord facet** | 内置的五个面板本身就是插件，各自是独立发布的包，服务端一半与浏览器一半都是 facet；插件只通过注册表与能力契约接触内核，外部插件放到 `~/.moonan/plugins` 即可加载，`/api/plugins/reload` 热重载。 |
+| **面板不属于 shell** | shell 不 import 任何面板：插件的 `web.js` 在运行时被加载，注册进浏览器自己的 `Panels` 注册表。写一个插件就能多一个标签页，不用改 Moonan 的代码。 |
 
 ## 截图 · Screenshots
 
@@ -60,7 +61,7 @@ By default Moonan listens on `0.0.0.0` so the UI is reachable over your LAN or T
 ## 文档 · Documentation
 
 - [架构](docs/architecture.md) — 进程、包、一次对话的完整路径
-- [插件](docs/plugins.md) — 写一个插件，服务端与浏览器各一半
+- [插件](docs/plugins.md) — 写一个插件：服务端 facet、契约、浏览器 facet
 - [数据](docs/data.md) — 表结构与文件位置
 - [决策记录](docs/adr/) — 为什么是现在这个样子
 
@@ -68,19 +69,20 @@ By default Moonan listens on `0.0.0.0` so the UI is reachable over your LAN or T
 
 ```bash
 pnpm install
-pnpm dev        # 服务端 21316 + Vite 21315
+pnpm dev        # 单端口 21315 + 三个 watcher（tsc / vite build --watch / esbuild）
 pnpm typecheck
 pnpm test       # 端到端跑一次真实对话（假模型）
-pnpm e2e        # Playwright，截图会写到 docs/screenshots
+pnpm build      # contracts → web-api → core → plugin-* → web → moonan
+pnpm e2e        # 先构建，再用 Playwright 跑整条路径
 ```
 
 需要 Node.js ≥ 22.19。
 
 ## 状态 · Status
 
-`0.0.1-alpha4`：内核大解耦——对话、MCP、日志、面板全部下沉为插件，插件只通过注册表与能力契约接触内核；回合改为「立即确认 + 后台 root」，支持插件热重载。
-**升级会丢弃 alpha3 的聊天与 MCP 配置**，详见[数据](docs/data.md#alpha3--alpha4-的破坏性变更)。
-OAuth 登录、停止按钮、多 Agent 界面、外部 `web.js` 面板位留到后续版本。
+`0.0.1-alpha5`：把 alpha4 的「插件」推到官方形态——五个内置插件拆成独立发布的包（`@moonan_ai/plugin-*`），面板改为浏览器侧 facet 在运行时注册（`@moonan_ai/web-api` 的 `Panels` 注册表），内核不再知道面板存在；插件之间可以通过导出的契约互相调用。运行时加载是 Moonan 自己的扩展（chord 没有浏览器 loader），因此标记为实验性，详见 [ADR-0013](docs/adr/0013-experimental-browser-facet-loader.md)。
+**破坏性变更**：`AppContract` 升到 v2（`panels` 删除）、插件契约迁出 `@moonan_ai/contracts`、开发环境不再有 Vite dev server / 21316 端口，详见 [CHANGELOG](CHANGELOG.md)。
+OAuth 登录、停止按钮、多 Agent 界面留到后续版本。
 
 ## 许可 · License
 

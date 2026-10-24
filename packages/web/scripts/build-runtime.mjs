@@ -69,6 +69,8 @@ const ENTRIES = [
 			'import ReactDOM from "react-dom";\nimport { createRoot, hydrateRoot } from "react-dom/client";\nexport default ReactDOM;\nexport const { createPortal, flushSync, version } = ReactDOM;\nexport { createRoot, hydrateRoot };',
 	},
 	{ name: "typebox", external: [], contents: 'export * from "typebox";' },
+	// Chord imports the deep entry (`typebox/value`) directly, so it needs its own map entry.
+	{ name: "typebox-value", external: [], contents: 'export * from "typebox/value";' },
 	{
 		name: "chord",
 		external: ["typebox"],

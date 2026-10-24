@@ -57,25 +57,41 @@ _Avoid_: 渠道, 供应商, API 源
 _Avoid_: 插件（插件是 Moonan 的扩展单元）
 
 **内核（Kernel）**
-与插件相对的那一半：存储、模型网关、Agent 运行时、能力契约与 chord 宿主。它提供注册表与能力，但不认识任何具体面板。
+与插件相对的那一半：存储、模型网关、Agent 运行时、能力契约与 chord 宿主。它提供注册表与能力，但不认识任何具体的面板、对话或 MCP。
 _Avoid_: 核心, core, 服务端
 
 **插件（Plugin）**
-给 Moonan 增加 facet、注册表贡献与面板的扩展单元。五个内置面板本身就是插件；内置与磁盘插件走同一条加载路径。
+给 Moonan 增加 facet、注册表贡献与面板的扩展单元。它是**一个包**，最多三个入口：`.`（服务端 facet）、`./contract`（导出的契约）、`./web`（浏览器 facet）。五个内置面板本身就是五个这样的包；内置与磁盘插件走同一条加载路径。
 _Avoid_: 模块, 扩展点
 
+**插件包（Plugin package）**
+一个可独立发布的 npm 包，形如 `@moonan_ai/plugin-<id>`。`@moonan_ai/moonan` 依赖内置插件包，第三方插件可以照同样形状发布，也可以只是一个 `plugin.json` 目录。
+_Avoid_: 扩展包, addon
+
 **注册表（Registry）**
-插件向内核**贡献**东西的唯一声明式通道：Agent 定义、工具、工具组、面板。整表替换，随代码版本切换。
+插件**贡献**东西的唯一声明式通道：Agent 定义、工具、工具组在服务端，面板在浏览器。整表替换，随代码版本切换。
 _Avoid_: 钩子, 回调, 事件总线
 
 **能力契约（Capability contract）**
 内核向插件**提供**能力的进程内契约：路径、投递消息、读转录、模型与密钥、应用设置。与注册表方向相反。
 _Avoid_: 服务, API, 桥
 
+**跨插件契约（Cross-plugin contract）**
+一个插件通过 `./contract` 导出的 `local()` 契约，别的插件用 `self.get` 使用它，并在 facet 上声明 `uses`。契约的身份是指纹（名字 + 版本 + schema + 成员），不是模块实例，所以两边可以各写一份逐字相同的定义。
+_Avoid_: 插件 API, 内部接口, 服务发现
+
 **插件数据库（Plugin database）**
 插件自己的 SQLite 文件，位于 `plugins-data/<id>.db`，由插件用 `self.resource` 打开与迁移。对话气泡、MCP 配置都在这里。
 _Avoid_: 私有表, 共享库
 
 **面板（Panel）**
-浏览器里的一个顶层页面：对话、日志、Agent、提供商、MCP。由 `panels` 注册表声明，前端按 `id` 找组件。
+浏览器里的一个顶层页面：对话、日志、Agent、提供商、MCP。由插件的**浏览器 facet** 注册进浏览器宿主自己的 `Panels` 注册表，值是 `{ id, order, title, component }`。内核不知道面板存在。
 _Avoid_: 页面, 标签页
+
+**浏览器 facet（Web facet）**
+插件在浏览器里的那一半：一个 ESM 模块（`web.tsx` → `web.js`），默认导出 `defineFacet(...)`，实现里 `self.register(Panels, …)`。shell 在运行时 `import()` 它，它 import 的 React / Chord / TypeBox 由 import map 指到共享运行时。
+_Avoid_: 前端插件, UI 模块, 组件包
+
+**共享运行时（Shared runtime）**
+`/runtime/*.js`：由 `scripts/build-runtime.mjs` 打出的 React、Chord、TypeBox、contracts、web-api 各一份 ESM，供 shell 与所有运行时加载的插件共用。多一份 React 会让 hooks 报错，多一份 Chord 会让令牌对不上。
+_Avoid_: vendor, 依赖包

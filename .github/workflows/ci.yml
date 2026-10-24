@@ -78,7 +78,7 @@ jobs:
           test -f packages/moonan/dist/web/index.html
           # The shell and its import map must ship together: a plugin loaded at runtime
           # imports /runtime/*.js, so a build without them is broken at first click.
-          for runtime in react jsx-runtime react-dom chord chord-output typebox contracts web-api; do
+          for runtime in react jsx-runtime react-dom chord chord-output typebox typebox-value contracts web-api; do
             test -f "packages/web/dist/runtime/$runtime.js"
           done
           grep -q 'type="importmap"' packages/web/dist/index.html
