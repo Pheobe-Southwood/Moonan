@@ -115,7 +115,7 @@ reload 提交
   └── Manifest.revision 变化 → host.reload(同批 URL, { remove })
 ```
 
-第一条值得单独说：**建 link 必须在 socket `open` 之前**。服务端在 `Connection` 构造时就发 `hello`，客户端晚一步订阅就永远收不到；收不到 `hello` 的客户端不知道对端会 ack，于是自己从不发 ack，服务端的流控窗口再也不排空——表现为「状态不再到达」，而不是一条报错。`webSocketLink` 会在 open 前缓存出站帧，所以提前建 link 没有代价。
+第一条值得单独说：**建 link 要在 socket `open` 之前**。服务端在 `Connection` 构造时就发 `hello`，晚挂的监听能不能看到它取决于运行时的事件循环——是竞态，不是保证；收不到 `hello` 的客户端不知道对端会 ack，于是自己从不发 ack，服务端的流控窗口再也不排空，表现为「状态不再到达」，而不是一条报错。提前建 link 是安全顺序，也没有代价：`webSocketLink` 在 open 前缓存出站帧，而帧要到达也总得先有它落脚的 link。
 
 断线不重建宿主：`host.connect` 换掉 link，Chord 会把每个远程引用重新 hold，值在重新水合前保持可读（状态 `loading`）。浏览器切面与 `Panels` 注册表留在原地。
 

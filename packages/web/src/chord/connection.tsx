@@ -76,12 +76,13 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
 			socket = next;
 
 			// The link is created before the socket opens on purpose. The server sends `hello`
-			// from its connection's constructor, as soon as it accepts, and a client that has not
-			// subscribed yet never sees it — the DOM WebSocket drops messages nobody is listening
-			// for. A client without that hello never learns `acks: true`, so it never sends an
-			// acknowledgement and the server stops draining this link's flow-control window:
-			// state stops arriving, with no error to show for it. `webSocketLink` buffers our
-			// outgoing frames until open, so connecting early costs nothing.
+			// from its connection's constructor, as soon as it accepts, so whether a listener
+			// attached later still sees it is a race in the runtime's event loop, not a
+			// guarantee. A client without that hello never learns `acks: true`, so it never sends
+			// an acknowledgement and the server stops draining this link's flow-control window:
+			// state stops arriving, with no error to show for it. Creating the link first is the
+			// safe order and costs nothing: `webSocketLink` buffers outgoing frames until open,
+			// and no frame can arrive before the link it arrives on exists.
 			host.connect(webSocketLink(next), {
 				principal: { id: "browser" },
 				onProtocolMismatch: () => {
