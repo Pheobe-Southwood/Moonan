@@ -1,18 +1,20 @@
 import type { Facet, FacetLoader } from "@earendil-works/chord";
 
 /**
- * Chord ships only a Node loader, so the browser needs its own. It mirrors chord's
- * `nodeLoader` in the two details that matter:
+ * Chord ships only a Node loader, so the browser needs its own. It copies `nodeLoader`'s
+ * three contracts exactly:
  *
- * - a facet's **name is its URL without a query**. `host.reload([url])` finds facets by
- *   name, so a name that carried a cache-busting query could never be replaced;
- * - every import is cache-busted with a fresh query, so a reload really loads new code
- *   instead of reusing the module the page already has. (chord's own parameter is
- *   `chord2-reload`; the technique is shared, the parameter name is not.)
+ * - a facet's **name is its URL without the query**, because `host.reload([url])` finds
+ *   facets by name and a name carrying a cache-busting query could never be replaced (this
+ *   loader also drops the hash, which `nodeLoader` keeps);
+ * - every import is cache-busted with a fresh query, under chord's own parameter name
+ *   (`chord2-reload`), so a reload loads new code instead of reusing the module the page has;
+ * - a module whose default export is not a facet is refused with the same message.
  *
- * A relative import inside a browser facet is not rewritten (browsers have no module
- * hooks), so a facet is expected to be a single file — the plugin format already says
- * `web.js` is the browser facet.
+ * The fourth thing `nodeLoader` does cannot be copied: it carries the reload query into the
+ * facet's *relative* imports through a `node:module` hook, and browsers have no module hooks.
+ * So a facet here is expected to be a single file — the plugin format already says `web.js`
+ * is the browser facet.
  */
 export function browserFacetLoader(): FacetLoader {
 	let sequence = 0;
@@ -25,7 +27,7 @@ export function browserFacetLoader(): FacetLoader {
 			const name = base.href;
 
 			const url = new URL(name);
-			url.searchParams.set("v", String((sequence += 1)));
+			url.searchParams.set("chord2-reload", String((sequence += 1)));
 			const loaded = (await import(/* @vite-ignore */ url.href)) as { default?: Facet };
 			const definition = loaded.default;
 			if (definition === undefined || typeof definition.setup !== "function") {

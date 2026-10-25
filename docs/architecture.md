@@ -91,7 +91,7 @@ POST /api/plugins/reload  { "id": "clock" }   ← id 省略则全部
 ```text
 reload 提交
   │
-  ├── publishManifest()：manifestChanges.set({ revision: host.codeVersion, plugins })
+  ├── publishManifest()：manifestChanges.replace(BACKGROUND_CONTEXT, { revision: host.codeVersion, plugins })
   │        └── 一个 Subscribable，只保存当前值并通知订阅者
   └── 每个 Manifest 实例在自己工厂里声明的 self.on("manifest", …)
            └── chord 在自己的 root 里把新值写进那个实例的 cell

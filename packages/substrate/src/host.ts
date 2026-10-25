@@ -1,10 +1,10 @@
-import { createHost, type Host, type Ref, type ReloadReport } from "@earendil-works/chord";
+import { createHost, replicatedState, type Host, type ReloadReport } from "@earendil-works/chord";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { nodeLoader } from "@earendil-works/chord/node";
 import { Manifest, PluginEntrySchema, type PluginEntry } from "@moonan_ai/sdk";
 import { Type } from "typebox";
 import { createLogger, type Logger } from "./logger.js";
 import { installSharedModuleHooks, resolvePluginRef, scanPluginDirectory } from "./plugins.js";
-import { createSignal } from "./signal.js";
 import { describe, errorMessage, type PluginRecord, type Principal } from "./types.js";
 
 export interface SubstrateOptions {
@@ -126,7 +126,10 @@ export async function createSubstrate(options: SubstrateOptions): Promise<Substr
 	await loadPlugins();
 
 	/**
-	 * The one thing the substrate announces, and the only state the base carries.
+	 * The one thing the substrate announces, and the only state the base carries: chord's own
+	 * standalone observable value, not a hand-rolled one. `replicatedState` is the shipped
+	 * primitive for exactly this — a JSON value plus ordered notifications, independent of any
+	 * object — so the base owns no fan-out code of its own.
 	 *
 	 * chord instantiates a remote type per principal, so the host has its own `Manifest`
 	 * object and every browser shares another one. Fanning a new snapshot out to them is
@@ -137,7 +140,7 @@ export async function createSubstrate(options: SubstrateOptions): Promise<Substr
 	 * Created per substrate, not per module: two substrates in one process (tests) must not
 	 * deliver each other's reloads.
 	 */
-	const manifestChanges = createSignal<ManifestSnapshot>({
+	const manifestChanges = replicatedState<ManifestSnapshot>({
 		revision: host.codeVersion,
 		plugins: plugins.map(describe),
 	});
@@ -147,8 +150,8 @@ export async function createSubstrate(options: SubstrateOptions): Promise<Substr
 		setup(api) {
 			api.serve(Manifest, (_input, _principal, self) => {
 				// Seed from the snapshot, and expect the same value again when the listener
-				// starts: a signal replays its current value, so nothing announced between this
-				// factory and that moment is lost.
+				// starts: a replicated state hydrates a new subscriber with its current value, so
+				// nothing announced between this factory and that moment is lost.
 				const initial = manifestChanges.value;
 				const version = self.state("version", Type.String(), options.version);
 				const entries = self.state("plugins", Type.Array(PluginEntrySchema), initial.plugins);
@@ -163,12 +166,11 @@ export async function createSubstrate(options: SubstrateOptions): Promise<Substr
 	});
 
 	// Activate the substrate's own contract once at startup, so a mistake in it fails here
-	// with a logged error instead of in every browser. This is not what keeps the manifest
-	// alive: the object a browser needs belongs to the browser principal and is created when
-	// that browser first holds it.
-	let manifest: Ref<typeof Manifest> | undefined;
+	// with a logged error instead of in every browser. The reference is dropped at once: this
+	// is a self-check, not a lifetime pin, and `host.close()` would dispose it anyway.
 	try {
-		manifest = await host.get(Manifest, {});
+		const check = await host.get(Manifest, {});
+		check.release();
 	} catch (error) {
 		logger.error("the manifest object could not be activated", error);
 	}
@@ -181,7 +183,7 @@ export async function createSubstrate(options: SubstrateOptions): Promise<Substr
 	 * instances have written their cells — nothing may read a cell to answer a request.
 	 */
 	const publishManifest = (): void => {
-		manifestChanges.set({ revision: host.codeVersion, plugins: plugins.map(describe) });
+		manifestChanges.replace(BACKGROUND_CONTEXT, { revision: host.codeVersion, plugins: plugins.map(describe) });
 	};
 
 	const reload = async (id?: string): Promise<{ reloaded: string[]; report?: ReloadReport }> => {
@@ -217,12 +219,8 @@ export async function createSubstrate(options: SubstrateOptions): Promise<Substr
 	};
 
 	const close = async (): Promise<void> => {
-		try {
-			manifest?.release();
-		} catch {
-			// already released
-		}
-		manifest = undefined;
+		// `host.close()` disposes everything it holds, in waves, however many references are
+		// still out — there is nothing here to release first.
 		await host.close().catch((error: unknown) => logger.error("host close failed", error));
 	};
 
