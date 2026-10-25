@@ -5,17 +5,17 @@
 ## 进程里有什么
 
 ```text
-node packages/substrate/bin/moonan.js
+node packages/platform/bin/moonan.js
   │
   ├── Chord 宿主 "moonan"            ← 服务端宿主，名字必须和契约里的 hostNamed("moonan") 一致
   │     ├── 插件 A 的服务端切面
   │     ├── 插件 B 的服务端切面
-  │     └── moonan:manifest 切面      ← 基座唯一自己装的切面
+  │     └── moonan:manifest 切面      ← 平台唯一自己装的切面
   │
   └── HTTP + WebSocket 服务（一个端口）
 ```
 
-**只有一个进程，一个端口。** 没有独立的 UI 服务、没有反向代理、没有数据库进程。插件需要持久化就自己开自己的 SQLite 文件——基座不知道它开在哪。
+**只有一个进程，一个端口。** 没有独立的 UI 服务、没有反向代理、没有数据库进程。插件需要持久化就自己开自己的 SQLite 文件——平台不知道它开在哪。
 
 ## 一次装载
 
@@ -23,21 +23,23 @@ node packages/substrate/bin/moonan.js
 
 ```text
 1. 收集插件引用
-     --plugin <包名|目录>  ＋  plugins-dir 下的每个子目录
-2. 逐个解析成模块 URL
-     目录 → plugin.json 的 server 字段（或 server.mjs / server.js）
-     包   → import.meta.resolve(包名)，由包自己的 exports 决定
+     --plugin <包名|目录>  ＋  plugins-dir 下的每个含切面入口的子目录
+2. 逐个解析成切面模块 URL
+     目录 → server.mjs / server.js 与 web.js / web.mjs（各自可选）
+     包   → exports["."] 与 exports["./web"]（各自可选）
      失败 → 记在记录的 error 上，不抛出
 3. 建宿主
-4. 一次 host.load(全部 URL)：先装完所有切面，再统一激活宿主对象
-     成功 → 全部 loaded = true
-     失败 → 逐个 host.reload 只为定位是哪一个，记 error，序列继续
-5. 装 manifest 切面，把最终的插件列表写进它的 state
-6. host.get(Manifest, {}) 激活一次后立即 release
+4. 一次 host.load(全部服务端切面 URL)：先装完所有切面，再统一激活宿主对象
+     成功 → 服务端切面 serverInstalled = true
+     失败 → 关闭宿主，启动失败（不继续跑半装状态）
+5. 装 manifest 切面，把最终的切面列表写进它的 state
+6. host.get(Manifest, {}) 激活一次后立即 release；失败则启动失败
 7. 开端口
 ```
 
-第 5 步在第 4 步之后，不是疏忽：清单的内容就是第 4 步的结果。第 4 步的隔离用 `reload` 而不是 `load`：对批量没装到的切面，`reload` 等同安装；对已经装上的切面，它重跑工厂——两种失败形状都能定位到具体插件，不必去读 chord 的 "already installed" 文本。第 6 步只是自检：浏览器那个实例属于浏览器 principal，在它首次 `hold` 时才创建，基座不需要替它持有。
+第 5 步在第 4 步之后，不是疏忽：清单的内容就是第 4 步的结果。
+
+第 4 步失败时**不**逐个 `host.reload` 去归因。Chord 的 `install` 不是回滚事务：一个 `setup` 在 `api.serve` 之后抛错，服务已经留在宿主里；继续运行会让平台看起来“其他插件正常”，实际上一个失败的插件仍在提供类型。Chord 的规矩是放弃启动时关闭宿主，平台照做。
 
 ## 一次请求
 
@@ -46,8 +48,8 @@ node packages/substrate/bin/moonan.js
   │
   ├── /ws                     → WebSocket 升级 → chord 协议（对象调用走这里）
   ├── /api/plugins            → 内建：清单的 HTTP 视图
-  ├── /api/plugins/reload     → 内建：POST 触发重载
-  ├── /plugins/<id>/<file>    → 插件的浏览器切面与其资源（越界即 403）
+  ├── /api/plugins/reload     → 内建：POST 触发全量重载
+  ├── /facets/<hash>/<file>   → 浏览器切面与其同目录资源（越界即 403）
   ├── 其它                     → Routes 注册表："GET /path" 优先，其次 "/path"
   └── 仍未命中                → 外壳静态文件；不是文件就回 index.html（前端路由）
 ```
@@ -69,29 +71,32 @@ await host.root(async (ctx) => {
 ## 一次重载
 
 ```text
-POST /api/plugins/reload  { "id": "clock" }   ← id 省略则全部
+POST /api/plugins/reload        ← 无 body；没有“按插件 ID”这回事
   │
-  ├── 每个插件           → host.reload([url])  （装没装上都用它：没装＝安装，装了＝重跑工厂）
+  ├── 全部服务端切面     → host.reload([...serverFacetUrls])
   ├── chord 内部         → prepare → gate → commit → retire
-  ├── 提交成功           → chord 的 code version +1，基座直接读 host.codeVersion
+  ├── 提交成功           → chord 的 code version +1，平台直接读 host.codeVersion
+  ├── 等待新宿主对象     → host.ready()；激活失败在这里 reject
   ├── 广播一份快照       → 每个活着的 Manifest 实例在自己的 root 里写自己的 cell
-  └── 响应 { ok, reloadBrowser: true, revision, reloaded }
+  └── 响应 { ok, reloadBrowser, revision, report? }
 ```
 
-`revision` 就是 **chord 的 code version**（`host.codeVersion`）：启动时是 1，每次提交 +1。基座不再自己数一个整数——那份信息 chord 本来就有，而且 `ReloadReport.codeVersion` 已经在响应里。一次「恢复加载」（启动时失败的插件被 `host.reload` 装上）也是一次提交：code version +1，浏览器照样换切面。真正不提交的只有「重试仍然失败」——那时只有 `error` 变了，快照带着同一个 revision 再发一次。
+`revision` 就是 **chord 的 code version**（`host.codeVersion`）：启动时是 1，每次提交 +1。平台不自己数一个整数——那份信息 chord 本来就有，而且 `ReloadReport.codeVersion` 已经在响应里。
 
-`reloadBrowser: true` 说的是「浏览器切面过期了」，不是「整页刷新」。浏览器不参与 chord 的 **cluster** 重载协调，但 `kind: "client"` 的宿主可以本地 reload 自己的切面（代码版本不跨连接传播）——chord 对过期契约的补救也正是「reload its web facets」。整页刷新只留给协议版本失配。
+`reloadBrowser` 说的是「浏览器切面过期了」，不是「整页刷新」：它只在这次请求真的推进了 code version 时为 true。浏览器不参与 chord 的 **cluster** 重载协调，但 `kind: "client"` 的宿主可以本地 reload 自己的切面（代码版本不跨连接传播）——chord 对过期契约的补救也正是「reload its web facets」。整页刷新只留给协议版本失配。
 
-旧代码的根还在跑时，旧实现继续为它服务；根结束后，那一版才退休。这是 Chord 自带的事务语义，基座没有额外做什么。
+`host.reload` 在 prepare 阶段是事务性的：如果 provider 与 consumer 的契约对不上，且 consumer 不在这一批里，reload 会被拒绝，旧代码保留。平台总是把全部服务端切面放进同一批，所以 breaking contract 的 provider 和 consumer 不会分开。
+
+旧代码的根还在跑时，旧实现继续为它服务；根结束后，那一版才退休。这是 Chord 自带的事务语义，平台没有额外做什么。
 
 ## 一次广播
 
-`Manifest` 是远程对象，chord 按 principal 建实例：**宿主自己的一个，以及所有浏览器共用的一个**（`acceptWebSockets` 给每个连接同一个 principal）。基座不遍历这些实例：
+`Manifest` 是远程对象，chord 按 principal 建实例：**宿主自己的一个，以及所有浏览器共用的一个**（`acceptWebSockets` 给每个连接同一个 principal）。平台不遍历这些实例：
 
 ```text
 reload 提交
   │
-  ├── publishManifest()：manifestChanges.replace(BACKGROUND_CONTEXT, { revision: host.codeVersion, plugins })
+  ├── publishManifest()：manifestChanges.replace(BACKGROUND_CONTEXT, { revision: host.codeVersion, facets })
   │        └── chord 的 replicatedState：一个独立可观察值，只保存当前值、订阅即拿到当前值
   └── 每个 Manifest 实例在自己工厂里声明的 self.on("manifest", …)
            └── chord 在自己的 root 里把新值写进那个实例的 cell
@@ -112,7 +117,7 @@ reload 提交
   ├── 一次 host.load([...web 切面 URL])：整批装完再激活
   │     └── 插件切面把自己注册进 Panels 注册表
   ├── 外壳订阅 Panels，按 order 排序渲染标签页
-  └── Manifest.revision 变化 → host.reload(同批 URL, { remove })
+  └── Manifest.revision 变化 → host.reload(同批 URL, { remove }) → host.ready()
 ```
 
 第一条值得单独说：**建 link 要在 socket `open` 之前**。服务端在 `Connection` 构造时就发 `hello`，晚挂的监听能不能看到它取决于运行时的事件循环——是竞态，不是保证；收不到 `hello` 的客户端不知道对端会 ack，于是自己从不发 ack，服务端的流控窗口再也不排空，表现为「状态不再到达」，而不是一条报错。提前建 link 是安全顺序，也没有代价：`webSocketLink` 在 open 前缓存出站帧，而帧要到达也总得先有它落脚的 link。
@@ -125,6 +130,6 @@ reload 提交
 
 ## 零数据落在哪里
 
-基座没有任何一行写磁盘的代码。没有 `moonan.db`，没有配置文件，没有 `.moonan/state.json`。`--plugins-dir` 是**只读**的扫描目录。
+平台没有任何一行写磁盘的代码。没有 `moonan.db`，没有配置文件，没有 `.moonan/state.json`。`--plugins-dir` 是**只读**的扫描目录。
 
-结果：卸载一个插件 = 删掉它的包和它自己的数据文件，基座侧没有残留需要清理。升级基座不会碰你的数据。把仓库整个删掉，除了插件自己的数据，什么都不会丢。
+结果：卸载一个插件 = 删掉它的包和它自己的数据文件，平台侧没有残留需要清理。升级平台不会碰你的数据。把仓库整个删掉，除了插件自己的数据，什么都不会丢。

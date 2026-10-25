@@ -1,7 +1,7 @@
 import { createLogger } from "./logger.js";
-import { defaultPluginsDir, start, VERSION } from "./index.js";
+import { defaultPluginsDir, start, VERSION, type Moonan } from "./index.js";
 
-const HELP = `moonan — a zero-data plugin substrate
+const HELP = `moonan — a local plugin platform
 
 Usage
   moonan [options]
@@ -10,13 +10,13 @@ Options
   -p, --port <port>        Port to listen on                  (default 21315)
   -H, --hostname <host>    Address to bind                    (default 127.0.0.1)
       --plugins-dir <dir>  Scan for plugin directories        (default ~/.moonan/plugins)
-  -P, --plugin <ref>       Load a plugin: package name or directory (repeatable)
+  -P, --plugin <ref>       Resolve a plugin: package name or directory (repeatable)
       --web-dist <dir>     Serve a built shell from <dir>     (default: the bundled one)
   -h, --help               Show this help
   -v, --version            Print the version
 
-The substrate stores nothing: no database, no config file. A plugin that needs to keep
-data owns its own storage; this process only hosts and serves.
+The platform stores nothing: no database, no config file. A plugin that needs to keep
+data owns its own storage; this process only resolves facets, hosts and serves.
 `;
 
 interface Args {
@@ -98,23 +98,32 @@ async function main(): Promise<void> {
 	}
 
 	const logger = createLogger();
-	const moonan = await start({
-		...(args.port !== undefined ? { port: args.port } : {}),
-		...(args.hostname !== undefined ? { hostname: args.hostname } : {}),
-		...(args.pluginsDir !== undefined ? { pluginsDir: args.pluginsDir } : {}),
-		...(args.webDist !== undefined ? { webDist: args.webDist } : {}),
-		plugins: args.plugins,
-		logger,
-	});
+	let moonan: Moonan;
+	try {
+		moonan = await start({
+			...(args.port !== undefined ? { port: args.port } : {}),
+			...(args.hostname !== undefined ? { hostname: args.hostname } : {}),
+			...(args.pluginsDir !== undefined ? { pluginsDir: args.pluginsDir } : {}),
+			...(args.webDist !== undefined ? { webDist: args.webDist } : {}),
+			plugins: args.plugins,
+			logger,
+		});
+	} catch (error) {
+		// A failed facet batch is fatal by design: chord's install is not a rollback
+		// transaction, so continuing would run a half-installed host.
+		logger.error("startup failed", error);
+		process.exitCode = 1;
+		return;
+	}
 
 	logger.info(`Moonan ${VERSION} listening on ${moonan.url}`);
 	logger.info(`plugins directory: ${args.pluginsDir ?? defaultPluginsDir()} (read-only)`);
 	if (moonan.plugins.length === 0) {
-		logger.warn("no plugins loaded: pass --plugin <package|dir>, or drop directories into the plugins directory");
+		logger.warn("no plugins resolved: pass --plugin <package|dir>, or drop directories into the plugins directory");
 	}
 	for (const plugin of moonan.plugins) {
-		if (plugin.error) logger.warn(`plugin "${plugin.id}" failed: ${plugin.error}`);
-		else logger.info(`plugin "${plugin.id}" ${plugin.version} (${plugin.source}${plugin.web ? ", web" : ""})`);
+		if (plugin.error) logger.warn(`plugin "${plugin.name}" failed: ${plugin.error}`);
+		else logger.info(`plugin "${plugin.name}" ${plugin.version} (${plugin.source}${plugin.web ? ", web" : ""})`);
 	}
 	const hostname = args.hostname ?? "127.0.0.1";
 	if (!/^(127\.|::1$|localhost$)/.test(hostname)) {

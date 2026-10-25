@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
 /**
- * Ships the built shell inside the substrate package, so `npx @moonan_ai/moonan` serves
+ * Ships the built shell inside the platform package, so `npx @moonan_ai/moonan` serves
  * a UI without anyone building one. The source of truth stays `packages/web/dist`; this
  * is a copy, not a second build.
  */

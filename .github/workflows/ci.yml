@@ -36,10 +36,10 @@ jobs:
           check() { test -f "$1" || { echo "missing: $1"; missing=1; }; }
           check packages/sdk/dist/index.js
           check packages/sdk/dist/web.js
-          check packages/substrate/dist/index.js
-          check packages/substrate/dist/cli.js
-          # The shell ships inside the substrate package: `npx @moonan_ai/moonan` must serve a UI.
-          check packages/substrate/dist/web/index.html
+          check packages/platform/dist/index.js
+          check packages/platform/dist/cli.js
+          # The shell ships inside the platform package: `npx @moonan_ai/moonan` must serve a UI.
+          check packages/platform/dist/web/index.html
           # A plugin imported at runtime resolves these through the import map, so all of
           # them have to exist by these exact names.
           for runtime in react jsx-runtime react-dom chord chord-output typebox typebox-value sdk sdk-web; do

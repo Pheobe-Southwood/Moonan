@@ -23,21 +23,21 @@ function manifest(area: string): { name?: string; dependencies?: Record<string, 
 /**
  * The architecture, asserted rather than assumed.
  *
- * The base's whole claim is that it stores nothing and knows no feature. That is easy to
+ * The platform's whole claim is that it stores nothing and knows no feature. That is easy to
  * break with one import and hard to notice: `pnpm build` would still succeed. These are
  * the lines that must not be crossed.
  */
 describe("layering", () => {
-	it("has no database or persistence code anywhere in the base", () => {
-		for (const area of ["packages/substrate/src", "packages/sdk/src", "packages/web/src"]) {
+	it("has no database or persistence code anywhere in the platform", () => {
+		for (const area of ["packages/platform/src", "packages/sdk/src", "packages/web/src"]) {
 			for (const { file, text } of sources(area)) {
 				expect(text, file).not.toMatch(/node:sqlite|better-sqlite3|CREATE TABLE|\.db["'`]/);
 			}
 		}
 	});
 
-	it("keeps AI packages out of the base and the SDK", () => {
-		for (const area of ["packages/substrate", "packages/sdk", "packages/web", "."]) {
+	it("keeps AI packages out of the platform and the SDK", () => {
+		for (const area of ["packages/platform", "packages/sdk", "packages/web", "."]) {
 			const deps = { ...manifest(area).dependencies, ...manifest(area).devDependencies, ...manifest(area).peerDependencies };
 			for (const name of Object.keys(deps)) {
 				expect(name, `${area}/package.json`).not.toMatch(/pi-(ai|agent-core|mcp|durable)|openai|anthropic/);
@@ -45,8 +45,8 @@ describe("layering", () => {
 		}
 	});
 
-	it("keeps the substrate out of React and out of any plugin", () => {
-		for (const { file, text } of sources("packages/substrate/src")) {
+	it("keeps the platform out of React and out of any plugin", () => {
+		for (const { file, text } of sources("packages/platform/src")) {
 			expect(text, file).not.toMatch(/from "react/);
 			expect(text, file).not.toMatch(/@moonan_ai\/(?!sdk)/);
 		}
@@ -75,5 +75,12 @@ describe("layering", () => {
 		const readme = readFileSync(join(root, "README.md"), "utf8");
 		expect(readme).toMatch(/@moonan_ai\/sdk/);
 		expect(readme).toMatch(/@moonan_ai\/moonan/);
+	});
+
+	it("uses the platform vocabulary in the current guides", () => {
+		for (const file of ["README.md", "docs/architecture.md", "docs/plugins.md"]) {
+			const text = readFileSync(join(root, file), "utf8");
+			expect(text, file).not.toMatch(/基座|Substrate|substrate/);
+		}
 	});
 });

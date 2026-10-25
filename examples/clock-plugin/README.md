@@ -1,11 +1,11 @@
 # Clock plugin
 
-一个最小的、没有任何 AI 概念的 Moonan 插件。它存在的意义是证明基座是真的空的：一个时钟和一个 HTTP 端点，走的路径与将来任何插件完全相同。
+一个最小的、没有任何 AI 概念的 Moonan 插件。它存在的意义是证明平台是真的空的：一个时钟和一个 HTTP 端点，走的路径与将来任何插件完全相同。
 
-A minimal Moonan plugin with no AI in it. It exists to show the base is genuinely empty: a clock and one HTTP endpoint, loaded exactly the way any other plugin will be.
+A minimal Moonan plugin with no AI in it. It exists to show the platform is genuinely empty: a clock and one HTTP endpoint, loaded exactly the way any other plugin will be.
 
 ```bash
-node packages/substrate/bin/moonan.js --plugin ./examples/clock-plugin
+node packages/platform/bin/moonan.js --plugin ./examples/clock-plugin
 # http://127.0.0.1:21315
 ```
 
@@ -13,7 +13,7 @@ node packages/substrate/bin/moonan.js --plugin ./examples/clock-plugin
 
 | 文件 | 内容 |
 |---|---|
-| `plugin.json` | id `clock`，服务端入口 `server.mjs`，浏览器入口 `web.js` |
+| `package.json` | 依赖声明；目录名 `clock-plugin` 是显示名 |
 | `server.mjs` | 一个 `moonan.clock` 远程对象（state `at`，方法 `tick`），外加一条 `GET /api/clock` 路由 |
 | `web.js` | 同一个契约写第二遍，注册一个 `Panels` 面板 |
 
@@ -21,7 +21,7 @@ node packages/substrate/bin/moonan.js --plugin ./examples/clock-plugin
 
 1. **没有构建步骤。** 两个切面都是纯 ESM，浏览器那份靠外壳的 import map 解析 `react` 和 `@moonan_ai/sdk/web`。
 2. **契约写了两遍。** Chord 认指纹不认模块实例，所以两份独立的 `remote("moonan.clock", …)` 能对上。
-3. **服务端只发时间戳。** `at` 是毫秒数，面板在浏览器本地时区格式化——服务端格式化会让用户看到服务器的时区。
+3. **没有 `plugin.json`，也没有插件 ID。** 平台按目录里的 `server.mjs` / `web.js` 找到切面；切面的模块 URL 才是运行时的身份。
 
 ## 试一下
 
@@ -31,6 +31,5 @@ node packages/substrate/bin/moonan.js --plugin ./examples/clock-plugin
 - 服务端热重载不会刷新页面：浏览器不参与 chord 的 cluster 重载协调，但它会在自己的宿主里本地 reload 切面——`Manifest.revision` 一变就换：
 
 ```bash
-curl -X POST http://127.0.0.1:21315/api/plugins/reload \
-  -H 'content-type: application/json' -d '{"id":"clock"}'
+curl -X POST http://127.0.0.1:21315/api/plugins/reload
 ```

@@ -1,46 +1,51 @@
 # 写一个插件
 
-一个插件是一个目录或一个 npm 包，最多三个文件：
+一个插件是一个目录或一个 npm 包，提供最多两个切面：
 
 ```text
 my-plugin/
-├── plugin.json     # 只对目录插件必要
-├── server.mjs      # 服务端切面
-└── web.js          # 浏览器切面
+├── package.json   # 可选：name / version / type / 依赖
+├── server.mjs     # 服务端切面
+└── web.js         # 浏览器切面
 ```
 
-两个切面都是 `defineFacet` 的返回值，都由基座用 `host.load([url])` 装进去。**只有一个的插件也是完整插件**——纯后端插件没有 `web.js`，纯前端插件没有 `server.mjs`。
+两个切面都是 `defineFacet` 的返回值，都由平台交给 Chord 的 `nodeLoader`/浏览器 loader。**只有一个切面的插件也是完整插件**——纯后端插件没有 `web.js`，纯前端插件没有 `server.mjs`。
+
+没有 `plugin.json`，也没有插件 ID。目录名或包名只是**显示名**；切面的模块 URL 才是运行时的身份，也是平台装载与重载的单位。
 
 ## 两种来源
 
 | 来源 | 怎么被找到 | 入口怎么定 |
 |---|---|---|
-| 目录 | `--plugin ./my-plugin`，或放进 `--plugins-dir` 的任一子目录 | `plugin.json` 的 `server` / `web`，缺省 `server.mjs` 和 `web.js` |
-| 包 | `--plugin my-plugin` | 包自己的 `exports`：`"."` 是服务端切面，`"./web"` 是浏览器切面 |
+| 目录 | `--plugin ./my-plugin`，或放进 `--plugins-dir` 的任一子目录 | `server.mjs` / `server.js` 与 `web.js` / `web.mjs`，各自可选 |
+| 包 | `--plugin my-plugin` | 包自己的 `exports`：`"."` 是服务端切面，`"./web"` 是浏览器切面，各自可选 |
 
-基座对两者做同一件事：拿到模块 URL，交给 Chord 的 `nodeLoader`。区别只在 URL 从哪来。
+平台对两者做同一件事：拿到切面模块 URL，交给 Chord。区别只在 URL 从哪来。一个包可以只导出 `"./web"`，一个目录可以只有 `web.js`——平台照样启动，只是没有服务端切面。纯前端插件不参与服务端 reload 的 code version；改了 `web.js` 后刷新页面或重启进程。
 
 ### 依赖从哪来
 
-服务端切面由 Node 按它**自己的位置**解析依赖，基座不接管这一步。这也是 Chord 的规矩：`nodeLoader` 只换掉切面目录里的模块副本，裸说明符（`@earendil-works/chord`、`typebox`、`@moonan_ai/sdk`）仍交给 Node。
+服务端切面由 Node 按它**自己的位置**解析依赖，平台不接管这一步。这也是 Chord 的规矩：`nodeLoader` 只换掉切面目录里的模块副本，裸说明符（`@earendil-works/chord`、`typebox`、`@moonan_ai/sdk`）仍交给 Node。
 
-所以一个插件目录要么自带 `node_modules`（`npm i @earendil-works/chord @moonan_ai/sdk typebox`），要么放在一个能向上找到这些依赖的目录里。同版本经 Node 的 realpath 去重后仍是**同一个模块实例**，因此「一个进程一份 Chord」不需要基座做任何事；解析不到的插件不会拖垮基座：它带着 `error` 停下来，`/api/plugins` 能看到，启动日志 warn 一句，页面横幅也会显示。
+所以一个插件目录要么自带 `node_modules`（`npm i @earendil-works/chord @moonan_ai/sdk typebox`），要么放在一个能向上找到这些依赖的目录里。同版本经 Node 的 realpath 去重后仍是**同一个模块实例**，因此「一个进程一份 Chord」不需要平台做任何事；解析不到的插件带着 `error` 停下来，`/api/plugins` 能看到，启动日志 warn 一句。
 
 `examples/clock-plugin` 就是这么写的：`package.json` 声明 `@earendil-works/chord` 与 `@moonan_ai/sdk`，pnpm 把它们链到工作区里的同一份。
 
-`plugin.json`：
+### 目录插件的 `package.json`
+
+目录插件不要求有 `package.json`；有的话，平台只读 `version` 与 `type`：
 
 ```json
 {
-	"id": "clock",
-	"name": "时钟 · Clock",
-	"version": "0.0.2-alpha1",
-	"server": "server.mjs",
-	"web": "web.js"
+	"type": "module",
+	"dependencies": {
+		"@earendil-works/chord": "1.4.0",
+		"@moonan_ai/sdk": "workspace:*",
+		"typebox": "1.3.27"
+	}
 }
 ```
 
-一条规则值得记住：目录里的 `.js` 服务端入口，如果同目录没有 `{"type":"module"}` 的 `package.json`，Node 会当 CommonJS 加载，`export default` 直接失败。基座会给出明确错误并跳过这个插件。要么写 `.mjs`，要么加上 `"type": "module"`。
+一条规则值得记住：目录里的 `.js` 服务端入口，如果同目录没有 `{"type":"module"}` 的 `package.json`，Node 会当 CommonJS 加载，`export default` 直接失败。平台会给出明确错误并跳过这个服务端切面；同目录的 `web.js` 仍可作为浏览器切面出现在清单里。要么写 `.mjs`，要么加上 `"type": "module"`。
 
 ## 服务端切面
 
@@ -71,14 +76,14 @@ export default defineFacet((api) => {
 
 - **`hostNamed("moonan")`**：服务端只有一个宿主，名字就是这个。写别的名字，浏览器会得到一个「该类型不在这个宿主上」的错误。
 - **生命周期**：默认的对象只活到最后一个引用被释放。想让它常驻，用 `{ lifetime: "host" }`——但只有 `local` 契约、且 `input` 接受 `{}` 的对象可以这样。
-- **任务**：`self.task(async (ctx) => {…})` 里用 `ctx.signal` 退出。对象释放时任务跟着停——别在插件里起一个基座关不掉的后台循环。
+- **任务**：`self.task(async (ctx) => {…})` 里用 `ctx.signal` 退出。对象释放时任务跟着停——别在插件里起一个平台关不掉的后台循环。
 - **注册表贡献**必须来自 `lifetime: "host"` 对象。这也是为什么例子末尾有一个空的 `Root` 对象。
 
 ## 契约要在两边各写一份
 
 浏览器切面拿不到服务端的模块（它是另一个进程、另一套打包），所以契约写两遍。两份不需要共享模块——Chord 认的是**指纹**：名字、版本、成员结构，以及这个类型住在哪个宿主（`host: hostNamed(...)` 也在指纹里，移动类型是破坏性改动）。写了不一致的 schema，浏览器会得到 `contract_mismatch`。
 
-这是刻意的取舍：它换来的是插件可以零构建。有构建的插件当然可以把契约抽成第三个文件、两边 import 同一份；基座对两种写法一视同仁。
+这是刻意的取舍：它换来的是插件可以零构建。有构建的插件当然可以把契约抽成第三个文件、两边 import 同一份；平台对两种写法一视同仁。
 
 ## 声明你消费的契约
 
@@ -137,19 +142,34 @@ export default defineFacet((api) => {
 
 ## 持久化
 
-基座不提供数据库，也不给数据目录。插件自己决定存哪、存什么：
+平台不提供数据库，也不给数据目录。插件自己决定存哪、存什么：
 
 ```js
 import { DatabaseSync } from "node:sqlite";
 const db = new DatabaseSync("/path/to/your-own.db");
 ```
 
-这是零数据基座的直接后果：卸载插件 = 删掉它的包和它自己的文件，基座侧没有残留要清理。想跟着 Moonan 一起启动，就把数据文件放进插件自己的目录或环境变量指定的位置。
+这是零数据平台的直接后果：卸载插件 = 删掉它的包和它自己的文件，平台侧没有残留要清理。想跟着 Moonan 一起启动，就把数据文件放进插件自己的目录或环境变量指定的位置。
 
-## 检查插件有没有装上
+## 检查平台解析到了什么
 
 ```bash
 curl http://127.0.0.1:21315/api/plugins
 ```
 
-返回里每个插件带 `error`（如果有）、`web`（浏览器切面路径）。加载失败的插件不会消失——它就停在这个列表里，理由写在一起，页面上会显示一条横幅。
+返回里每项带 `name`、`version`、`source`、`web`（浏览器切面 URL）和 `error`（如果有）；`serverInstalled` 只留在平台内部记录里。解析失败的插件不会消失——它停在这个列表里，理由写在一起，页面上会显示一条横幅。
+
+## 热重载
+
+```bash
+curl -X POST http://127.0.0.1:21315/api/plugins/reload
+```
+
+没有 body，也没有插件 ID：平台把**全部服务端切面**放进同一个 `host.reload` 批次，再 `await host.ready()`。这样：
+
+- breaking contract 的 provider 与 consumer 永远在同一批里，不会被拆开；
+- 新宿主对象激活失败会变成一次失败请求，而不是「reload 成功但对象没起来」；
+- 旧代码在旧根跑完后退休，这是 Chord 自己的事务语义；
+- reload 只重载已解析的切面；新增/删除插件目录、或修复一次解析错误，仍需要重启进程。
+
+启动时如果某个服务端切面 `setup` 抛错，平台会关闭宿主并让启动失败。这是刻意的：Chord 的 `install` 不是回滚事务，继续运行会留下半个插件。修好文件后重启进程，而不是在同一个宿主里“恢复”。

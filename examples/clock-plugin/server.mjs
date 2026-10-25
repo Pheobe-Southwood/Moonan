@@ -11,7 +11,7 @@ import {
 /**
  * The clock's contract: one object, two state members, one method.
  *
- * `hostNamed("moonan")` is where the object lives — the substrate's host, since that is
+ * `hostNamed("moonan")` is where the object lives — the platform's host, since that is
  * the only server host there is. `web.js` declares the same contract again; the two
  * copies match by fingerprint (name + version + members), not by module identity.
  */

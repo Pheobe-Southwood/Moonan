@@ -3,18 +3,36 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHost, webSocketLink } from "@earendil-works/chord";
-import { Manifest, type PluginEntry } from "@moonan_ai/sdk";
+import { Manifest, type FacetSetEntry } from "@moonan_ai/sdk";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { createSubstrate } from "../src/host.js";
 import { start, type Moonan } from "../src/index.js";
 import { silentLogger } from "../src/logger.js";
+import { createPlatform } from "../src/platform.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const clockDir = join(root, "examples", "clock-plugin");
 
 let moonan: Moonan;
 let pluginsDir: string;
+
+interface PluginsResponse {
+	experimental: boolean;
+	revision: number;
+	plugins: FacetSetEntry[];
+}
+
+async function pluginsOf(app: Moonan): Promise<FacetSetEntry[]> {
+	const response = await fetch(`${app.url}/api/plugins`);
+	expect(response.status).toBe(200);
+	return ((await response.json()) as PluginsResponse).plugins;
+}
+
+async function clockOf(app: Moonan): Promise<FacetSetEntry> {
+	const clock = (await pluginsOf(app)).find((plugin) => plugin.name === "clock-plugin");
+	expect(clock).toBeDefined();
+	return clock!;
+}
 
 beforeAll(async () => {
 	pluginsDir = await mkdtemp(join(tmpdir(), "moonan-plugins-"));
@@ -32,16 +50,15 @@ afterAll(async () => {
 	await rm(pluginsDir, { recursive: true, force: true });
 });
 
-describe("the substrate", () => {
-	it("loads a directory plugin and publishes it in the manifest endpoint", async () => {
-		const response = await fetch(`${moonan.url}/api/plugins`);
-		expect(response.status).toBe(200);
-		const body = (await response.json()) as { experimental: boolean; plugins: PluginEntry[] };
+describe("the platform", () => {
+	it("loads a directory plugin and publishes its facets", async () => {
+		const body = (await (await fetch(`${moonan.url}/api/plugins`)).json()) as PluginsResponse;
 		expect(body.experimental).toBe(true);
-		const clock = body.plugins.find((plugin) => plugin.id === "clock");
+		const clock = body.plugins.find((plugin) => plugin.name === "clock-plugin");
 		expect(clock).toBeDefined();
+		expect("id" in clock!).toBe(false);
 		expect(clock?.error).toBeUndefined();
-		expect(clock?.web).toBe("/plugins/clock/web.js");
+		expect(clock?.web).toMatch(/^\/facets\/[0-9a-f]{12}\/web\.js$/);
 		expect(clock?.source).toBe("directory");
 	});
 
@@ -54,20 +71,23 @@ describe("the substrate", () => {
 	});
 
 	it("serves the browser facet as an importable module", async () => {
-		const response = await fetch(`${moonan.url}/plugins/clock/web.js`);
+		const clock = await clockOf(moonan);
+		const response = await fetch(`${moonan.url}${clock.web}`);
 		expect(response.status).toBe(200);
 		expect(response.headers.get("content-type")).toMatch(/javascript/);
 		expect(await response.text()).toMatch(/defineFacet/);
 	});
 
-	it("refuses to read outside a plugin's directory", async () => {
+	it("refuses to read outside a facet's directory", async () => {
+		const clock = await clockOf(moonan);
+		const base = clock.web!.replace(/web\.js$/, "");
 		// The segment is percent-encoded so `new URL` cannot normalise it away before we see it.
-		const response = await fetch(`${moonan.url}/plugins/clock/..%2f..%2fpackage.json`);
+		const response = await fetch(`${moonan.url}${base}..%2f..%2fpackage.json`);
 		expect(response.status).not.toBe(200);
 	});
 
-	it("does not fall through to a 200 for an unknown plugin", async () => {
-		const response = await fetch(`${moonan.url}/plugins/nope/web.js`);
+	it("does not fall through to a 200 for an unknown facet", async () => {
+		const response = await fetch(`${moonan.url}/facets/nope/web.js`);
 		expect(response.status).toBe(404);
 	});
 
@@ -85,8 +105,8 @@ describe("the substrate", () => {
 		});
 		try {
 			const manifest = await client.get(Manifest, {});
-			const entries = manifest.plugins.value as PluginEntry[];
-			expect(entries.map((entry) => entry.id)).toContain("clock");
+			const facets = manifest.facets.value as FacetSetEntry[];
+			expect(facets.map((facet) => facet.name)).toContain("clock-plugin");
 			expect(manifest.version.value).toEqual(expect.any(String));
 			// What this proves: the handshake produced a link that still answers a second call a
 			// moment later. It does not prove the ordering rule above — a client that missed the
@@ -95,7 +115,7 @@ describe("the substrate", () => {
 			await new Promise((resolve) => setTimeout(resolve, 150));
 			expect(socket.readyState).toBe(WebSocket.OPEN);
 			const again = await client.get(Manifest, {});
-			expect(again.plugins.value.length).toBe(entries.length);
+			expect((again.facets.value as FacetSetEntry[]).length).toBe(facets.length);
 			again.release();
 		} finally {
 			await client.close().catch(() => undefined);
@@ -103,42 +123,35 @@ describe("the substrate", () => {
 		}
 	});
 
-	it("reloads one plugin by id", async () => {
-		const response = await fetch(`${moonan.url}/api/plugins/reload`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ id: "clock" }),
-		});
+	it("reloads every server facet in one batch", async () => {
+		const before = ((await (await fetch(`${moonan.url}/api/plugins`)).json()) as PluginsResponse).revision;
+		const response = await fetch(`${moonan.url}/api/plugins/reload`, { method: "POST" });
 		expect(response.status).toBe(200);
-		const body = (await response.json()) as { ok: boolean; reloadBrowser: boolean; revision: number; reloaded: string[] };
+		const body = (await response.json()) as {
+			ok: boolean;
+			reloadBrowser: boolean;
+			revision: number;
+			report?: { codeVersion: number };
+		};
 		expect(body.ok).toBe(true);
 		expect(body.reloadBrowser).toBe(true);
-		expect(body.revision).toBeGreaterThan(0);
-		expect(body.reloaded).toContain("clock");
+		expect(body.revision).toBeGreaterThan(before);
+		expect(body.report?.codeVersion).toBe(body.revision);
 	});
 
-	it("rejects a reload for an unknown plugin", async () => {
-		const response = await fetch(`${moonan.url}/api/plugins/reload`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ id: "nope" }),
-		});
-		expect(response.status).toBe(400);
-	});
-
-	it("reports a broken plugin without taking the others down", async () => {
-		const substrate = await createSubstrate({
+	it("reports a resolution failure without taking the others down", async () => {
+		const platform = await createPlatform({
 			version: "test",
 			plugins: [join(pluginsDir, "does-not-exist"), clockDir],
 			logger: silentLogger,
 		});
 		try {
-			const broken = substrate.plugins.find((plugin) => plugin.ref.includes("does-not-exist"));
+			const broken = platform.plugins.find((plugin) => plugin.ref.includes("does-not-exist"));
 			expect(broken?.error).toMatch(/no such directory/);
-			const clock = substrate.plugins.find((plugin) => plugin.id === "clock");
-			expect(clock?.loaded).toBe(true);
+			const clock = platform.plugins.find((plugin) => plugin.name === "clock-plugin");
+			expect(clock?.serverInstalled).toBe(true);
 		} finally {
-			await substrate.close();
+			await platform.close();
 		}
 	});
 
@@ -148,14 +161,10 @@ describe("the substrate", () => {
 		// a time would fail here with `unavailable/unknown_type`, decided by argument order.
 		// The consumer also declares `uses: [Shared]`, the facet-level statement of the same
 		// dependency: on a reload chord checks that the new provider still covers it.
-		const dir = await mkdtemp(join(root, "packages", "substrate", ".batch-"));
+		const dir = await mkdtemp(join(root, "packages", "platform", ".batch-"));
 		const write = async (name: string, text: string) => {
 			await mkdir(join(dir, name), { recursive: true });
 			await writeFile(join(dir, name, "server.mjs"), text);
-			await writeFile(
-				join(dir, name, "plugin.json"),
-				JSON.stringify({ id: name, name, version: "0.0.0", server: "server.mjs" }),
-			);
 		};
 		await write(
 			"consumer",
@@ -180,28 +189,75 @@ export default defineFacet((api) => {
 `,
 		);
 
-		const substrate = await createSubstrate({
+		const platform = await createPlatform({
 			version: "test",
 			plugins: [join(dir, "consumer"), join(dir, "provider")],
 			logger: silentLogger,
 		});
 		try {
-			const consumer = substrate.plugins.find((plugin) => plugin.id === "consumer");
-			const provider = substrate.plugins.find((plugin) => plugin.id === "provider");
-			expect(provider?.loaded).toBe(true);
+			const consumer = platform.plugins.find((plugin) => plugin.name === "consumer");
+			const provider = platform.plugins.find((plugin) => plugin.name === "provider");
+			expect(provider?.serverInstalled).toBe(true);
 			expect(consumer?.error).toBeUndefined();
-			expect(consumer?.loaded).toBe(true);
+			expect(consumer?.serverInstalled).toBe(true);
 		} finally {
-			await substrate.close();
+			await platform.close();
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
 
-	it("lets a plugin resolve chord from its own tree, and reports that failure", async () => {
+	it("reloads a breaking provider and its consumer together", async () => {
+		const dir = await mkdtemp(join(root, "packages", "platform", ".contract-"));
+		const write = async (name: string, text: string) => {
+			await mkdir(join(dir, name), { recursive: true });
+			await writeFile(join(dir, name, "server.mjs"), text);
+		};
+		const version = 1;
+		const consumer = (v: number) => `import { Type, defineFacet, local, method } from "@moonan_ai/sdk";
+const Shared = local("test.shared", { version: ${v}, input: Type.Object({}), members: { ping: method() } });
+const Consumer = local("test.consumer", { version: 1, input: Type.Object({}), members: { ping: method() } });
+export default defineFacet((api) => {
+	api.serve(Consumer, (_input, _principal, self) => {
+		const shared = self.get(Shared, {});
+		return { ping: (ctx) => shared.ping(ctx) };
+	}, { lifetime: "host" });
+}, { uses: [Shared] });
+`;
+		const provider = (v: number) => `import { Type, defineFacet, local, method } from "@moonan_ai/sdk";
+const Shared = local("test.shared", { version: ${v}, input: Type.Object({}), members: { ping: method() } });
+export default defineFacet((api) => {
+	api.serve(Shared, () => ({ ping: () => "pong" }), { lifetime: "host" });
+});
+`;
+		await write("consumer", consumer(version));
+		await write("provider", provider(version));
+
+		const platform = await createPlatform({
+			version: "test",
+			plugins: [join(dir, "consumer"), join(dir, "provider")],
+			logger: silentLogger,
+		});
+		try {
+			const before = platform.revision;
+			await write("consumer", consumer(version + 1));
+			await write("provider", provider(version + 1));
+			const report = await platform.reload();
+			expect(report).toBeDefined();
+			expect(platform.revision).toBe(before + 1);
+			// Both files are in the batch: a breaking contract is not rejected just because the
+			// provider's module came first.
+			expect(report?.changed.length).toBeGreaterThan(0);
+		} finally {
+			await platform.close();
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("lets a plugin resolve chord from its own tree, and fails startup on the import", async () => {
 		// No process-wide shim: bare specifiers resolve from the plugin's own tree, like any Node
 		// module. The fixture ships its own copy of chord that throws, so a copy forced by the
-		// base would show up here; this asserts the substrate adds no copy of its own.
-		const dir = await mkdtemp(join(root, "packages", "substrate", ".own-deps-"));
+		// platform would show up here; this asserts the platform adds no copy of its own.
+		const dir = await mkdtemp(join(root, "packages", "platform", ".own-deps-"));
 		const own = join(dir, "node_modules", "@earendil-works", "chord");
 		await mkdir(own, { recursive: true });
 		await writeFile(
@@ -210,32 +266,20 @@ export default defineFacet((api) => {
 		);
 		await writeFile(join(own, "index.js"), 'throw new Error("the plugin imports its own chord");\n');
 		await writeFile(join(dir, "server.mjs"), 'import "@earendil-works/chord";\nexport default { setup() {} };\n');
-		await writeFile(join(dir, "plugin.json"), JSON.stringify({ id: "own", name: "own", version: "0.0.0", server: "server.mjs" }));
 
-		const substrate = await createSubstrate({ version: "test", plugins: [dir, clockDir], logger: silentLogger });
 		try {
-			const plugin = substrate.plugins.find((entry) => entry.id === "own");
-			expect(plugin?.error).toMatch(/the plugin imports its own chord/);
-			expect(plugin?.loaded).toBeFalsy();
-			expect(substrate.plugins.find((entry) => entry.id === "clock")?.loaded).toBe(true);
+			await expect(createPlatform({ version: "test", plugins: [dir, clockDir], logger: silentLogger })).rejects.toThrow(
+				/the plugin imports its own chord/,
+			);
 		} finally {
-			await substrate.close();
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
 
-	it("names the plugin whose setup failed, without reading chord's error text", async () => {
-		const dir = await mkdtemp(join(root, "packages", "substrate", ".broken-"));
-		const write = async (name: string, text: string) => {
-			await mkdir(join(dir, name), { recursive: true });
-			await writeFile(join(dir, name, "server.mjs"), text);
-			await writeFile(
-				join(dir, name, "plugin.json"),
-				JSON.stringify({ id: name, name, version: "0.0.0", server: "server.mjs" }),
-			);
-		};
-		await write(
-			"angry",
+	it("fails startup when a server facet throws during setup", async () => {
+		const dir = await mkdtemp(join(root, "packages", "platform", ".broken-"));
+		await writeFile(
+			join(dir, "server.mjs"),
 			`import { Type, defineFacet, local, method } from "@moonan_ai/sdk";
 const Angry = local("test.angry", { version: 1, input: Type.Object({}), members: { ping: method() } });
 export default defineFacet((api) => {
@@ -244,68 +288,45 @@ export default defineFacet((api) => {
 });
 `,
 		);
-		await write(
-			"calm",
-			`import { Type, defineFacet, local, method } from "@moonan_ai/sdk";
-const Calm = local("test.calm", { version: 1, input: Type.Object({}), members: { ping: method() } });
-export default defineFacet((api) => {
-	api.serve(Calm, () => ({ ping: () => "ok" }), { lifetime: "host" });
-});
-`,
-		);
 
-		const substrate = await createSubstrate({
-			version: "test",
-			plugins: [join(dir, "angry"), join(dir, "calm")],
-			logger: silentLogger,
-		});
 		try {
-			const angry = substrate.plugins.find((plugin) => plugin.id === "angry");
-			const calm = substrate.plugins.find((plugin) => plugin.id === "calm");
-			expect(angry?.error).toMatch(/setup said no/);
-			expect(angry?.loaded).toBeFalsy();
-			expect(calm?.error).toBeUndefined();
-			expect(calm?.loaded).toBe(true);
+			// chord's install is not a rollback transaction: continuing would leave Angry's
+			// service behind. The platform closes the host and refuses to start instead.
+			await expect(createPlatform({ version: "test", plugins: [dir], logger: silentLogger })).rejects.toThrow(
+				/setup said no/,
+			);
 		} finally {
-			await substrate.close();
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
 
-	it("recovers a plugin that failed at startup", async () => {
-		const dir = await mkdtemp(join(root, "packages", "substrate", ".recover-"));
-		const manifest = JSON.stringify({ id: "recover", name: "recover", version: "0.0.0", server: "server.mjs" });
-		await writeFile(join(dir, "server.mjs"), 'throw new Error("not yet");\n');
-		await writeFile(join(dir, "plugin.json"), manifest);
-
-		const substrate = await createSubstrate({ version: "test", plugins: [dir], logger: silentLogger });
+	it("starts with a web-only plugin and serves its facet", async () => {
+		const dir = await mkdtemp(join(root, "packages", "platform", ".web-only-"));
+		await writeFile(join(dir, "web.js"), "export default { setup() {} };\n");
+		const app = await start({
+			port: 0,
+			hostname: "127.0.0.1",
+			plugins: [dir],
+			pluginsDir,
+			logger: silentLogger,
+		});
 		try {
-			expect(substrate.plugins[0]?.error).toMatch(/not yet/);
-			expect(substrate.plugins[0]?.loaded).toBeFalsy();
-			// Fixing the file on disk is all a reload needs: `nodeLoader` imports fresh copies.
-			await writeFile(
-				join(dir, "server.mjs"),
-				`import { Type, defineFacet, local, method } from "@moonan_ai/sdk";
-const Recover = local("test.recover", { version: 1, input: Type.Object({}), members: { ping: method() } });
-export default defineFacet((api) => {
-	api.serve(Recover, () => ({ ping: () => "ok" }), { lifetime: "host" });
-});
-`,
-			);
-			const result = await substrate.reload("recover");
-			expect(result.reloaded).toContain("recover");
-			expect(substrate.plugins[0]?.error).toBeUndefined();
-			expect(substrate.plugins[0]?.loaded).toBe(true);
-			// A recovery is a commit: the reload installed the facet and moved the code version.
-			expect(substrate.revision).toBe(2);
+			const plugin = app.plugins[0];
+			expect(plugin?.server).toBeUndefined();
+			expect(plugin?.web?.url).toMatch(/^\/facets\/[0-9a-f]{12}\/web\.js$/);
+			expect(plugin?.error).toBeUndefined();
+			expect(plugin?.serverInstalled).toBeFalsy();
+			const response = await fetch(`${app.url}${plugin?.web?.url}`);
+			expect(response.status).toBe(200);
+			expect(await response.text()).toMatch(/setup/);
 		} finally {
-			await substrate.close();
+			await app.close();
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
 
 	it("converges every manifest instance on the new code version", async () => {
-		const current = (await (await fetch(`${moonan.url}/api/plugins`)).json()) as { revision: number };
+		const current = (await (await fetch(`${moonan.url}/api/plugins`)).json()) as PluginsResponse;
 		const socket = new WebSocket(`${moonan.url.replace("http", "ws")}/ws`);
 		const client = createHost({ kind: "client", self: { id: "browser" } });
 		client.connect(webSocketLink(socket as never), { principal: { id: "browser" } });
@@ -334,11 +355,7 @@ export default defineFacet((api) => {
 				});
 			const seen = watch(manifest, before);
 			const hostSeen = watch(hostManifest, before);
-			const response = await fetch(`${moonan.url}/api/plugins/reload`, {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ id: "clock" }),
-			});
+			const response = await fetch(`${moonan.url}/api/plugins/reload`, { method: "POST" });
 			expect(response.status).toBe(200);
 			const body = (await response.json()) as { revision: number };
 			expect(body.revision).toBeGreaterThan(before);

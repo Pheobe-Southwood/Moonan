@@ -2,18 +2,18 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createSubstrate, type Substrate } from "./host.js";
 import { createLogger, type Logger } from "./logger.js";
+import { createPlatform, type Platform } from "./platform.js";
 import { startWebServer, type WebServerHandle } from "./server.js";
 
-export const VERSION = "0.0.2-alpha1";
+export const VERSION = "0.0.3-alpha1";
 
 export interface StartOptions {
 	port?: number;
 	hostname?: string;
-	/** Plugins to load: package names or directories. */
+	/** Plugins to resolve: package names or directories. */
 	plugins?: readonly string[];
-	/** Scanned for subdirectories that carry a `plugin.json`. */
+	/** Scanned for subdirectories that carry a facet entry file. */
 	pluginsDir?: string;
 	/** The built shell. Defaults to `MOONAN_WEB_DIST`, then the copy shipped next to this file. */
 	webDist?: string;
@@ -21,7 +21,7 @@ export interface StartOptions {
 	logger?: Logger;
 }
 
-export interface Moonan extends Substrate {
+export interface Moonan extends Platform {
 	port: number;
 	url: string;
 	server: WebServerHandle;
@@ -40,58 +40,63 @@ function resolveWebDist(explicit: string | undefined): string | undefined {
 }
 
 /**
- * Starts the substrate and the one port it serves.
+ * Starts the platform and the one port it serves.
  *
- * Everything below this line is the whole application: a Chord host with some plugins in
- * it, and a server that hands requests to them. If this looks too small to be an app,
- * that is the point — the app is the plugins.
+ * Everything below this line is the whole local application: a Chord host with some facets
+ * in it, and a server that hands requests to them. If this looks too small to be an app,
+ * that is the point — the features are plugins.
  */
 export async function start(options: StartOptions = {}): Promise<Moonan> {
 	const logger = options.logger ?? createLogger();
 	const version = options.version ?? VERSION;
 	const webDist = resolveWebDist(options.webDist);
 
-	const substrate = await createSubstrate({
+	const platform = await createPlatform({
 		version,
 		...(options.plugins ? { plugins: options.plugins } : {}),
 		pluginsDir: options.pluginsDir ?? defaultPluginsDir(),
-		logger: logger.child("substrate"),
+		logger: logger.child("platform"),
 	});
 
-	const server = await startWebServer({
-		host: substrate.host,
-		port: options.port ?? 21315,
-		hostname: options.hostname ?? "127.0.0.1",
-		version,
-		...(webDist ? { webDist } : {}),
-		plugins: () => substrate.plugins,
-		revision: () => substrate.revision,
-		reload: substrate.reload,
-		logger: logger.child("http"),
-	});
+	try {
+		const server = await startWebServer({
+			host: platform.host,
+			port: options.port ?? 21315,
+			hostname: options.hostname ?? "127.0.0.1",
+			version,
+			...(webDist ? { webDist } : {}),
+			plugins: () => platform.plugins,
+			revision: () => platform.revision,
+			reload: platform.reload,
+			logger: logger.child("http"),
+		});
 
-	return {
-		port: server.port,
-		url: server.url,
-		server,
-		get host() {
-			return substrate.host;
-		},
-		get plugins() {
-			return substrate.plugins;
-		},
-		get revision() {
-			return substrate.revision;
-		},
-		reload: substrate.reload,
-		close: async () => {
-			await server.close();
-			await substrate.close();
-		},
-	};
+		return {
+			port: server.port,
+			url: server.url,
+			server,
+			get host() {
+				return platform.host;
+			},
+			get plugins() {
+				return platform.plugins;
+			},
+			get revision() {
+				return platform.revision;
+			},
+			reload: platform.reload,
+			close: async () => {
+				await server.close();
+				await platform.close();
+			},
+		};
+	} catch (error) {
+		await platform.close();
+		throw error;
+	}
 }
 
-export { createSubstrate, type Substrate, type SubstrateOptions } from "./host.js";
+export { createPlatform, type Platform, type PlatformOptions } from "./platform.js";
 export { createLogger, silentLogger, type Logger } from "./logger.js";
 export { resolvePluginRef, scanPluginDirectory } from "./plugins.js";
-export { describe, type PluginRecord, type Principal } from "./types.js";
+export { describe, type PluginFacets, type Principal } from "./types.js";

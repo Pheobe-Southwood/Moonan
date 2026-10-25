@@ -6,7 +6,7 @@
  * `Panels` registry and the React hooks) lives in `@moonan_ai/sdk/web`, because it needs
  * React and the root entry must stay importable from a Node facet.
  */
-export { Manifest, PluginEntrySchema, type PluginEntry } from "./manifest.js";
+export { Manifest, FacetSetSchema, type FacetSetEntry } from "./manifest.js";
 export { Routes, type RouteHandler } from "./routes.js";
 
 /** Chord primitives, re-exported so a plugin needs two dependencies instead of three. */

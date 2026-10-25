@@ -1,5 +1,5 @@
 import type { Host } from "@earendil-works/chord";
-import { Manifest, type PluginEntry } from "@moonan_ai/sdk";
+import { Manifest, type FacetSetEntry } from "@moonan_ai/sdk";
 import { useReadable, useRefStatus, useRemote, type PanelContribution } from "@moonan_ai/sdk/web";
 import { useEffect, useRef, useState } from "react";
 import { useConnection } from "./chord/connection.js";
@@ -9,7 +9,7 @@ import { usePanels } from "./chord/panels.js";
  * The shell knows no panel and holds no application state.
  *
  * Every tab is registered by a plugin's browser facet into this host's `Panels`
- * registry, and the list of facets to load comes from the substrate's `Manifest`. Adding
+ * registry, and the list of facets to load comes from the platform's `Manifest`. Adding
  * a feature means shipping a plugin, never editing this file.
  */
 function currentRoute(panels: PanelContribution[]): string {
@@ -71,7 +71,7 @@ function Shell({ host, version, panels }: { host: Host<unknown>; version: string
 				) : (
 					<div className="empty">
 						<h2>没有插件</h2>
-						<p>基座已在运行，但没有任何插件注册面板。</p>
+						<p>平台已在运行，但没有任何插件注册面板。</p>
 						<code>moonan --plugin &lt;包名或目录&gt;</code>
 					</div>
 				)}
@@ -86,15 +86,15 @@ function Bootstrapped() {
 	const manifestStatus = useRefStatus(manifest);
 	const revision = useReadable<number>(manifest?.revision, 0);
 	const version = useReadable<string>(manifest?.version, "");
-	const entries = useReadable<PluginEntry[]>(manifest?.plugins, []);
+	const facets = useReadable<FacetSetEntry[]>(manifest?.facets, []);
 	const panels = usePanels(host);
 
 	// The web facets to load, as one string: it is the dependency that says "the set
 	// changed". A manifest revision change means the server committed new code — a browser
 	// is not a reload participant, so this state member is the only signal it gets.
-	const webSignature = entries
-		.filter((entry) => entry.web)
-		.map((entry) => entry.web)
+	const webSignature = facets
+		.filter((facet) => facet.web)
+		.map((facet) => facet.web)
 		.join("|");
 	const signature = `${webSignature}#${revision}`;
 
@@ -130,20 +130,15 @@ function Bootstrapped() {
 				// activates, so a facet may consume a type installed by a later one.
 				if (previous === null) await host.load(urls);
 				else await host.reload(urls, removed.length > 0 ? { remove: removed } : {});
+				// `reload` resolves at commit, not at activation; `load` already waits.
+				await host.ready();
 			} catch (cause) {
-				// A batch fails as a whole; isolate so one broken facet does not hide the rest.
-				// `reload` installs a facet the batch never reached and re-runs the factory of one
-				// it did, so neither case needs chord's "already installed" text to tell apart.
+				// A batch fails as a whole. Do not retry facet-by-facet: that installs a partial
+				// set and hides which transaction actually failed. Reloading again, or fixing the
+				// facet and letting the next revision land, is the recovery path.
+				const message = cause instanceof Error ? cause.message : String(cause);
 				console.error("[chord] facet batch failed", cause);
-				for (const url of urls) {
-					try {
-						await host.reload([url]);
-					} catch (facetError) {
-						const message = facetError instanceof Error ? facetError.message : String(facetError);
-						console.error("[chord] web facet failed to load", facetError);
-						failed.push(`${url}: ${message}`);
-					}
-				}
+				failed.push(`facet batch: ${message}`);
 			}
 			if (cancelled) return;
 			setFailures(failed);
@@ -174,13 +169,13 @@ function Bootstrapped() {
 		return <div className="loading">Moonan …</div>;
 	}
 
-	const reported = entries.filter((entry) => entry.error);
+	const reported = facets.filter((facet) => facet.error);
 
 	return (
 		<>
 			{failures.length > 0 || reported.length > 0 ? (
 				<div className="banner">
-					{[...reported.map((entry) => `${entry.id}: ${entry.error}`), ...failures].map((line) => (
+					{[...reported.map((facet) => `${facet.name}: ${facet.error}`), ...failures].map((line) => (
 						<div key={line}>{line}</div>
 					))}
 				</div>

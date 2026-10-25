@@ -1,6 +1,6 @@
 {
   "name": "moonan-workspace",
-  "version": "0.0.2-alpha1",
+  "version": "0.0.3-alpha1",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.7.0",
@@ -11,7 +11,7 @@
     "typecheck": "pnpm -r --parallel typecheck",
     "build": "pnpm -r build",
     "test": "pnpm --filter @moonan_ai/moonan test",
-    "dev": "pnpm build && node packages/substrate/bin/moonan.js --plugin ./examples/clock-plugin"
+    "dev": "pnpm build && node packages/platform/bin/moonan.js --plugin ./examples/clock-plugin"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

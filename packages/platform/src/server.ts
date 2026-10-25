@@ -6,7 +6,7 @@ import { acceptWebSockets, type Host, type ReloadReport } from "@earendil-works/
 import { Routes } from "@moonan_ai/sdk";
 import { WebSocketServer } from "ws";
 import type { Logger } from "./logger.js";
-import { describe, errorMessage, type PluginRecord, type Principal } from "./types.js";
+import { describe, errorMessage, type PluginFacets, type Principal } from "./types.js";
 
 export interface WebServerOptions {
 	host: Host<Principal>;
@@ -15,10 +15,10 @@ export interface WebServerOptions {
 	version: string;
 	/** Absent when the shell has not been built: the API and the WebSocket still work. */
 	webDist?: string;
-	plugins: () => PluginRecord[];
+	plugins: () => PluginFacets[];
 	/** chord's code version: what a browser and an external tool compare to know a commit landed. */
 	revision: () => number;
-	reload: (id?: string) => Promise<{ reloaded: string[]; report?: ReloadReport }>;
+	reload: () => Promise<ReloadReport | undefined>;
 	logger: Logger;
 }
 
@@ -72,27 +72,15 @@ async function sendFile(response: ServerResponse, file: string, cache: boolean):
 	}
 }
 
-async function readJson(request: IncomingMessage): Promise<Record<string, unknown> | undefined> {
-	const chunks: Buffer[] = [];
-	for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-	if (chunks.length === 0) return undefined;
-	try {
-		const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-		return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : undefined;
-	} catch {
-		return undefined;
-	}
-}
-
-/** A path inside `base` or nothing: `..` in a plugin asset URL must not escape the plugin. */
+/** A path inside `base` or nothing: `..` in a facet asset URL must not escape the facet. */
 function within(base: string, relative: string): string | undefined {
 	const target = resolve(join(base, relative));
 	return target === base || target.startsWith(`${base}${sep}`) ? target : undefined;
 }
 
 /**
- * One port for everything: the WebSocket the Chord client speaks, the plugin assets the
- * browser imports, the routes plugins registered, and the shell.
+ * One port for everything: the WebSocket the Chord client speaks, the browser facets the
+ * shell imports, the routes plugins registered, and the shell.
  */
 export async function startWebServer(options: WebServerOptions): Promise<WebServerHandle> {
 	const wss = new WebSocketServer({ noServer: true });
@@ -108,15 +96,18 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 
 	const plugins = options.plugins;
 
-	const servePluginAsset = async (pathname: string, response: ServerResponse): Promise<boolean> => {
-		const [, , rawId, ...rest] = pathname.split("/");
-		const plugin = plugins().find((candidate) => candidate.id === rawId && candidate.web);
-		if (!plugin?.web || rest.length === 0) {
-			sendJson(response, 404, { error: "plugin not found" });
+	const serveFacetAsset = async (pathname: string, response: ServerResponse): Promise<boolean> => {
+		const facet = plugins().find((candidate) => candidate.web && pathname.startsWith(candidate.web.base));
+		if (!facet?.web) {
+			sendJson(response, 404, { error: "facet not found" });
 			return true;
 		}
-		const base = resolve(plugin.web.file, "..");
-		const target = within(base, rest.join("/"));
+		const relative = pathname.slice(facet.web.base.length);
+		if (!relative) {
+			sendJson(response, 404, { error: "not found" });
+			return true;
+		}
+		const target = within(resolve(facet.web.file, ".."), relative);
 		if (!target) {
 			sendJson(response, 403, { error: "forbidden" });
 			return true;
@@ -158,26 +149,30 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 				sendJson(response, 405, { error: "method not allowed" });
 				return;
 			}
-			const body = await readJson(request);
-			const id = typeof body?.id === "string" ? body.id : undefined;
+			const before = options.revision();
 			try {
-				const result = await options.reload(id);
-				// A committed reload moves chord's code version, which is what `revision` reports.
-				// The shell watches the same number as a state member and swaps its browser facets
-				// with `host.reload`: a browser takes no part in *cluster* reload coordination, so
-				// it learns about new code from state, not from a commit frame. The flag means
-				// "browser facets are stale", not "reload the page" — only a protocol mismatch
-				// reloads the page.
-				sendJson(response, 200, { ok: true, reloadBrowser: true, revision: options.revision(), ...result });
+				const report = await options.reload();
+				// A committed reload moves chord's code version. The shell watches the same
+				// number as a state member and swaps its browser facets with `host.reload`; a
+				// browser takes no part in *cluster* reload coordination, so it learns about new
+				// code from state, not from a commit frame. The flag means "browser facets are
+				// stale", not "reload the page" — only a protocol mismatch reloads the page.
+				const committed = options.revision() > before;
+				sendJson(response, 200, {
+					ok: true,
+					reloadBrowser: committed,
+					revision: options.revision(),
+					...(report ? { report } : {}),
+				});
 			} catch (error) {
-				options.logger.error("plugin reload failed", error);
+				options.logger.error("facet reload failed", error);
 				sendJson(response, 400, { error: errorMessage(error) });
 			}
 			return;
 		}
 
-		if (pathname.startsWith("/plugins/")) {
-			if (await servePluginAsset(pathname, response)) return;
+		if (pathname.startsWith("/facets/")) {
+			if (await serveFacetAsset(pathname, response)) return;
 		}
 
 		// Plugin HTTP routes, resolved against the code version this root runs on.
