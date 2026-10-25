@@ -73,9 +73,9 @@ describe("the substrate", () => {
 
 	it("gives a chord client the manifest over the websocket", async () => {
 		const socket = new WebSocket(`${moonan.url.replace("http", "ws")}/ws`);
-		// Connected before `open` on purpose: the server greets as soon as it accepts, and a
-		// client that subscribes later loses that `hello`. See `connection.tsx` for what a
-		// missing hello costs (no acknowledgements, so no flow control).
+		// Connected before `open` on purpose: the server greets as soon as it accepts, so a
+		// listener attached later may or may not see that `hello`. See `connection.tsx` for
+		// what a missing hello costs (no acknowledgements, so no flow control).
 		const client = createHost({ kind: "client", self: { id: "browser" } });
 		// `ws` speaks the structural WebSocketLike chord wants, event listeners included.
 		client.connect(webSocketLink(socket as never), { principal: { id: "browser" } });
@@ -191,6 +191,113 @@ export default defineFacet((api) => {
 			expect(provider?.loaded).toBe(true);
 			expect(consumer?.error).toBeUndefined();
 			expect(consumer?.loaded).toBe(true);
+		} finally {
+			await substrate.close();
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("lets a plugin resolve chord from its own tree, and reports that failure", async () => {
+		// No process-wide shim: bare specifiers resolve from the plugin's own tree, like any Node
+		// module. The fixture ships its own copy of chord that throws, so a copy forced by the
+		// base would show up here; this asserts the substrate adds no copy of its own.
+		const dir = await mkdtemp(join(root, "packages", "substrate", ".own-deps-"));
+		const own = join(dir, "node_modules", "@earendil-works", "chord");
+		await mkdir(own, { recursive: true });
+		await writeFile(
+			join(own, "package.json"),
+			JSON.stringify({ name: "@earendil-works/chord", version: "0.0.0", type: "module", exports: "./index.js" }),
+		);
+		await writeFile(join(own, "index.js"), 'throw new Error("the plugin imports its own chord");\n');
+		await writeFile(join(dir, "server.mjs"), 'import "@earendil-works/chord";\nexport default { setup() {} };\n');
+		await writeFile(join(dir, "plugin.json"), JSON.stringify({ id: "own", name: "own", version: "0.0.0", server: "server.mjs" }));
+
+		const substrate = await createSubstrate({ version: "test", plugins: [dir, clockDir], logger: silentLogger });
+		try {
+			const plugin = substrate.plugins.find((entry) => entry.id === "own");
+			expect(plugin?.error).toMatch(/the plugin imports its own chord/);
+			expect(plugin?.loaded).toBeFalsy();
+			expect(substrate.plugins.find((entry) => entry.id === "clock")?.loaded).toBe(true);
+		} finally {
+			await substrate.close();
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("names the plugin whose setup failed, without reading chord's error text", async () => {
+		const dir = await mkdtemp(join(root, "packages", "substrate", ".broken-"));
+		const write = async (name: string, text: string) => {
+			await mkdir(join(dir, name), { recursive: true });
+			await writeFile(join(dir, name, "server.mjs"), text);
+			await writeFile(
+				join(dir, name, "plugin.json"),
+				JSON.stringify({ id: name, name, version: "0.0.0", server: "server.mjs" }),
+			);
+		};
+		await write(
+			"angry",
+			`import { Type, defineFacet, local, method } from "@moonan_ai/sdk";
+const Angry = local("test.angry", { version: 1, input: Type.Object({}), members: { ping: method() } });
+export default defineFacet((api) => {
+	api.serve(Angry, () => ({ ping: () => "ok" }), { lifetime: "host" });
+	throw new Error("setup said no");
+});
+`,
+		);
+		await write(
+			"calm",
+			`import { Type, defineFacet, local, method } from "@moonan_ai/sdk";
+const Calm = local("test.calm", { version: 1, input: Type.Object({}), members: { ping: method() } });
+export default defineFacet((api) => {
+	api.serve(Calm, () => ({ ping: () => "ok" }), { lifetime: "host" });
+});
+`,
+		);
+
+		const substrate = await createSubstrate({
+			version: "test",
+			plugins: [join(dir, "angry"), join(dir, "calm")],
+			logger: silentLogger,
+		});
+		try {
+			const angry = substrate.plugins.find((plugin) => plugin.id === "angry");
+			const calm = substrate.plugins.find((plugin) => plugin.id === "calm");
+			expect(angry?.error).toMatch(/setup said no/);
+			expect(angry?.loaded).toBeFalsy();
+			expect(calm?.error).toBeUndefined();
+			expect(calm?.loaded).toBe(true);
+		} finally {
+			await substrate.close();
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("recovers a plugin that failed at startup", async () => {
+		const dir = await mkdtemp(join(root, "packages", "substrate", ".recover-"));
+		const manifest = JSON.stringify({ id: "recover", name: "recover", version: "0.0.0", server: "server.mjs" });
+		await writeFile(join(dir, "server.mjs"), 'throw new Error("not yet");\n');
+		await writeFile(join(dir, "plugin.json"), manifest);
+
+		const substrate = await createSubstrate({ version: "test", plugins: [dir], logger: silentLogger });
+		try {
+			expect(substrate.plugins[0]?.error).toMatch(/not yet/);
+			expect(substrate.plugins[0]?.loaded).toBeFalsy();
+			// Fixing the file on disk is all a reload needs: `nodeLoader` imports fresh copies.
+			await writeFile(
+				join(dir, "server.mjs"),
+				`import { Type, defineFacet, local, method } from "@moonan_ai/sdk";
+const Recover = local("test.recover", { version: 1, input: Type.Object({}), members: { ping: method() } });
+export default defineFacet((api) => {
+	api.serve(Recover, () => ({ ping: () => "ok" }), { lifetime: "host" });
+});
+`,
+			);
+			const result = await substrate.reload("recover");
+			expect(result.reloaded).toContain("recover");
+			expect(substrate.plugins[0]?.error).toBeUndefined();
+			expect(substrate.plugins[0]?.loaded).toBe(true);
+			// A recovery is a commit: the reload installed the facet and moved the code version.
+			expect(substrate.revision).toBe(2);
 		} finally {
 			await substrate.close();
 			await rm(dir, { recursive: true, force: true });

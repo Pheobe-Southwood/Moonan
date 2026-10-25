@@ -132,15 +132,14 @@ function Bootstrapped() {
 				else await host.reload(urls, removed.length > 0 ? { remove: removed } : {});
 			} catch (cause) {
 				// A batch fails as a whole; isolate so one broken facet does not hide the rest.
+				// `reload` installs a facet the batch never reached and re-runs the factory of one
+				// it did, so neither case needs chord's "already installed" text to tell apart.
 				console.error("[chord] facet batch failed", cause);
 				for (const url of urls) {
 					try {
-						if (previous === null) await host.load([url]);
-						else await host.reload([url]);
+						await host.reload([url]);
 					} catch (facetError) {
 						const message = facetError instanceof Error ? facetError.message : String(facetError);
-						// The batch already installed this facet; its activation is what failed.
-						if (message.includes("is already installed")) continue;
 						console.error("[chord] web facet failed to load", facetError);
 						failed.push(`${url}: ${message}`);
 					}

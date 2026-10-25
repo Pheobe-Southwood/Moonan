@@ -4,7 +4,7 @@ import { nodeLoader } from "@earendil-works/chord/node";
 import { Manifest, PluginEntrySchema, type PluginEntry } from "@moonan_ai/sdk";
 import { Type } from "typebox";
 import { createLogger, type Logger } from "./logger.js";
-import { installSharedModuleHooks, resolvePluginRef, scanPluginDirectory } from "./plugins.js";
+import { resolvePluginRef, scanPluginDirectory } from "./plugins.js";
 import { describe, errorMessage, type PluginRecord, type Principal } from "./types.js";
 
 export interface SubstrateOptions {
@@ -28,14 +28,15 @@ export interface Substrate {
 	/** Resolution order; entries carry `error` rather than disappearing when they fail. */
 	plugins: PluginRecord[];
 	/**
-	 * chord's code version of this host (`host.codeVersion`): 1 at startup, one higher after
-	 * every reload that committed. A browser and an external tool both use it to tell whether
-	 * a new code version exists.
+	 * chord's code version of this host (`host.codeVersion`): 1 after a healthy startup, one
+	 * higher per commit — including the per-plugin reloads a failed batch leaves behind. A
+	 * browser and an external tool both use it to tell whether a new code version exists.
 	 */
 	readonly revision: number;
 	/**
-	 * Re-installs plugin modules: a Chord reload for the ones already loaded, a plain load
-	 * for the ones that failed at startup. Without an id, every plugin.
+	 * Re-installs plugin modules with one verb: `host.reload` installs a facet that never
+	 * installed and re-runs the factory of one that did, so a loaded plugin and one that failed
+	 * at startup both go through it. Without an id, every plugin.
 	 */
 	reload(id?: string): Promise<{ reloaded: string[]; report?: ReloadReport }>;
 	close(): Promise<void>;
@@ -51,7 +52,6 @@ export interface Substrate {
  */
 export async function createSubstrate(options: SubstrateOptions): Promise<Substrate> {
 	const logger = options.logger ?? createLogger();
-	installSharedModuleHooks();
 
 	const refs = [...(options.plugins ?? [])];
 	if (options.pluginsDir) refs.push(...scanPluginDirectory(options.pluginsDir, logger.child("plugins")));
@@ -86,39 +86,24 @@ export async function createSubstrate(options: SubstrateOptions): Promise<Substr
 			}
 			return;
 		} catch (error) {
-			// The batch reports one failure for all of them, but its installs already happened
-			// and are not rolled back. Retry one at a time only to say which plugin broke.
+			// The batch reports one failure for all of them: if it failed while activating, the
+			// installs already happened and are not rolled back; if it failed to resolve a module,
+			// nothing was installed. Retry one at a time only to say which plugin broke.
 			logger.error("plugin batch failed to activate; isolating", error);
 		}
+		// `reload` is the one verb that covers both states (chord has no "is this facet
+		// installed" query): it installs a facet the batch never reached and re-runs the factory
+		// of one it did, so a plugin whose `setup` throws is named here instead of hiding behind
+		// the batch's error. A host object that fails to *activate* does not reject a reload —
+		// chord reports it through `onError` — so that shape stays unattributed to its plugin.
 		for (const plugin of loadable) {
 			try {
-				await host.load([plugin.server!]);
+				await host.reload([plugin.server!]);
 				plugin.loaded = true;
 				logger.info(`loaded "${plugin.id}" from ${plugin.source}`);
 			} catch (error) {
-				const message = errorMessage(error);
-				if (!message.includes("is already installed")) {
-					plugin.error = message;
-					logger.error(`plugin "${plugin.id}" failed to load`, error);
-					continue;
-				}
-				// The batch installed this facet; its host object is what failed. A reload
-				// re-runs the factory and reports this plugin's own error instead of the batch's.
-				// It costs one code version per healthy plugin, which is acceptable on an error
-				// path and buys an honest per-plugin message.
-				//
-				// Only true for an activation failure. A facet whose `setup` throws after it
-				// already served a type is not rolled back by chord either, so this retry gets
-				// "`<type>` is already served" instead — a known limit of this isolation, not a
-				// second plugin error.
-				plugin.loaded = true;
-				try {
-					await host.reload([plugin.server!]);
-					logger.info(`activated "${plugin.id}" after the batch failure`);
-				} catch (reloadError) {
-					plugin.error = errorMessage(reloadError);
-					logger.error(`plugin "${plugin.id}" failed to activate`, reloadError);
-				}
+				plugin.error = errorMessage(error);
+				logger.error(`plugin "${plugin.id}" failed to load`, error);
 			}
 		}
 	};
@@ -193,10 +178,13 @@ export async function createSubstrate(options: SubstrateOptions): Promise<Substr
 		const reloadable = targets.filter((plugin) => plugin.loaded && plugin.server).map((plugin) => plugin.server!);
 		const retry = targets.filter((plugin) => !plugin.loaded && plugin.server);
 
+		// `reload` is the one verb that covers both states — it installs a facet that is not
+		// there yet and re-runs the factory of one that is — so a plugin that failed at startup
+		// is recoverable whether or not the batch managed to install its facet.
 		let recovered = false;
 		for (const plugin of retry) {
 			try {
-				await host.load([plugin.server!]);
+				await host.reload([plugin.server!]);
 				plugin.loaded = true;
 				plugin.error = undefined;
 				recovered = true;
@@ -207,12 +195,16 @@ export async function createSubstrate(options: SubstrateOptions): Promise<Substr
 			}
 		}
 
-		const report = reloadable.length > 0 ? await host.reload(reloadable) : undefined;
 		const committed = reloadable.length > 0 || recovered;
-		// A commit moved `host.codeVersion`; a recovery only changed the plugin list. Either way
-		// the browser listens to this snapshot, and a browser reloads its own facets from it
-		// (docs/architecture). Reading the version here, not from a cell: delivery is queued.
-		if (committed || retry.length > 0) publishManifest();
+		let report: ReloadReport | undefined;
+		try {
+			if (reloadable.length > 0) report = await host.reload(reloadable);
+		} finally {
+			// In `finally`: a retry may have committed before this batch threw, and the browser
+			// listens to this snapshot — the manifest must not keep a stale `error` while the
+			// revision has already moved. Reading the version here, not from a cell: queued.
+			if (committed || retry.length > 0) publishManifest();
+		}
 
 		const reloaded = targets.filter((plugin) => plugin.loaded).map((plugin) => plugin.id);
 		return { reloaded, ...(report ? { report } : {}) };

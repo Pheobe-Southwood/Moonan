@@ -1,5 +1,4 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { registerHooks } from "node:module";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Logger } from "./logger.js";
@@ -11,46 +10,6 @@ interface Manifest {
 	version?: string;
 	server?: string;
 	web?: string;
-}
-
-let hooksInstalled = false;
-
-/**
- * Points the shared specifiers at the copies this process already uses.
- *
- * A plugin installed outside the substrate's own `node_modules` cannot resolve
- * `@earendil-works/chord` or `typebox` on its own, and — more importantly — should not
- * get a second copy: one TypeBox and one Chord per process keeps schema identity and the
- * host implementation single. Registries and contracts would still match by name and
- * fingerprint, so a duplicate is not fatal; it is just a second set of state nobody needs.
- *
- * Chord has no equivalent: `nodeLoader` imports a facet, but it does not take over bare
- * specifiers, so a plugin's `import "@earendil-works/chord"` is whatever the plugin's own
- * `node_modules` resolves. This hook is the substrate making the shared specifiers
- * explicit — the Node-side twin of the browser's import map.
- */
-export function installSharedModuleHooks(extra: Record<string, string> = {}): void {
-	if (hooksInstalled) return;
-	// Vitest already routes `.ts` through its own loader; a shim on top of that makes Node
-	// load the source file itself, which fails. Tests resolve from source anyway.
-	if (process.env.VITEST) return;
-	hooksInstalled = true;
-	const shims = new Map<string, string>();
-	for (const specifier of ["@earendil-works/chord", "typebox", "@moonan_ai/sdk"]) {
-		try {
-			shims.set(specifier, import.meta.resolve(specifier));
-		} catch {
-			// optional in some deployments
-		}
-	}
-	for (const [specifier, url] of Object.entries(extra)) shims.set(specifier, url);
-	registerHooks({
-		resolve(specifier, context, nextResolve) {
-			const shim = shims.get(specifier);
-			if (shim) return { url: shim, shortCircuit: true };
-			return nextResolve(specifier, context);
-		},
-	});
 }
 
 function isDirectory(path: string): boolean {
@@ -190,9 +149,9 @@ function fromPackage(specifier: string, ref: string): PluginRecord {
  * Turns what the user asked for into module URLs.
  *
  * Two shapes, one path: a directory (with `plugin.json`) or an installed package
- * (`import.meta.resolve`, so its own `exports` decides the entries). Both end at
- * `host.load([url])`; only the URL differs. Failures come back as records with `error`
- * so the rest of the list still loads and the browser can show what broke.
+ * (`import.meta.resolve`, so its own `exports` decides the entries). Both end at a module
+ * URL the substrate hands to chord's loader; only the URL differs. Failures come back as
+ * records with `error` so the rest of the list still loads and the browser can show what broke.
  */
 export function resolvePluginRef(ref: string, baseDir: string): PluginRecord {
 	const trimmed = ref.trim();

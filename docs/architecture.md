@@ -31,13 +31,13 @@ node packages/substrate/bin/moonan.js
 3. 建宿主
 4. 一次 host.load(全部 URL)：先装完所有切面，再统一激活宿主对象
      成功 → 全部 loaded = true
-     失败 → 逐个 host.load 只为定位是哪一个，记 error，序列继续
+     失败 → 逐个 host.reload 只为定位是哪一个，记 error，序列继续
 5. 装 manifest 切面，把最终的插件列表写进它的 state
-6. host.get(Manifest, {}) 拿到引用并一直持有
+6. host.get(Manifest, {}) 激活一次后立即 release
 7. 开端口
 ```
 
-第 5 步在第 4 步之后，不是疏忽：清单的内容就是第 4 步的结果。第 6 步的持有也不是疏忽——远程对象是按引用计数的，没有引用就会被回收，而浏览器每次重连都要重新拿一次。
+第 5 步在第 4 步之后，不是疏忽：清单的内容就是第 4 步的结果。第 4 步的隔离用 `reload` 而不是 `load`：对批量没装到的切面，`reload` 等同安装；对已经装上的切面，它重跑工厂——两种失败形状都能定位到具体插件，不必去读 chord 的 "already installed" 文本。第 6 步只是自检：浏览器那个实例属于浏览器 principal，在它首次 `hold` 时才创建，基座不需要替它持有。
 
 ## 一次请求
 
@@ -71,14 +71,14 @@ await host.root(async (ctx) => {
 ```text
 POST /api/plugins/reload  { "id": "clock" }   ← id 省略则全部
   │
-  ├── 从未加载成功的插件 → host.load()         （重载无法修复「没装上」）
-  ├── 已加载的插件       → host.reload([url])  （prepare → gate → commit → retire）
+  ├── 每个插件           → host.reload([url])  （装没装上都用它：没装＝安装，装了＝重跑工厂）
+  ├── chord 内部         → prepare → gate → commit → retire
   ├── 提交成功           → chord 的 code version +1，基座直接读 host.codeVersion
   ├── 广播一份快照       → 每个活着的 Manifest 实例在自己的 root 里写自己的 cell
   └── 响应 { ok, reloadBrowser: true, revision, reloaded }
 ```
 
-`revision` 就是 **chord 的 code version**（`host.codeVersion`）：启动时是 1，每次提交 +1。基座不再自己数一个整数——那份信息 chord 本来就有，而且 `ReloadReport.codeVersion` 已经在响应里。一次「恢复加载」（启动时失败的插件被 `host.load` 装上）不改变 code version，因为那不算一次提交；这时变的是 `plugins` 数组，浏览器照样会换切面。
+`revision` 就是 **chord 的 code version**（`host.codeVersion`）：启动时是 1，每次提交 +1。基座不再自己数一个整数——那份信息 chord 本来就有，而且 `ReloadReport.codeVersion` 已经在响应里。一次「恢复加载」（启动时失败的插件被 `host.reload` 装上）也是一次提交：code version +1，浏览器照样换切面。真正不提交的只有「重试仍然失败」——那时只有 `error` 变了，快照带着同一个 revision 再发一次。
 
 `reloadBrowser: true` 说的是「浏览器切面过期了」，不是「整页刷新」。浏览器不参与 chord 的 **cluster** 重载协调，但 `kind: "client"` 的宿主可以本地 reload 自己的切面（代码版本不跨连接传播）——chord 对过期契约的补救也正是「reload its web facets」。整页刷新只留给协议版本失配。
 
@@ -92,7 +92,7 @@ POST /api/plugins/reload  { "id": "clock" }   ← id 省略则全部
 reload 提交
   │
   ├── publishManifest()：manifestChanges.replace(BACKGROUND_CONTEXT, { revision: host.codeVersion, plugins })
-  │        └── 一个 Subscribable，只保存当前值并通知订阅者
+  │        └── chord 的 replicatedState：一个独立可观察值，只保存当前值、订阅即拿到当前值
   └── 每个 Manifest 实例在自己工厂里声明的 self.on("manifest", …)
            └── chord 在自己的 root 里把新值写进那个实例的 cell
 ```
