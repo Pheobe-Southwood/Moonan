@@ -1,10 +1,9 @@
-import { createHost, replicatedState, type Host, type ReloadReport } from "@earendil-works/chord";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { createHost, type Host, type PluginRef, type ReloadReport } from "@earendil-works/chord";
 import { nodeLoader } from "@earendil-works/chord/node";
-import { FacetSetSchema, Manifest, type FacetSetEntry } from "@moonan_ai/sdk";
-import { Type } from "typebox";
+import { Manifest } from "@moonan_ai/sdk";
 import { createLogger, type Logger } from "./logger.js";
-import { resolvePluginRef, scanPluginDirectory } from "./plugins.js";
+import { createManifestFacet, ManifestStore, type ManifestStoreRef } from "./manifest.js";
+import { refreshWebHashes, resolvePluginRef, scanPluginDirectory } from "./plugins.js";
 import { describe, type PluginFacets, type Principal } from "./types.js";
 
 export interface PlatformOptions {
@@ -15,12 +14,6 @@ export interface PlatformOptions {
 	/** A directory whose subdirectories each carry a facet entry. Read-only; the platform stores nothing. */
 	pluginsDir?: string;
 	logger?: Logger;
-}
-
-/** What every `Manifest` instance converges on, and what a new instance starts from. */
-interface ManifestSnapshot {
-	readonly revision: number;
-	readonly facets: FacetSetEntry[];
 }
 
 export interface Platform {
@@ -67,61 +60,59 @@ export async function createPlatform(options: PlatformOptions): Promise<Platform
 	/**
 	 * One batch, as chord intends it: every facet is installed before any host object
 	 * activates, so a plugin's host object may consume a type served by a plugin loaded
-	 * after it (`host.load` documents exactly this). One URL at a time makes startup
-	 * order-dependent: the consumer fails with `unavailable/unknown_type` when its provider
-	 * sits later in the list.
+	 * after it (`host.load` documents exactly this) — and so `Manifest` is available while
+	 * plugin host objects activate.
 	 */
 	const loadFacets = async (): Promise<void> => {
-		const loadable = plugins.filter((plugin) => !plugin.error && plugin.server);
-		if (loadable.length === 0) return;
-		await host.load(loadable.map((plugin) => plugin.server!));
-		for (const plugin of loadable) {
+		const serverPlugins = plugins.filter((plugin) => !plugin.error && plugin.server);
+		const manifestFacet = createManifestFacet({
+			version: options.version,
+			facets: plugins.map(describe),
+			revision: host.codeVersion,
+		});
+		const refs: PluginRef[] = [...serverPlugins.map((plugin) => plugin.server!), manifestFacet];
+		await host.load(refs);
+		for (const plugin of serverPlugins) {
 			plugin.serverInstalled = true;
 			logger.info(`loaded server facet of "${plugin.name}" from ${plugin.source}`);
 		}
 	};
 
-	/**
-	 * The one thing the platform announces, and the only state it carries: chord's own
-	 * standalone observable value, not a hand-rolled one. `replicatedState` is the shipped
-	 * primitive for exactly this — a JSON value plus ordered notifications, independent of any
-	 * object — so the platform owns no fan-out code of its own.
-	 *
-	 * chord instantiates a remote type per principal, so the host has its own `Manifest`
-	 * object and every browser shares another one. Fanning a new snapshot out to them is
-	 * chord's job, not this file's: each instance declares `self.on("manifest", …)` in its own
-	 * factory, chord runs that handler in the object's own root, and an object that is gone
-	 * takes its listener with it. Nothing here iterates instances or prunes dead ones.
-	 *
-	 * Created per platform, not per module: two platforms in one process (tests) must not
-	 * deliver each other's reloads.
-	 */
-	const manifestChanges = replicatedState<ManifestSnapshot>({
-		revision: host.codeVersion,
-		facets: plugins.map(describe),
-	});
+	/** The platform's one reference to the manifest store; held for the platform lifetime. */
+	let store: ManifestStoreRef | undefined;
 
 	/**
-	 * Announces the current snapshot.
-	 *
-	 * `revision` is chord's code version, read after the commit; the facet list is what the
-	 * resolver knows now. Delivery is chord's publication queue, so this returns before the
-	 * instances have written their cells — nothing may read a cell to answer a request.
+	 * Publishes the current facet snapshot into the one store cell. `revision` is chord's
+	 * code version, read after the commit; the facet list is what the resolver knows now.
 	 */
-	const publishManifest = (): void => {
-		manifestChanges.replace(BACKGROUND_CONTEXT, { revision: host.codeVersion, facets: plugins.map(describe) });
+	const publishManifest = async (): Promise<void> => {
+		if (!store) return;
+		await store.update({
+			version: options.version,
+			facets: plugins.map(describe),
+			revision: host.codeVersion,
+		});
 	};
 
 	const reload = async (): Promise<ReloadReport | undefined> => {
 		const serverFacets = plugins.filter((plugin) => !plugin.error && plugin.server).map((plugin) => plugin.server!);
 		if (serverFacets.length === 0) {
-			publishManifest();
+			// A web-only change still needs a new hash in the manifest; there is no chord
+			// transaction to commit, but the browser must see the new module.
+			refreshWebHashes(plugins);
+			try {
+				await publishManifest();
+			} catch (error) {
+				logger.error("manifest publish failed", error);
+			}
 			return undefined;
 		}
 
 		let report: ReloadReport | undefined;
+		let committed = false;
 		try {
 			report = await host.reload(serverFacets);
+			committed = true;
 			for (const plugin of plugins) {
 				if (plugin.server && !plugin.error) plugin.serverInstalled = true;
 			}
@@ -129,42 +120,33 @@ export async function createPlatform(options: PlatformOptions): Promise<Platform
 			// failed activation must reject here, not become a report that says "reloaded".
 			await host.ready();
 		} finally {
-			// In `finally`: the manifest must converge even when the reload was refused or a
-			// host object failed after the commit. Reading the version here, not from a cell:
-			// chord's publication queue is asynchronous.
-			publishManifest();
+			// Only a committed reload publishes new web hashes. A refused reload keeps the old
+			// server code, so it must not advertise new web code either.
+			if (committed) refreshWebHashes(plugins);
+			try {
+				await publishManifest();
+			} catch (error) {
+				// Do not mask a reload failure with a manifest-publish failure. The next
+				// successful reload publishes again; a terminal host failure is reported by
+				// chord's onError.
+				logger.error("manifest publish failed", error);
+			}
 		}
 		return report;
 	};
 
 	const close = async (): Promise<void> => {
-		// `host.close()` disposes everything it holds, in waves, however many references are
-		// still out — there is nothing here to release first.
+		store?.release();
+		store = undefined;
 		await host.close().catch((error: unknown) => logger.error("host close failed", error));
 	};
 
 	try {
 		await loadFacets();
 
-		await host.install({
-			name: "moonan:manifest",
-			setup(api) {
-				api.serve(Manifest, (_input, _principal, self) => {
-					// Seed from the snapshot, and expect the same value again when the listener
-					// starts: a replicated state hydrates a new subscriber with its current value, so
-					// nothing announced between this factory and that moment is lost.
-					const initial = manifestChanges.value;
-					const version = self.state("version", Type.String(), options.version);
-					const facets = self.state("facets", Type.Array(FacetSetSchema), initial.facets);
-					const revision = self.state("revision", Type.Number(), initial.revision);
-					self.on("manifest", manifestChanges, (next, ctx) => {
-						facets.replace(ctx, next.facets, { diff: true });
-						if (next.revision !== revision.value) revision.replace(ctx, next.revision);
-					});
-					return { variant: "v1" as const, version, facets, revision };
-				});
-			},
-		});
+		// The store is host-lifetime, so `host.load` already waited for it. Keep one reference
+		// for the platform lifetime to publish snapshots; it does not change the store's life.
+		store = await host.get(ManifestStore, {});
 
 		// Activate the platform's own contract once at startup, so a mistake in it fails here
 		// instead of in every browser. The reference is dropped at once: this is a self-check,
@@ -172,9 +154,11 @@ export async function createPlatform(options: PlatformOptions): Promise<Platform
 		const check = await host.get(Manifest, {});
 		check.release();
 	} catch (error) {
-		// `install` (and therefore `load`) is not a rollback transaction: a setup that served a
-		// type before throwing leaves that service behind. The chord guidance is to close the
-		// host when abandoning startup, which is exactly what happens here.
+		// `load` is not a rollback transaction: a setup that served a type before throwing
+		// leaves that service behind. The chord guidance is to close the host when abandoning
+		// startup, which is exactly what happens here.
+		store?.release();
+		store = undefined;
 		await host.close().catch((closeError: unknown) => logger.error("host close failed", closeError));
 		throw error;
 	}

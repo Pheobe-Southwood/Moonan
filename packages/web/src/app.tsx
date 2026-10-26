@@ -1,9 +1,10 @@
-import type { Host } from "@earendil-works/chord";
+import { isChordError, type Host } from "@earendil-works/chord";
 import { Manifest, type FacetSetEntry } from "@moonan_ai/sdk";
 import { useReadable, useRefStatus, useRemote, type PanelContribution } from "@moonan_ai/sdk/web";
 import { useEffect, useRef, useState } from "react";
 import { useConnection } from "./chord/connection.js";
 import { usePanels } from "./chord/panels.js";
+import { reloadOnce } from "./chord/reload.js";
 
 /**
  * The shell knows no panel and holds no application state.
@@ -15,6 +16,20 @@ import { usePanels } from "./chord/panels.js";
 function currentRoute(panels: PanelContribution[]): string {
 	const hash = location.hash.replace(/^#\/?/, "");
 	return panels.some((panel) => panel.id === hash) ? hash : (panels[0]?.id ?? "");
+}
+
+function Recovery({ title, detail }: { title: string; detail?: string }) {
+	return (
+		<section className="empty">
+			<h2>{title}</h2>
+			{detail ? <p>{detail}</p> : null}
+			<p>
+				<button type="button" onClick={() => location.reload()}>
+					刷新页面 · Reload
+				</button>
+			</p>
+		</section>
+	);
 }
 
 function Shell({ host, version, panels }: { host: Host<unknown>; version: string; panels: PanelContribution[] }) {
@@ -82,27 +97,19 @@ function Shell({ host, version, panels }: { host: Host<unknown>; version: string
 
 function Bootstrapped() {
 	const { host, error } = useConnection();
-	const manifest = useRemote(host, Manifest, {});
+	const [manifestFatal, setManifestFatal] = useState<unknown>(null);
+	const manifest = useRemote(host, Manifest, {}, { onFatal: setManifestFatal });
 	const manifestStatus = useRefStatus(manifest);
-	const revision = useReadable<number>(manifest?.revision, 0);
 	const version = useReadable<string>(manifest?.version, "");
 	const facets = useReadable<FacetSetEntry[]>(manifest?.facets, []);
 	const panels = usePanels(host);
 
-	// The web facets to load, as one string: it is the dependency that says "the set
-	// changed". A manifest revision change means the server committed new code — a browser
-	// is not a reload participant, so this state member is the only signal it gets.
-	const webSignature = facets
-		.filter((facet) => facet.web)
-		.map((facet) => facet.web)
-		.join("|");
-	const signature = `${webSignature}#${revision}`;
-
-	// What this shell has installed, and under which revision. Kept in a ref so a reload
-	// can diff the facet set without making the effect depend on its own result.
-	const installed = useRef<{ urls: string[]; revision: number } | null>(null);
+	// What this shell has installed, and under which exact web-facet signature. Kept in a
+	// ref so a reload can diff the facet set without making the effect depend on its result.
+	const installed = useRef<{ urls: string[]; signature: string } | null>(null);
 	const [installedSignature, setInstalledSignature] = useState("");
 	const [failures, setFailures] = useState<string[]>([]);
+	const [batchFailure, setBatchFailure] = useState<string | null>(null);
 	const live = manifestStatus === "live";
 
 	// Hydration gates the shell; a reconnect does not. A dropped link puts the reference back
@@ -113,13 +120,29 @@ function Bootstrapped() {
 		if (live) setEverLive(true);
 	}, [live]);
 
+	// A Manifest that cannot bind will never become useful: the page needs the build that
+	// knows the provider contract. `useRemote` reports only after its bounded retries, and
+	// contract errors do not retry at all.
+	useEffect(() => {
+		if (!manifestFatal) return;
+		if (
+			isChordError(manifestFatal, "contract_mismatch") ||
+			isChordError(manifestFatal, "upgrade_required")
+		) {
+			reloadOnce("manifest contract mismatch");
+		}
+	}, [manifestFatal]);
+
 	useEffect(() => {
 		if (!host || !live) return;
-		const previous = installed.current;
-		if (previous && previous.revision === revision && previous.urls.join("|") === webSignature) return;
 
-		const urls = webSignature ? webSignature.split("|") : [];
-		installed.current = { urls, revision };
+		const webFacets = facets.filter((facet) => facet.web);
+		const urls = webFacets.map((facet) => facet.web!.url);
+		const signature = webFacets.map((facet) => `${facet.web!.url}#${facet.web!.hash}`).sort().join("|") || "none";
+		const previous = installed.current;
+		if (previous && previous.signature === signature) return;
+
+		installed.current = { urls, signature };
 		let cancelled = false;
 
 		void (async () => {
@@ -133,12 +156,13 @@ function Bootstrapped() {
 				// `reload` resolves at commit, not at activation; `load` already waits.
 				await host.ready();
 			} catch (cause) {
-				// A batch fails as a whole. Do not retry facet-by-facet: that installs a partial
-				// set and hides which transaction actually failed. Reloading again, or fixing the
-				// facet and letting the next revision land, is the recovery path.
 				const message = cause instanceof Error ? cause.message : String(cause);
 				console.error("[chord] facet batch failed", cause);
-				failed.push(`facet batch: ${message}`);
+				// The first load has no working shell to keep: abandoning it and reloading the
+				// page is the clean recovery. A later reload is transactional in chord, so the
+				// old facets are still valid and only a banner is needed.
+				if (previous === null) setBatchFailure(message);
+				else failed.push(`facet batch: ${message}`);
 			}
 			if (cancelled) return;
 			setFailures(failed);
@@ -148,16 +172,24 @@ function Bootstrapped() {
 		return () => {
 			cancelled = true;
 		};
-	}, [host, live, webSignature, revision, signature]);
+	}, [host, live, facets]);
 
 	if (error) {
 		// The shell that would know the user's language is exactly what failed to negotiate.
+		return <Recovery title="界面版本不匹配 · UI version mismatch" detail="服务端已经更新，请刷新页面。 Reload the page to continue." />;
+	}
+
+	if (manifestFatal) {
 		return (
-			<section className="empty">
-				<h2>界面版本不匹配 · UI version mismatch</h2>
-				<p>服务端已经更新，请刷新页面。Reload the page to continue.</p>
-			</section>
+			<Recovery
+				title="界面需要刷新 · Reload required"
+				detail={manifestFatal instanceof Error ? manifestFatal.message : String(manifestFatal)}
+			/>
 		);
+	}
+
+	if (batchFailure) {
+		return <Recovery title="浏览器切面加载失败 · Facet batch failed" detail={batchFailure} />;
 	}
 
 	if (!host || !(live || everLive)) {

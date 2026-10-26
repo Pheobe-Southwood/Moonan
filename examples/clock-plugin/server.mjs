@@ -45,15 +45,18 @@ function sleep(ms, signal) {
 			resolve();
 			return;
 		}
-		const timer = setTimeout(resolve, ms);
-		signal.addEventListener(
-			"abort",
-			() => {
-				clearTimeout(timer);
-				resolve();
-			},
-			{ once: true },
-		);
+		let timer;
+		const onAbort = () => {
+			clearTimeout(timer);
+			resolve();
+		};
+		timer = setTimeout(() => {
+			// `once` removes an abort listener only when it fires; a timer that finishes first
+			// must remove it explicitly or a long-lived object accumulates one per tick.
+			signal.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		signal.addEventListener("abort", onAbort, { once: true });
 	});
 }
 

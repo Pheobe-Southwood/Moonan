@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Logger } from "./logger.js";
@@ -54,11 +55,39 @@ function firstExisting(dir: string, candidates: readonly string[]): string | und
  * from a plugin id: a facet's identity is its module, and this is only the HTTP route that
  * serves it. `base` keeps sibling assets of a future multi-file facet inside the same
  * namespace; the loader still expects a single browser facet today.
+ *
+ * `hash` is the exact file content. The URL stays stable across edits; the hash is what
+ * tells a browser that the module behind it changed.
  */
-function webAsset(file: string): { file: string; url: string; base: string } {
+function webAsset(file: string): { file: string; url: string; base: string; hash: string } {
 	const key = createHash("sha256").update(file).digest("hex").slice(0, 12);
 	const base = `/facets/${key}/`;
-	return { file, base, url: `${base}${encodeURIComponent(basename(file))}` };
+	let hash = key;
+	try {
+		hash = createHash("sha256").update(readFileSync(file)).digest("hex").slice(0, 12);
+	} catch {
+		// A file that vanished between stat and read keeps a stable (path-based) hash; the
+		// HTTP server will report the missing file.
+	}
+	return {
+		file,
+		base,
+		url: `${base}${encodeURIComponent(basename(file))}`,
+		hash,
+	};
+}
+
+/** Recompute every browser facet's content hash after a server reload committed. */
+export function refreshWebHashes(plugins: PluginFacets[]): void {
+	for (const plugin of plugins) {
+		if (!plugin.web) continue;
+		try {
+			plugin.web = webAsset(plugin.web.file);
+		} catch {
+			// A file that disappeared keeps its old hash; serving it will fail with a clear
+			// 404 and the shell shows the plugin error. This must not take the platform down.
+		}
+	}
 }
 
 function fromDirectory(dir: string, ref: string): PluginFacets {
@@ -78,7 +107,10 @@ function fromDirectory(dir: string, ref: string): PluginFacets {
 		};
 	}
 
-	if (server?.endsWith(".js") && pkg?.type !== "module") {
+	// Node decides `.js` by the nearest package scope, not only by a package.json inside the
+	// plugin directory. Walk up, so a plugin under a `"type": "module"` project is accepted.
+	const packageScope = server ? nearestPackage(join(dir, basename(server))) : undefined;
+	if (server?.endsWith(".js") && packageScope?.type !== "module") {
 		return {
 			name,
 			version,
@@ -120,11 +152,25 @@ function resolveFile(specifier: string): string | undefined {
 	}
 }
 
-function fromPackage(specifier: string, ref: string): PluginFacets {
+/**
+ * Resolve a package from `baseDir` (the user's working directory), not from Moonan's own
+ * module location. `npx` and global installs put Moonan somewhere else entirely; a plugin
+ * installed in the user's project must still resolve.
+ */
+function resolvePackage(baseDir: string, specifier: string): string | undefined {
+	try {
+		const require = createRequire(join(baseDir, "__moonan_resolve__.js"));
+		return pathToFileURL(require.resolve(specifier)).href;
+	} catch {
+		return undefined;
+	}
+}
+
+function fromPackage(specifier: string, ref: string, baseDir: string): PluginFacets {
 	// A package may export only `./web` (a browser-only plugin) or only `.` (a server-only
 	// plugin). Resolve the two independently; neither is required by itself.
-	const serverUrl = resolveFile(specifier);
-	const webUrl = resolveFile(`${specifier}/web`);
+	const serverUrl = resolvePackage(baseDir, specifier) ?? resolveFile(specifier);
+	const webUrl = resolvePackage(baseDir, `${specifier}/web`) ?? resolveFile(`${specifier}/web`);
 
 	if (!serverUrl && !webUrl) {
 		return {
@@ -156,7 +202,7 @@ function fromPackage(specifier: string, ref: string): PluginFacets {
  * Failures come back as records with `error` so the rest of the list still resolves and the
  * browser can show what broke.
  */
-export function resolvePluginRef(ref: string, baseDir: string): PluginFacets {
+export function resolvePluginRef(ref: string, baseDir = process.cwd()): PluginFacets {
 	const trimmed = ref.trim();
 	const asPath = isAbsolute(trimmed) ? trimmed : resolve(baseDir, trimmed);
 	if (isDirectory(asPath)) return fromDirectory(asPath, ref);
@@ -170,7 +216,7 @@ export function resolvePluginRef(ref: string, baseDir: string): PluginFacets {
 		};
 	}
 	try {
-		return fromPackage(trimmed, ref);
+		return fromPackage(trimmed, ref, baseDir);
 	} catch (error) {
 		return {
 			name: trimmed,

@@ -1,6 +1,7 @@
 import { createHost, webSocketLink, type Host } from "@earendil-works/chord";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { browserFacetLoader } from "./facet-loader.js";
+import { reloadOnce } from "./reload.js";
 
 export type ConnectionStatus = "connecting" | "open" | "closed" | "error";
 
@@ -17,22 +18,9 @@ const INITIAL: ConnectionValue = { status: "connecting", host: null, generation:
 
 const ConnectionContext = createContext<ConnectionValue>(INITIAL);
 
-/** Set just before a mismatch reload, so a still-incompatible shell shows a banner instead of looping. */
-const MISMATCH_KEY = "moonan.protocol-mismatch";
-
 function socketUrl(): string {
 	const scheme = location.protocol === "https:" ? "wss" : "ws";
 	return `${scheme}://${location.host}/ws`;
-}
-
-/** Chord's answer to an incompatible client: reload the page and hope the new shell matches. */
-function reloadOnce(): boolean {
-	const now = Date.now();
-	const last = Number(sessionStorage.getItem(MISMATCH_KEY) ?? 0);
-	if (now - last < 10_000) return false;
-	sessionStorage.setItem(MISMATCH_KEY, String(now));
-	location.reload();
-	return true;
 }
 
 /**
@@ -84,10 +72,12 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
 			// safe order and costs nothing: `webSocketLink` buffers outgoing frames until open,
 			// and no frame can arrive before the link it arrives on exists.
 			host.connect(webSocketLink(next), {
-				principal: { id: "browser" },
+				// `connect.principal` is what the parent's own requests act as in this host:
+				// the server's own code, not this browser.
+				principal: { id: "host" },
 				onProtocolMismatch: () => {
 					mismatched = true;
-					if (reloadOnce()) return;
+					if (reloadOnce("protocol mismatch")) return;
 					setValue({ status: "error", host: null, generation: 0, error: "protocol_mismatch" });
 					void host.close().catch(() => undefined);
 				},

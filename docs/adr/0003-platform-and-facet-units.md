@@ -20,7 +20,7 @@ Moonan 原来的“基座（substrate）”把自己放在 Chord 的 host 之下
 
 **Consequences**
 
-- 破坏性变更：`plugin.json`、插件 ID、`/plugins/<id>/...`、`Manifest.plugins` 都不再存在；`Manifest` 契约升到 v2。
+- 破坏性变更：`plugin.json`、插件 ID、`/plugins/<id>/...`、`Manifest.plugins` 都不再存在；`Manifest` 契约升到 v2（后续 v3 见 [0004](0004-manifest-store-and-web-hash.md)）。
 - 一个坏的服务端切面会阻止启动，而不是让其他插件继续跑；真正的隔离留给未来的 child-host 工作。
 - 纯前端插件（只有 `web.js`，或包只导出 `./web`）现在可以启动并被浏览器加载。
 - 旧的 `0001`、`0002` ADR 已删除；它们的内容与命名不再适用，git 历史保留。

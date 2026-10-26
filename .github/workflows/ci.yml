@@ -42,7 +42,7 @@ jobs:
           check packages/platform/dist/web/index.html
           # A plugin imported at runtime resolves these through the import map, so all of
           # them have to exist by these exact names.
-          for runtime in react jsx-runtime react-dom chord chord-output typebox typebox-value sdk sdk-web; do
+          for runtime in react jsx-runtime react-dom chord chord-context chord-delta chord-output typebox typebox-value sdk sdk-web; do
             check "packages/web/dist/runtime/$runtime.js"
           done
           grep -q 'type="importmap"' packages/web/dist/index.html || { echo "importmap missing"; missing=1; }

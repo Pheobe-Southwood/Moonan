@@ -24,7 +24,7 @@ export interface PluginFacets {
 	/** The server facet module, importable by `nodeLoader`. */
 	server?: string;
 	/** The browser facet: the file on disk and the path it is served from. */
-	web?: { file: string; url: string; base: string };
+	web?: { file: string; url: string; base: string; hash: string };
 	/** Set when resolution failed; the plugin keeps its place in the list. */
 	error?: string;
 	/** True once the server facet is installed and activated. */
@@ -36,9 +36,21 @@ export function describe(plugin: PluginFacets): FacetSetEntry {
 		name: plugin.name,
 		version: plugin.version,
 		source: plugin.source,
-		...(plugin.web ? { web: plugin.web.url } : {}),
+		...(plugin.web ? { web: { url: plugin.web.url, hash: plugin.web.hash } } : {}),
 		...(plugin.error ? { error: plugin.error } : {}),
 	};
+}
+
+/**
+ * The exact browser facet set: URL + content hash. A server-only reload does not change it;
+ * a web facet edit does. This is what `reloadBrowser` and the shell compare.
+ */
+export function webSignature(plugins: readonly PluginFacets[]): string {
+	return plugins
+		.filter((plugin) => plugin.web)
+		.map((plugin) => `${plugin.web!.url}#${plugin.web!.hash}`)
+		.sort()
+		.join("|");
 }
 
 export function errorMessage(error: unknown): string {

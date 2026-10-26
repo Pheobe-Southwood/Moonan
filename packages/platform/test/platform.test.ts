@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,7 @@ import WebSocket from "ws";
 import { start, type Moonan } from "../src/index.js";
 import { silentLogger } from "../src/logger.js";
 import { createPlatform } from "../src/platform.js";
+import { resolvePluginRef } from "../src/plugins.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const clockDir = join(root, "examples", "clock-plugin");
@@ -58,7 +59,7 @@ describe("the platform", () => {
 		expect(clock).toBeDefined();
 		expect("id" in clock!).toBe(false);
 		expect(clock?.error).toBeUndefined();
-		expect(clock?.web).toMatch(/^\/facets\/[0-9a-f]{12}\/web\.js$/);
+		expect(clock?.web?.url).toMatch(/^\/facets\/[0-9a-f]{12}\/web\.js$/);
 		expect(clock?.source).toBe("directory");
 	});
 
@@ -72,7 +73,7 @@ describe("the platform", () => {
 
 	it("serves the browser facet as an importable module", async () => {
 		const clock = await clockOf(moonan);
-		const response = await fetch(`${moonan.url}${clock.web}`);
+		const response = await fetch(`${moonan.url}${clock.web?.url}`);
 		expect(response.status).toBe(200);
 		expect(response.headers.get("content-type")).toMatch(/javascript/);
 		expect(await response.text()).toMatch(/defineFacet/);
@@ -80,7 +81,7 @@ describe("the platform", () => {
 
 	it("refuses to read outside a facet's directory", async () => {
 		const clock = await clockOf(moonan);
-		const base = clock.web!.replace(/web\.js$/, "");
+		const base = clock.web!.url.replace(/web\.js$/, "");
 		// The segment is percent-encoded so `new URL` cannot normalise it away before we see it.
 		const response = await fetch(`${moonan.url}${base}..%2f..%2fpackage.json`);
 		expect(response.status).not.toBe(200);
@@ -98,7 +99,7 @@ describe("the platform", () => {
 		// what a missing hello costs (no acknowledgements, so no flow control).
 		const client = createHost({ kind: "client", self: { id: "browser" } });
 		// `ws` speaks the structural WebSocketLike chord wants, event listeners included.
-		client.connect(webSocketLink(socket as never), { principal: { id: "browser" } });
+		client.connect(webSocketLink(socket as never), { principal: { id: "host" } });
 		await new Promise<void>((resolve, reject) => {
 			socket.once("open", () => resolve());
 			socket.once("error", (error) => reject(error));
@@ -134,7 +135,9 @@ describe("the platform", () => {
 			report?: { codeVersion: number };
 		};
 		expect(body.ok).toBe(true);
-		expect(body.reloadBrowser).toBe(true);
+		// The clock's server facet is reloaded, but its web file is unchanged. The browser
+		// must not reload on a server-only code-version bump.
+		expect(body.reloadBrowser).toBe(false);
 		expect(body.revision).toBeGreaterThan(before);
 		expect(body.report?.codeVersion).toBe(body.revision);
 	});
@@ -325,11 +328,172 @@ export default defineFacet((api) => {
 		}
 	});
 
+	it("installs the manifest facet in the same batch, so a plugin host object can consume it", async () => {
+		const dir = await mkdtemp(join(root, "packages", "platform", ".manifest-batch-"));
+		await writeFile(
+			join(dir, "server.mjs"),
+			`import { Manifest, Type, defineFacet, local, method } from "@moonan_ai/sdk";
+const Probe = local("test.probe", { version: 1, input: Type.Object({}), members: { revision: method(undefined, Type.Number()) } });
+export default defineFacet((api) => {
+	api.serve(Probe, (_input, _principal, self) => {
+		const manifest = self.get(Manifest, {});
+		return { revision: () => manifest.revision.value };
+	}, { lifetime: "host" });
+}, { uses: [Manifest] });
+`,
+		);
+
+		const platform = await createPlatform({ version: "test", plugins: [dir], logger: silentLogger });
+		try {
+			// The assertion is that startup resolved: if the manifest facet were installed after
+			// the plugin batch, Probe's activation would fail with `unknown_type`.
+			expect(platform.plugins[0]?.serverInstalled).toBe(true);
+		} finally {
+			await platform.close();
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("reloads a web-only plugin's facet when its content hash changes", async () => {
+		const dir = await mkdtemp(join(root, "packages", "platform", ".webhash-"));
+		await writeFile(join(dir, "web.js"), "export default { setup() {} };\n");
+		const app = await start({ port: 0, hostname: "127.0.0.1", plugins: [dir], pluginsDir, logger: silentLogger });
+		try {
+			const beforeHash = app.plugins[0]?.web?.hash;
+			expect(beforeHash).toMatch(/^[0-9a-f]{12}$/);
+			await writeFile(join(dir, "web.js"), "// changed\nexport default { setup() {} };\n");
+			const response = await fetch(`${app.url}/api/plugins/reload`, { method: "POST" });
+			expect(response.status).toBe(200);
+			const body = (await response.json()) as { reloadBrowser: boolean; revision: number };
+			expect(body.reloadBrowser).toBe(true);
+			// A web-only change has no server commit; the code version is unchanged.
+			expect(body.revision).toBe(app.revision);
+			const afterHash = app.plugins[0]?.web?.hash;
+			expect(afterHash).not.toBe(beforeHash);
+		} finally {
+			await app.close();
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("aborts a route's ctx when the client disconnects", async () => {
+		const dir = await mkdtemp(join(root, "packages", "platform", ".abort-"));
+		const started = join(dir, "started");
+		const aborted = join(dir, "aborted");
+		await writeFile(
+			join(dir, "server.mjs"),
+			`import { writeFileSync } from "node:fs";
+import { Routes, Type, defineFacet, local } from "@moonan_ai/sdk";
+const Root = local("test.abort", { version: 1, input: Type.Object({}), members: {} });
+const started = ${JSON.stringify(started)};
+const aborted = ${JSON.stringify(aborted)};
+export default defineFacet((api) => {
+	api.serve(Root, (_input, _principal, self) => {
+		self.register(Routes, {
+			"GET /hang": async (_request, _response, ctx) => {
+				writeFileSync(started, "started");
+				await new Promise((resolve) => {
+					if (ctx.signal.aborted) return resolve();
+					ctx.signal.addEventListener("abort", () => {
+						writeFileSync(aborted, "aborted");
+						resolve();
+					}, { once: true });
+				});
+			},
+		});
+		return {};
+	}, { lifetime: "host" });
+});
+`,
+		);
+		const app = await start({ port: 0, hostname: "127.0.0.1", plugins: [dir], pluginsDir, logger: silentLogger });
+		try {
+			const controller = new AbortController();
+			const request = fetch(`${app.url}/hang`, { signal: controller.signal });
+			let seen = false;
+			for (let i = 0; i < 40; i += 1) {
+				try {
+					if ((await readFile(started, "utf8")) === "started") {
+						seen = true;
+						break;
+					}
+				} catch {
+					await new Promise((resolve) => setTimeout(resolve, 25));
+				}
+			}
+			expect(seen).toBe(true);
+			controller.abort();
+			await expect(request).rejects.toBeDefined();
+			let content: string | undefined;
+			for (let i = 0; i < 40; i += 1) {
+				try {
+					content = await readFile(aborted, "utf8");
+					break;
+				} catch {
+					await new Promise((resolve) => setTimeout(resolve, 25));
+				}
+			}
+			expect(content).toBe("aborted");
+		} finally {
+			await app.close();
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("answers unknown /api paths with JSON 404, not the shell", async () => {
+		const response = await fetch(`${moonan.url}/api/not-a-route`);
+		expect(response.status).toBe(404);
+		expect(response.headers.get("content-type")).toMatch(/application\/json/);
+		expect(await response.json()).toEqual({ error: "not found" });
+	});
+
+	it("resolves package plugins from the working directory", async () => {
+		const project = await mkdtemp(join(root, "packages", "platform", ".pkg-"));
+		const pkgDir = join(project, "node_modules", "fake-plugin");
+		await mkdir(pkgDir, { recursive: true });
+		await writeFile(
+			join(pkgDir, "package.json"),
+			JSON.stringify({
+				name: "fake-plugin",
+				version: "1.2.3",
+				type: "module",
+				exports: { ".": "./index.js", "./web": "./web.js" },
+			}),
+		);
+		await writeFile(join(pkgDir, "index.js"), "export default { setup() {} };\n");
+		await writeFile(join(pkgDir, "web.js"), "export default { setup() {} };\n");
+		try {
+			const plugin = resolvePluginRef("fake-plugin", project);
+			expect(plugin.error).toBeUndefined();
+			expect(plugin.version).toBe("1.2.3");
+			expect(plugin.server).toMatch(/node_modules\/fake-plugin\/index\.js$/);
+			expect(plugin.web?.url).toMatch(/^\/facets\/[0-9a-f]{12}\/web\.js$/);
+			expect(plugin.web?.hash).toMatch(/^[0-9a-f]{12}$/);
+		} finally {
+			await rm(project, { recursive: true, force: true });
+		}
+	});
+
+	it("honors a parent package scope when a directory plugin uses .js", async () => {
+		const parent = await mkdtemp(join(root, "packages", "platform", ".scope-"));
+		await writeFile(join(parent, "package.json"), JSON.stringify({ type: "module" }));
+		const pluginDir = join(parent, "plugin");
+		await mkdir(pluginDir, { recursive: true });
+		await writeFile(join(pluginDir, "server.js"), "export default { setup() {} };\n");
+		try {
+			const plugin = resolvePluginRef(pluginDir, parent);
+			expect(plugin.error).toBeUndefined();
+			expect(plugin.server).toMatch(/plugin\/server\.js$/);
+		} finally {
+			await rm(parent, { recursive: true, force: true });
+		}
+	});
+
 	it("converges every manifest instance on the new code version", async () => {
 		const current = (await (await fetch(`${moonan.url}/api/plugins`)).json()) as PluginsResponse;
 		const socket = new WebSocket(`${moonan.url.replace("http", "ws")}/ws`);
 		const client = createHost({ kind: "client", self: { id: "browser" } });
-		client.connect(webSocketLink(socket as never), { principal: { id: "browser" } });
+		client.connect(webSocketLink(socket as never), { principal: { id: "host" } });
 		await new Promise<void>((resolve, reject) => {
 			socket.once("open", () => resolve());
 			socket.once("error", (error) => reject(error));

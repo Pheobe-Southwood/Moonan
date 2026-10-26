@@ -2,11 +2,11 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, resolve, sep } from "node:path";
-import { acceptWebSockets, type Host, type ReloadReport } from "@earendil-works/chord";
+import { acceptWebSockets, isChordError, type Host, type ReloadReport } from "@earendil-works/chord";
 import { Routes } from "@moonan_ai/sdk";
 import { WebSocketServer } from "ws";
 import type { Logger } from "./logger.js";
-import { describe, errorMessage, type PluginFacets, type Principal } from "./types.js";
+import { describe, errorMessage, type PluginFacets, type Principal, webSignature } from "./types.js";
 
 export interface WebServerOptions {
 	host: Host<Principal>;
@@ -149,24 +149,28 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 				sendJson(response, 405, { error: "method not allowed" });
 				return;
 			}
-			const before = options.revision();
+			const beforeWeb = webSignature(plugins());
 			try {
 				const report = await options.reload();
-				// A committed reload moves chord's code version. The shell watches the same
-				// number as a state member and swaps its browser facets with `host.reload`; a
-				// browser takes no part in *cluster* reload coordination, so it learns about new
-				// code from state, not from a commit frame. The flag means "browser facets are
-				// stale", not "reload the page" — only a protocol mismatch reloads the page.
-				const committed = options.revision() > before;
+				// `reloadBrowser` means "the browser facet set or its code changed", not "the
+				// server committed". A web file's content hash is the signal; a server-only
+				// change leaves it untouched. A browser that is not a cluster participant
+				// learns this through `Manifest` and swaps its own facets with `host.reload`.
+				const afterWeb = webSignature(plugins());
 				sendJson(response, 200, {
 					ok: true,
-					reloadBrowser: committed,
+					reloadBrowser: afterWeb !== beforeWeb,
 					revision: options.revision(),
 					...(report ? { report } : {}),
 				});
 			} catch (error) {
 				options.logger.error("facet reload failed", error);
-				sendJson(response, 400, { error: errorMessage(error) });
+				sendJson(response, 400, {
+					error: errorMessage(error),
+					...(isChordError(error)
+						? { code: error.code, ...(error.reason ? { reason: error.reason } : {}) }
+						: {}),
+				});
 			}
 			return;
 		}
@@ -175,20 +179,47 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 			if (await serveFacetAsset(pathname, response)) return;
 		}
 
-		// Plugin HTTP routes, resolved against the code version this root runs on.
+		// Plugin HTTP routes, resolved against the code version this root runs on. The root
+		// follows the response's lifetime: a client that disconnects aborts `ctx.signal`, so
+		// a plugin's nested calls stop instead of running for a response nobody will read.
+		const controller = new AbortController();
+		const abortOnClose = () => {
+			if (!response.writableEnded) controller.abort();
+		};
+		response.on("close", abortOnClose);
 		try {
-			const handled = await options.host.root(async (ctx) => {
-				const view = options.host.registry(Routes);
-				const handler = view.get(`${method} ${pathname}`, ctx) ?? view.get(pathname, ctx);
-				if (!handler) return false;
-				await handler(request, response, ctx);
-				return true;
-			});
+			const handled = await options.host.root(
+				async (ctx) => {
+					const view = options.host.registry(Routes);
+					const handler = view.get(`${method} ${pathname}`, ctx) ?? view.get(pathname, ctx);
+					if (!handler) return false;
+					await handler(request, response, ctx);
+					return true;
+				},
+				{ signal: controller.signal },
+			);
 			if (handled) return;
 		} catch (error) {
+			// A disconnect is not a server error: the root was aborted on purpose.
+			if (controller.signal.aborted) return;
 			options.logger.error(`route ${method} ${pathname} failed`, error);
-			if (!response.headersSent) sendJson(response, 500, { error: "internal error" });
-			else response.end();
+			if (!response.headersSent) {
+				sendJson(response, 500, {
+					error: "internal error",
+					...(isChordError(error)
+						? { code: error.code, ...(error.reason ? { reason: error.reason } : {}) }
+						: {}),
+				});
+			} else response.end();
+			return;
+		} finally {
+			response.off("close", abortOnClose);
+		}
+
+		// `/api/*` is the platform's own JSON surface. An unknown path is a 404, never the
+		// SPA shell with a misleading 200.
+		if (pathname === "/api" || pathname.startsWith("/api/")) {
+			sendJson(response, 404, { error: "not found" });
 			return;
 		}
 
@@ -236,7 +267,12 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 				wss.close(() => resolveClose());
 				for (const client of wss.clients) client.terminate();
 			});
-			await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+			await new Promise<void>((resolveClose) => {
+				server.close(() => resolveClose());
+				// HTTP keep-alive connections from the shell/API can otherwise keep `close()`
+				// waiting for their idle timeout after the listener is gone.
+				server.closeIdleConnections();
+			});
 		},
 	};
 }

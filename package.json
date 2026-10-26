@@ -10,7 +10,7 @@
   "scripts": {
     "typecheck": "pnpm -r --parallel typecheck",
     "build": "pnpm -r build",
-    "test": "pnpm --filter @moonan_ai/moonan test",
+    "test": "pnpm -r --if-present test",
     "dev": "pnpm build && node packages/platform/bin/moonan.js --plugin ./examples/clock-plugin"
   },
   "devDependencies": {

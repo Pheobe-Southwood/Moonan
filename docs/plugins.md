@@ -20,7 +20,7 @@ my-plugin/
 | 目录 | `--plugin ./my-plugin`，或放进 `--plugins-dir` 的任一子目录 | `server.mjs` / `server.js` 与 `web.js` / `web.mjs`，各自可选 |
 | 包 | `--plugin my-plugin` | 包自己的 `exports`：`"."` 是服务端切面，`"./web"` 是浏览器切面，各自可选 |
 
-平台对两者做同一件事：拿到切面模块 URL，交给 Chord。区别只在 URL 从哪来。一个包可以只导出 `"./web"`，一个目录可以只有 `web.js`——平台照样启动，只是没有服务端切面。纯前端插件不参与服务端 reload 的 code version；改了 `web.js` 后刷新页面或重启进程。
+平台对两者做同一件事：拿到切面模块 URL，交给 Chord。区别只在 URL 从哪来。一个包可以只导出 `"./web"`，一个目录可以只有 `web.js`——平台照样启动，只是没有服务端切面。纯前端插件不参与服务端 commit，但平台会重算它的 web hash；改完 `web.js` 后 `POST /api/plugins/reload` 就能让浏览器换上新模块。
 
 ### 依赖从哪来
 
@@ -45,7 +45,7 @@ my-plugin/
 }
 ```
 
-一条规则值得记住：目录里的 `.js` 服务端入口，如果同目录没有 `{"type":"module"}` 的 `package.json`，Node 会当 CommonJS 加载，`export default` 直接失败。平台会给出明确错误并跳过这个服务端切面；同目录的 `web.js` 仍可作为浏览器切面出现在清单里。要么写 `.mjs`，要么加上 `"type": "module"`。
+一条规则值得记住：目录里的 `.js` 服务端入口，如果最近的 `package.json` 没有 `{"type":"module"}`，Node 会当 CommonJS 加载，`export default` 直接失败。平台沿 package scope 查找，所以插件目录的父目录声明 `"type":"module"` 也可以。平台会给出明确错误并跳过这个服务端切面；同目录的 `web.js` 仍可作为浏览器切面出现在清单里。要么写 `.mjs`，要么在目录或父目录加上 `"type": "module"`。
 
 ## 服务端切面
 
@@ -138,7 +138,7 @@ export default defineFacet((api) => {
 
 ## 直接用 Chord
 
-`@moonan_ai/sdk` 把 Chord 的原语原样再导出了：`remote`、`local`、`method`、`hostNamed`、`defineFacet`、`defineRegistry`、`Type`……插件不直接依赖 Chord 也能写完整功能。想用更深的 API，装 `@earendil-works/chord` 即可，版本对齐 `1.4.0`。
+`@moonan_ai/sdk` 把 Chord 的原语再导出了：`remote`、`local`、`method`、`hostNamed`、`defineFacet`、`defineRegistry`、`Type`，以及 `forbidden`、`invalid`、`isChordError`、`BACKGROUND_CONTEXT`、`Context` 等错误/上下文入口。插件不直接依赖 Chord 也能写完整功能。想用更深的 API（`track`、`applyImmutable` 等），装 `@earendil-works/chord` 即可，版本对齐 `1.4.0`；浏览器切面还可以直接 `import "@earendil-works/chord/context"` 或 `/delta`，import map 已提供这两个入口。
 
 ## 持久化
 
@@ -157,7 +157,7 @@ const db = new DatabaseSync("/path/to/your-own.db");
 curl http://127.0.0.1:21315/api/plugins
 ```
 
-返回里每项带 `name`、`version`、`source`、`web`（浏览器切面 URL）和 `error`（如果有）；`serverInstalled` 只留在平台内部记录里。解析失败的插件不会消失——它停在这个列表里，理由写在一起，页面上会显示一条横幅。
+返回里每项带 `name`、`version`、`source`、`web`（浏览器切面 `{ url, hash }`）和 `error`（如果有）；`serverInstalled` 只留在平台内部记录里。解析失败的插件不会消失——它停在这个列表里，理由写在一起，页面上会显示一条横幅。
 
 ## 热重载
 
@@ -170,6 +170,9 @@ curl -X POST http://127.0.0.1:21315/api/plugins/reload
 - breaking contract 的 provider 与 consumer 永远在同一批里，不会被拆开；
 - 新宿主对象激活失败会变成一次失败请求，而不是「reload 成功但对象没起来」；
 - 旧代码在旧根跑完后退休，这是 Chord 自己的事务语义；
+- web facet 的内容 hash 变化时，响应里的 `reloadBrowser` 为 true；只改服务端时它是 false；
 - reload 只重载已解析的切面；新增/删除插件目录、或修复一次解析错误，仍需要重启进程。
+
+Chord 的 `nodeLoader` 每次 reload 都会 import 一份新的模块副本，且不会 evict 旧副本（上游已知限制）。频繁 reload 会让进程内存增长；长期运行的会话可以定期重启进程。
 
 启动时如果某个服务端切面 `setup` 抛错，平台会关闭宿主并让启动失败。这是刻意的：Chord 的 `install` 不是回滚事务，继续运行会留下半个插件。修好文件后重启进程，而不是在同一个宿主里“恢复”。

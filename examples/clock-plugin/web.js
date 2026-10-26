@@ -64,6 +64,8 @@ function ClockPanel({ host }) {
 		setBusy(true);
 		try {
 			await clock.tick();
+		} catch (error) {
+			console.error("[clock] tick failed", error);
 		} finally {
 			setBusy(false);
 		}

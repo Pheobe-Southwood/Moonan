@@ -6,15 +6,25 @@
  * `Panels` registry and the React hooks) lives in `@moonan_ai/sdk/web`, because it needs
  * React and the root entry must stay importable from a Node facet.
  */
-export { Manifest, FacetSetSchema, type FacetSetEntry } from "./manifest.js";
+export {
+	Manifest,
+	FacetSetSchema,
+	WebFacetSchema,
+	type FacetSetEntry,
+	type WebFacet,
+} from "./manifest.js";
 export { Routes, type RouteHandler } from "./routes.js";
 
 /** Chord primitives, re-exported so a plugin needs two dependencies instead of three. */
 export {
+	ChordError,
 	defineFacet,
 	defineRegistry,
+	forbidden,
 	hostFamily,
 	hostNamed,
+	invalid,
+	isChordError,
 	local,
 	method,
 	opaque,
@@ -36,6 +46,17 @@ export {
 	type RemoteContract,
 	type Shape,
 } from "@earendil-works/chord";
+
+/** Explicit cancellation/context helpers; browser-safe, same entry points as chord. */
+export {
+	BACKGROUND_CONTEXT,
+	awaitWithContext,
+	traceIn,
+	withAbortSignal,
+	withCancel,
+	withoutAbortSignal,
+	type Context,
+} from "@earendil-works/chord/context";
 
 /** The schema builder every contract is written with. */
 export { Type, type Static, type TSchema } from "typebox";

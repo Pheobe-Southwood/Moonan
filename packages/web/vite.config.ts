@@ -14,6 +14,8 @@ const SHARED = [
 	"react-dom",
 	"react-dom/client",
 	"@earendil-works/chord",
+	"@earendil-works/chord/context",
+	"@earendil-works/chord/delta",
 	"@earendil-works/chord/output",
 	"typebox",
 	"typebox/value",

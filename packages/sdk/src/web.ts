@@ -11,6 +11,22 @@ import {
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 export type { InputOf, Readable, Ref, RefStatus } from "@earendil-works/chord";
+export { isChordError } from "@earendil-works/chord";
+
+/** A `gone` error that no new reference can fix: the page needs the build for the new contract. */
+export function isFatalContractError(error: unknown): boolean {
+	return isChordError(error, "contract_mismatch") || isChordError(error, "upgrade_required");
+}
+
+/** Options of {@link useRemote}. */
+export interface UseRemoteOptions {
+	/**
+	 * Called once when the reference can no longer be recovered: a non-retryable contract
+	 * error, or a `gone` reference after the bounded retries. The shell uses this to reload
+	 * the page instead of rendering a permanently loading screen.
+	 */
+	onFatal?: (error: unknown) => void;
+}
 
 /**
  * What the shell hands to a panel: the browser chord host, and nothing else.
@@ -74,6 +90,7 @@ export function useRemote<C extends AnyContract>(
 	host: Host<unknown> | null | undefined,
 	contract: C,
 	input: InputOf<C>,
+	options: UseRemoteOptions = {},
 ): Ref<C> | null {
 	// The input is a plain JSON address, and a panel commonly passes a fresh `{}` each
 	// render. Key on its content so identity churn does not re-acquire the reference.
@@ -81,6 +98,9 @@ export function useRemote<C extends AnyContract>(
 	const [ref, setRef] = useState<Ref<C> | null>(null);
 	const [attempt, setAttempt] = useState(0);
 	const retries = useRef(0);
+	const fatalReported = useRef(false);
+	const onFatal = useRef(options.onFatal);
+	onFatal.current = options.onFatal;
 
 	useLayoutEffect(() => {
 		if (!host) {
@@ -105,16 +125,36 @@ export function useRemote<C extends AnyContract>(
 
 	useEffect(() => {
 		if (!ref) return;
-		return ref.onStatus((status: RefStatus) => {
+		return ref.onStatus((status: RefStatus, error: unknown) => {
 			// A reconnect re-holds in place (`loading`, last values readable) and needs nothing.
 			// `gone` is terminal for this reference — the object was forced away while held —
 			// and chord's guidance for a UI is to take a new one. Bounded, so a provider that
 			// keeps answering `gone` cannot spin the page.
 			if (status === "live") {
 				retries.current = 0;
-			} else if (status === "gone" && retries.current < 3) {
+				fatalReported.current = false;
+				return;
+			}
+			if (status !== "gone") return;
+
+			// A contract that the provider no longer covers cannot be fixed by taking another
+			// reference: the page needs the build that knows the new contract.
+			if (isFatalContractError(error)) {
+				if (!fatalReported.current) {
+					fatalReported.current = true;
+					onFatal.current?.(error);
+				}
+				return;
+			}
+
+			if (retries.current < 3) {
 				retries.current += 1;
 				setAttempt((value) => value + 1);
+				return;
+			}
+			if (!fatalReported.current) {
+				fatalReported.current = true;
+				onFatal.current?.(error);
 			}
 		});
 	}, [ref]);

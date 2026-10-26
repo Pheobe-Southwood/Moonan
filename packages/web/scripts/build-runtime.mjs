@@ -39,6 +39,8 @@ const entries = {
 	// Chord imports this deep entry itself; a plugin may want it for schema validation.
 	"typebox-value": 'export * from "typebox/value";',
 	chord: 'export * from "@earendil-works/chord";',
+	"chord-context": 'export * from "@earendil-works/chord/context";',
+	"chord-delta": 'export * from "@earendil-works/chord/delta";',
 	"chord-output": 'export * from "@earendil-works/chord/output";',
 	sdk: 'export * from "@moonan_ai/sdk";',
 	"sdk-web": 'export * from "@moonan_ai/sdk/web";',
