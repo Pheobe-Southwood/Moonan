@@ -13,7 +13,12 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 export type { InputOf, Readable, Ref, RefStatus } from "@earendil-works/chord";
 export { isChordError } from "@earendil-works/chord";
 
-/** A `gone` error that no new reference can fix: the page needs the build for the new contract. */
+/**
+ * A `gone` error that no new reference can fix: the consumer was built against a contract the
+ * provider no longer covers. For the shell's own contracts (the platform `Manifest`, or a
+ * protocol mismatch) the page needs the new build. For a plugin's contract, chord's remedy is
+ * to reload the web facets; the shell does that when the manifest reports changed facets.
+ */
 export function isFatalContractError(error: unknown): boolean {
 	return isChordError(error, "contract_mismatch") || isChordError(error, "upgrade_required");
 }
@@ -99,6 +104,7 @@ export function useRemote<C extends AnyContract>(
 	const [attempt, setAttempt] = useState(0);
 	const retries = useRef(0);
 	const fatalReported = useRef(false);
+	const warned = useRef(false);
 	const onFatal = useRef(options.onFatal);
 	onFatal.current = options.onFatal;
 
@@ -133,16 +139,30 @@ export function useRemote<C extends AnyContract>(
 			if (status === "live") {
 				retries.current = 0;
 				fatalReported.current = false;
+				warned.current = false;
 				return;
 			}
 			if (status !== "gone") return;
 
 			// A contract that the provider no longer covers cannot be fixed by taking another
-			// reference: the page needs the build that knows the new contract.
+			// reference. The shell owns the official remedy (reload the web facets when the
+			// manifest reports changed facets); a panel only reports it upward, and without an
+			// `onFatal` handler it says once what the developer can do.
 			if (isFatalContractError(error)) {
-				if (!fatalReported.current) {
-					fatalReported.current = true;
-					onFatal.current?.(error);
+				const handler = onFatal.current;
+				if (handler !== undefined) {
+					if (!fatalReported.current) {
+						fatalReported.current = true;
+						handler(error);
+					}
+					return;
+				}
+				if (!warned.current) {
+					warned.current = true;
+					console.warn(
+						"[chord] a reference is gone because its contract no longer binds. The shell reloads web facets when the Manifest reports changed facets; if this persists, the plugin's web code and contract are out of sync.",
+						error,
+					);
 				}
 				return;
 			}

@@ -83,31 +83,41 @@ const handled = await host.root(
 ```text
 POST /api/plugins/reload        ← 无 body；没有“按插件 ID”这回事
   │
-  ├── 全部服务端切面     → host.reload([...serverFacetUrls])（没有服务端切面则跳过）
+  ├── 重新解析 refs       → 删除/改名的入口变成 remove 的 facet；web 内容 hash 重算
+  ├── 全部服务端切面     → host.reload([...serverFacetUrls], { remove })；仅纯 web 变化（无服务端切面、无待移除切面）才跳过
   ├── chord 内部         → prepare → gate → commit → retire
   ├── 提交成功           → chord 的 code version +1，平台直接读 host.codeVersion
-  ├── 等待新宿主对象     → host.ready()；激活失败在这里 reject
-  ├── 重算 web hash      → refreshWebHashes(plugins)
+  ├── 应用新解析结果     → 原地更新 name / version / server / web / error
+  ├── 等待新宿主对象     → host.ready()；激活失败在这里 reject（提交已经生效）
   ├── 发布快照           → store.update({ version, facets, revision })
   └── 响应 { ok, reloadBrowser, revision, report? }
 ```
 
-`revision` 就是 **chord 的 code version**（`host.codeVersion`）：启动时是 1，每次提交 +1。平台不自己数一个整数——那份信息 chord 本来就有，而且 `ReloadReport.codeVersion` 已经在响应里。
+`revision` 取自 **chord 的 code version**（`host.codeVersion`）：启动时是 1，每次提交 +1。它是 Moonan 的应用状态（spec §6 把 server `Manifest` 点名为浏览器了解变化的通道），不是 chord 被移除的 `Shape.codeVersion`，也不能当协议字段用。
 
 `reloadBrowser` 说的是「浏览器切面集合或其内容变了」，不是「服务端 code version 变了」。它比较 reload 前后的 `webSignature`（每个 web facet 的 `url#hash`）：
 - 只 reload 服务端切面：hash 不变 → `false`，浏览器不重载；
 - 改了 web.js / 增删 web 切面：hash 变 → `true`；
-- 纯前端插件没有服务端切面：`host.reload` 跳过，但仍重算 hash 并发布，所以也能通过同一个 POST 更新。
+- 纯前端插件没有服务端切面：`host.reload` 跳过，但仍发布新 hash，所以也能通过同一个 POST 更新。
 
-浏览器不参与 chord 的 **cluster** 重载协调，但 `kind: "client"` 的宿主可以本地 reload 自己的切面（代码版本不跨连接传播）——chord 对过期契约的补救也正是「reload its web facets」。整页刷新只留给协议版本失配和 Manifest 契约不匹配。
+### 官方信号 vs 平台信号
 
-`host.reload` 在 prepare 阶段是事务性的：如果 provider 与 consumer 的契约对不上，且 consumer 不在这一批里，reload 会被拒绝，旧代码保留。平台总是把全部服务端切面放进同一批，所以 breaking contract 的 provider 和 consumer 不会分开。提交失败时不刷新 web hash，也不发布新 revision。
+| 信号 | 谁裁决 | 动作 |
+|---|---|---|
+| 协议版本失配 | chord 链接层 | **整页刷新**（guide 的协议失配条款） |
+| 插件契约失配 / `upgrade_required` | chord | **重载 web 切面**（官方补救就是 “reload its web facets”）。外壳在 Manifest 报告 web 切面变化时做；若没有任何切面变化，重载同一文件无意义——这是插件自身 web 代码与契约不同步 |
+| 平台 Manifest 契约失配 | Moonan 例外 | **整页刷新**：外壳不是可重载切面，只有新壳能理解新 Manifest 契约 |
+| web 模块内容变化（hash） | Moonan（内容层） | 触发 client-local `host.reload`；hash **不判断契约兼容**，那始终由 chord 裁决 |
 
-旧代码的根还在跑时，旧实现继续为它服务；根结束后，那一版才退休。这是 Chord 自带的事务语义，平台没有额外做什么。
+chord 支持 `kind: "client"` 的宿主本地 reload 自己的切面（client-local code version 不跨父链接），浏览器不参与 cluster 重载协调。`host.reload` 在 prepare 阶段是事务性的：prepare 失败时旧代码保留、旧 `plugins` 列表也保留，下一次 Manifest 发布仍会重试。提交成功但 `host.ready()` 失败时，代码已经提交：平台照常发布清单，但把这次请求报成失败（400），不让“激活失败”伪装成“没重载”。
+
+移除一个切面同样是一次 chord 提交（`host.reload([], { remove })`）：被移除类型的引用变 `gone`，`ReloadReport.removed` 给出类型名。移除 provider 不会让 prepare 失败——chord 对已移除的 service 跳过 `uses` 检查；消费方的引用会随之下线。
+
+旧代码的根还在跑时，旧实现继续为它服务；根结束后，那一版才退休。这是 chord 自带的事务语义，平台没有额外做什么。
 
 ## 一次广播
 
-`Manifest` 是远程对象，chord 按 principal 建实例：**宿主自己的一个，以及所有浏览器共用的一个**（`acceptWebSockets` 给每个连接同一个 principal）。但所有实例共享同一个权威状态，平台不遍历、不复制：
+`Manifest` 是远程对象，chord 按 principal 建实例：**宿主自己的一个，以及所有浏览器共用的一个**（`acceptWebSockets` 给每个连接同一个 principal——官方 WebSocket 测试也给所有已认证客户端同一个常量 principal；按连接区分是应用选择，不是 chord 要求）。所有实例共享同一个权威状态，平台不遍历、不复制：
 
 ```text
 ManifestStore（local, lifetime: "host"）
@@ -134,13 +144,17 @@ Manifest（remote, per principal）
   ├── 先建 link，再等 socket open（服务端的 hello 在建连时就发出，晚订阅就永远收不到）
   ├── 连 /ws，建 kind:"client" 宿主（整页只建一次）
   ├── host.hold(Manifest) → 引用立刻返回，可能仍是 loading
-  ├── 一次 host.load([...web 切面 URL])：整批装完再激活
+  ├── 一次 host.load([...web 切面 URL], { awaitHostObjects: false })
+  │     ├── 装完记下签名（安装不是回滚事务）
+  │     ├── host.ready() 等宿主对象激活
   │     └── 插件切面把自己注册进 Panels 注册表
   ├── 外壳订阅 Panels，按 order 排序渲染标签页
-  └── Manifest.facets[].web.hash 变化 → host.reload(同批 URL, { remove }) → host.ready()
+  └── Manifest.facets[].web.hash 变化 → host.reload(同批 URL, { remove })
+        ├── resolve = 已提交 → 立即记下新签名
+        └── host.ready() 失败只报横幅，不回滚（提交已是既成事实）
 ```
 
-浏览器只比较 `web.url#hash`。服务端只改了服务端代码、web 文件没变时，hash 不变，浏览器不重载；改了 `web.js` 才会换。Manifest 的 `revision` 仍发布，但只作为诊断字段，不驱动重载。若 Manifest 本身因契约升级无法绑定，`useRemote` 会把它报成 fatal，外壳刷新页面——旧壳无法在不刷新页面的情况下理解新契约。
+浏览器只比较 `web.url#hash`。服务端只改了服务端代码、web 文件没变时，hash 不变，浏览器不重载；改了 `web.js` 才会换。Manifest 的 `revision` 仍发布，但只作为诊断字段，不驱动重载。若 Manifest 本身因契约升级无法绑定，`useRemote` 会把它报成 fatal，外壳刷新页面——旧壳无法在不刷新页面的情况下理解新契约。插件面板不应该使用 `isFatalContractError` 把插件契约失配升级成整页刷新：官方补救是重载 web 切面，外壳会在 Manifest 报告切面变化时做；若切面没变而错误持续，那是插件的 web 代码与契约不同步，重载同一文件或整页刷新都修不了。
 
 第一条值得单独说：**建 link 要在 socket `open` 之前**。服务端在 `Connection` 构造时就发 `hello`，晚挂的监听能不能看到它取决于运行时的事件循环——是竞态，不是保证；收不到 `hello` 的客户端不知道对端会 ack，于是自己从不发 ack，服务端的流控窗口再也不排空，表现为「状态不再到达」，而不是一条报错。提前建 link 是安全顺序，也没有代价：`webSocketLink` 在 open 前缓存出站帧，而帧要到达也总得先有它落脚的 link。
 
@@ -149,6 +163,16 @@ Manifest（remote, per principal）
 外壳从头到尾不知道「时钟」是什么，也没导入过它。它只知道有一个注册表，以及注册表里现在有什么。
 
 插件模块里的 `import "react"`、`import "@moonan_ai/sdk/web"` 由 `index.html` 的 import map 解析到 `/runtime/*.js`。**这就是为什么插件不需要打包**：它的依赖由外壳预先提供，而且只有一份。多一份 React 会让 hooks 报错，多一份 Chord 会把两个协议与对象身份世界放进同一个页面——两种失败都表现为「面板没出现」，而不是一条报错。
+
+## 运行时开关与安全边界
+
+- `--dev`：让 chord 校验每次 cell 写入与暴露状态（`createHost({ dev: true })`）。默认关闭，与 chord 的默认一致；`pnpm dev` 会显式打开。
+- `--allow-origin <origin>`：除同源外精确放行一个浏览器 origin（可重复）。WebSocket 与内建 `POST /api/plugins/reload` 都校验 `Origin`；无 `Origin` 的客户端（curl、测试、chord 官方 WebSocket 测试）不受影响，`Origin: null` 与畸形值被拒绝。
+- `--max-calls <n>`：把 chord 的 `maxCalls` 接到每条 WebSocket 链路上；默认不设上限（chord 默认）。超过上限的调用得到 `unavailable/too_many_calls`，不可重试。
+- 平台没有账号鉴权：同源/白名单只是拒绝跨源浏览器，不是安全边界。绑定非回环地址时，能访问端口的人仍可直接驱动所有插件。
+- 插件路由的可重试错误：`upgrade_conflict`/`superseded` 在幂等方法上自动以新根重试一次；非幂等请求得到 `503` + `Retry-After`，由客户端决定是否重试。这是 HTTP 策略，不是 chord 规定；GET/HEAD 处理函数应按 HTTP 语义保持无副作用。
+- 反向代理改写 `Host` 的部署不在同源校验支持范围内；用 `--allow-origin` 显式放行。
+- 其余 chord 调参（`linger`、`readyTimeout`、`taskStopDeadline`、`window`/`pendingCap`）保持官方默认，平台不擅自改。chord 的 hold `origin` 是 wire 上的客户端连接 id，不是 HTTP `Origin`；当前常量 principal 不需要它。
 
 ## 零数据落在哪里
 

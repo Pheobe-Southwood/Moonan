@@ -1,8 +1,9 @@
 import { isChordError, type Host } from "@earendil-works/chord";
 import { Manifest, type FacetSetEntry } from "@moonan_ai/sdk";
 import { useReadable, useRefStatus, useRemote, type PanelContribution } from "@moonan_ai/sdk/web";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useConnection } from "./chord/connection.js";
+import { useFacetBatches } from "./chord/facets.js";
 import { usePanels } from "./chord/panels.js";
 import { reloadOnce } from "./chord/reload.js";
 
@@ -104,13 +105,10 @@ function Bootstrapped() {
 	const facets = useReadable<FacetSetEntry[]>(manifest?.facets, []);
 	const panels = usePanels(host);
 
-	// What this shell has installed, and under which exact web-facet signature. Kept in a
-	// ref so a reload can diff the facet set without making the effect depend on its result.
-	const installed = useRef<{ urls: string[]; signature: string } | null>(null);
-	const [installedSignature, setInstalledSignature] = useState("");
-	const [failures, setFailures] = useState<string[]>([]);
-	const [batchFailure, setBatchFailure] = useState<string | null>(null);
 	const live = manifestStatus === "live";
+	// Chord owns the facet transaction; the hook owns only the shell's ledger of what is
+	// installed (see facets.ts for the commit-vs-ready rules).
+	const { signature: installedSignature, failures, batchFailure } = useFacetBatches(host, live, facets);
 
 	// Hydration gates the shell; a reconnect does not. A dropped link puts the reference back
 	// to `loading` while its last values stay readable, and unmounting the panels for that
@@ -132,47 +130,6 @@ function Bootstrapped() {
 			reloadOnce("manifest contract mismatch");
 		}
 	}, [manifestFatal]);
-
-	useEffect(() => {
-		if (!host || !live) return;
-
-		const webFacets = facets.filter((facet) => facet.web);
-		const urls = webFacets.map((facet) => facet.web!.url);
-		const signature = webFacets.map((facet) => `${facet.web!.url}#${facet.web!.hash}`).sort().join("|") || "none";
-		const previous = installed.current;
-		if (previous && previous.signature === signature) return;
-
-		installed.current = { urls, signature };
-		let cancelled = false;
-
-		void (async () => {
-			const failed: string[] = [];
-			const removed = previous ? previous.urls.filter((url) => !urls.includes(url)) : [];
-			try {
-				// One batch, as chord intends: every facet is installed before any host object
-				// activates, so a facet may consume a type installed by a later one.
-				if (previous === null) await host.load(urls);
-				else await host.reload(urls, removed.length > 0 ? { remove: removed } : {});
-				// `reload` resolves at commit, not at activation; `load` already waits.
-				await host.ready();
-			} catch (cause) {
-				const message = cause instanceof Error ? cause.message : String(cause);
-				console.error("[chord] facet batch failed", cause);
-				// The first load has no working shell to keep: abandoning it and reloading the
-				// page is the clean recovery. A later reload is transactional in chord, so the
-				// old facets are still valid and only a banner is needed.
-				if (previous === null) setBatchFailure(message);
-				else failed.push(`facet batch: ${message}`);
-			}
-			if (cancelled) return;
-			setFailures(failed);
-			setInstalledSignature(signature);
-		})();
-
-		return () => {
-			cancelled = true;
-		};
-	}, [host, live, facets]);
 
 	if (error) {
 		// The shell that would know the user's language is exactly what failed to negotiate.

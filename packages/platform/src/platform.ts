@@ -3,7 +3,7 @@ import { nodeLoader } from "@earendil-works/chord/node";
 import { Manifest } from "@moonan_ai/sdk";
 import { createLogger, type Logger } from "./logger.js";
 import { createManifestFacet, ManifestStore, type ManifestStoreRef } from "./manifest.js";
-import { refreshWebHashes, resolvePluginRef, scanPluginDirectory } from "./plugins.js";
+import { resolvePlugins, scanPluginDirectory } from "./plugins.js";
 import { describe, type PluginFacets, type Principal } from "./types.js";
 
 export interface PlatformOptions {
@@ -13,6 +13,8 @@ export interface PlatformOptions {
 	plugins?: readonly string[];
 	/** A directory whose subdirectories each carry a facet entry. Read-only; the platform stores nothing. */
 	pluginsDir?: string;
+	/** Validate every cell write against its schema (chord's `dev`). Default: chord's default (off). */
+	dev?: boolean;
 	logger?: Logger;
 }
 
@@ -23,9 +25,13 @@ export interface Platform {
 	/** chord's code version of this host (`host.codeVersion`). */
 	readonly revision: number;
 	/**
-	 * Reloads every resolved server facet in one chord transaction, then waits for the new
-	 * host objects. There is deliberately no per-plugin reload: the facet, not a Moonan plugin
-	 * id, is chord's unit, and a breaking contract needs its consumers in the same batch.
+	 * When a chord commit is needed, reloads every resolved server facet in one transaction and
+	 * then waits for the new host objects. There is deliberately no per-plugin reload: the
+	 * facet, not a Moonan plugin id, is chord's unit, and a breaking contract needs its
+	 * consumers in the same batch.
+	 *
+	 * The refs are re-resolved first, so a removed or renamed entry file is passed to chord as
+	 * a removed facet (`ReloadOptions.remove`) and a changed web file gets a new content hash.
 	 */
 	reload(): Promise<ReloadReport | undefined>;
 	close(): Promise<void>;
@@ -47,12 +53,14 @@ export async function createPlatform(options: PlatformOptions): Promise<Platform
 	// Explicit refs resolve against the working directory, like any other CLI path argument.
 	// Only the scanned directories come from `pluginsDir`; mixing the two silently pointed
 	// `--plugin ./foo` at `~/.moonan/plugins/./foo`.
-	const plugins = refs.map((ref) => resolvePluginRef(ref, process.cwd()));
+	const baseDir = process.cwd();
+	const plugins = resolvePlugins(refs, baseDir);
 
 	const host = createHost<Principal>({
 		name: "moonan",
 		self: { id: "host" },
 		loader: nodeLoader,
+		...(options.dev === undefined ? {} : { dev: options.dev }),
 		// A terminal failure should be loud, not a silent no-op in a background task.
 		onError: (error) => logger.error("chord reported an error", error),
 	});
@@ -70,8 +78,8 @@ export async function createPlatform(options: PlatformOptions): Promise<Platform
 			facets: plugins.map(describe),
 			revision: host.codeVersion,
 		});
-		const refs: PluginRef[] = [...serverPlugins.map((plugin) => plugin.server!), manifestFacet];
-		await host.load(refs);
+		const batch: PluginRef[] = [...serverPlugins.map((plugin) => plugin.server!), manifestFacet];
+		await host.load(batch);
 		for (const plugin of serverPlugins) {
 			plugin.serverInstalled = true;
 			logger.info(`loaded server facet of "${plugin.name}" from ${plugin.source}`);
@@ -94,43 +102,84 @@ export async function createPlatform(options: PlatformOptions): Promise<Platform
 		});
 	};
 
-	const reload = async (): Promise<ReloadReport | undefined> => {
-		const serverFacets = plugins.filter((plugin) => !plugin.error && plugin.server).map((plugin) => plugin.server!);
-		if (serverFacets.length === 0) {
-			// A web-only change still needs a new hash in the manifest; there is no chord
-			// transaction to commit, but the browser must see the new module.
-			refreshWebHashes(plugins);
-			try {
-				await publishManifest();
-			} catch (error) {
-				logger.error("manifest publish failed", error);
-			}
-			return undefined;
+	/**
+	 * Copies a fresh resolution onto the published entries in place, keeping the array and
+	 * each entry's `ref` (the user's input) stable for every holder of `platform.plugins`.
+	 */
+	const applyCandidates = (candidates: readonly PluginFacets[]): void => {
+		if (candidates.length !== plugins.length) throw new Error("plugin resolution changed the number of plugins");
+		for (let index = 0; index < plugins.length; index += 1) {
+			const plugin = plugins[index]!;
+			const candidate = candidates[index]!;
+			plugin.name = candidate.name;
+			plugin.version = candidate.version;
+			plugin.source = candidate.source;
+			plugin.server = candidate.server;
+			plugin.web = candidate.web;
+			plugin.error = candidate.error;
+			plugin.serverInstalled = candidate.server !== undefined && candidate.error === undefined;
 		}
+	};
+
+	const reload = async (): Promise<ReloadReport | undefined> => {
+		// Re-resolve before touching chord: a removed/renamed entry must become a removed facet,
+		// and a changed web file must get a new content hash. Candidates are applied only after
+		// a commit, so a refused reload leaves the published list (and `/api/plugins`) as it was.
+		const candidates = resolvePlugins(refs, baseDir);
+		const nextServers = new Set(
+			candidates.map((candidate) => candidate.server).filter((url): url is string => url !== undefined),
+		);
+		const removed = [
+			...new Set(
+				plugins
+					.map((plugin) => plugin.server)
+					.filter((url): url is string => url !== undefined && !nextServers.has(url)),
+			),
+		];
+		const serverFacets = [
+			...new Set(
+				candidates
+					.filter((candidate) => candidate.error === undefined && candidate.server !== undefined)
+					.map((candidate) => candidate.server!),
+			),
+		];
+		// Only a web-only change may skip chord entirely. A removal is a chord commit too:
+		// `host.reload([], { remove })` is the official way to stop serving those facets.
+		const webOnly = serverFacets.length === 0 && removed.length === 0;
 
 		let report: ReloadReport | undefined;
 		let committed = false;
 		try {
-			report = await host.reload(serverFacets);
-			committed = true;
-			for (const plugin of plugins) {
-				if (plugin.server && !plugin.error) plugin.serverInstalled = true;
+			if (webOnly) {
+				applyCandidates(candidates);
+			} else {
+				report = await host.reload(serverFacets, removed.length > 0 ? { remove: removed } : undefined);
+				committed = true;
+				applyCandidates(candidates);
+				// `host.reload` resolves at commit; it does not wait for the new host objects. A
+				// failed activation must reject here, not become a report that says "reloaded".
+				await host.ready();
 			}
-			// `host.reload` resolves at commit; it does not wait for the new host objects. A
-			// failed activation must reject here, not become a report that says "reloaded".
-			await host.ready();
-		} finally {
-			// Only a committed reload publishes new web hashes. A refused reload keeps the old
-			// server code, so it must not advertise new web code either.
-			if (committed) refreshWebHashes(plugins);
-			try {
-				await publishManifest();
-			} catch (error) {
-				// Do not mask a reload failure with a manifest-publish failure. The next
-				// successful reload publishes again; a terminal host failure is reported by
-				// chord's onError.
-				logger.error("manifest publish failed", error);
+		} catch (error) {
+			if (committed) {
+				// The commit is final even when a host object failed to activate: publish what is
+				// committed, then surface the activation failure to the caller.
+				try {
+					await publishManifest();
+				} catch (publishError) {
+					logger.error("manifest publish failed", publishError);
+				}
 			}
+			throw error;
+		}
+
+		try {
+			await publishManifest();
+		} catch (error) {
+			// Do not mask a successful reload with a manifest-publish failure. The next
+			// successful reload publishes again; a terminal host failure is reported by
+			// chord's onError.
+			logger.error("manifest publish failed", error);
 		}
 		return report;
 	};

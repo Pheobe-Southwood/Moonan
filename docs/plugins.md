@@ -100,7 +100,7 @@ export default defineFacet((api) => {
 
 reload 时 chord 会用它检查新的提供者是否仍覆盖你手里的那份契约；不覆盖就拒绝这次 reload，而不是让一个半坏的插件继续跑。
 
-**只在同一个宿主里生效。** `uses` 检查的是「这次 reload 改到的、由本宿主提供的类型」。所以你写在服务端切面里是有效的（都在 `moonan` 宿主上）；浏览器切面消费服务端类型**不属于此列**——那个类型不在浏览器宿主上，这一条会被跳过，跨宿主的契约靠版本与 `contract_mismatch` 兜底。
+**只在同一个宿主里生效。** `uses` 检查的是「这次 reload 改到的、由本宿主提供的类型」。所以你写在服务端切面里是有效的（都在 `moonan` 宿主上）；浏览器切面消费服务端类型**不属于此列**——那个类型不在浏览器宿主上，这一条会被跳过，跨宿主的契约靠版本与 `contract_mismatch` 兜底。提供者被整个移除时，chord 对已不存在的 service 跳过这条检查；消费方的引用随移除变 `gone`，不会被一次 `contract_mismatch` 卡住。
 
 `uses` 认的也是指纹，所以不需要共享模块：把契约再写一份丢进去即可。
 
@@ -130,6 +130,7 @@ export default defineFacet((api) => {
 - 组件收到的 props **只有 `host`**。外壳不传状态、不传语言、不传用户——它没有这些东西。
 - `useRemote` 走的是 Chord 的 `host.hold`：引用**同步**返回，可能仍是 `loading`。它返回 chord 的 `Ref<C>`，所以成员是有类型的：单 variant 契约直接 `clock.at`；**多 variant 契约要先按 `ref.variant` 收窄**，否则 TypeScript 不知道该 variant 有哪些成员。
 - `useRefStatus` 读它的 `status` 决定渲染过渡态；`loading` 时状态成员会抛 `not_ready`，`useReadable` 的 fallback 只是占位，不是数据。（`not_ready` / `not_in_variant` 会安静地降级为 fallback；其他错误会被打成 `console.error`，不会被 fallback 掩盖。）
+- **不要用 `isFatalContractError` 把插件契约失配升级成整页刷新。** 官方的补救是重载 web 切面：外壳在 Manifest 报告 `web.hash` 变化时会做，面板只负责显示过期状态。若切面没变而 `upgrade_required` 持续出现，说明插件的 web 代码与契约不同步——重载同一文件或刷新整页都修不了，改插件才是修法。
 - `useReadable` 接受任何 chord `Readable<T>`——cell、derivation、别人对象的 state 成员都行，不限于本插件自己的契约。
 - 浏览器切面应当是一个**单个 ESM 文件**。浏览器没有模块 hook，重载时只有入口 URL 的缓存参数会变，相对 import 的子文件仍命中缓存——把切面拆成多文件，热重载就只换掉入口。
 - `title` 是纯字符串，外壳原样显示。面板自己决定写什么语言。
@@ -165,13 +166,17 @@ curl http://127.0.0.1:21315/api/plugins
 curl -X POST http://127.0.0.1:21315/api/plugins/reload
 ```
 
-没有 body，也没有插件 ID：平台把**全部服务端切面**放进同一个 `host.reload` 批次，再 `await host.ready()`。这样：
+没有 body，也没有插件 ID：平台先重新解析所有已知 ref（删除/改名的入口因此变成 `remove` 的切面，web 文件的内容 hash 也重算）。需要 chord 提交时（有服务端切面，或需要移除切面），把**全部服务端切面**放进同一个 `host.reload` 批次，然后 `await host.ready()`；纯 web 变化只更新清单，不产生 chord 提交。这样：
 
 - breaking contract 的 provider 与 consumer 永远在同一批里，不会被拆开；
-- 新宿主对象激活失败会变成一次失败请求，而不是「reload 成功但对象没起来」；
+- 新宿主对象激活失败会变成一次失败请求，而不是「reload 成功但对象没起来」；提交本身已经生效，所以清单仍会发布已提交的切面集合；
 - 旧代码在旧根跑完后退休，这是 Chord 自己的事务语义；
 - web facet 的内容 hash 变化时，响应里的 `reloadBrowser` 为 true；只改服务端时它是 false；
-- reload 只重载已解析的切面；新增/删除插件目录、或修复一次解析错误，仍需要重启进程。
+- 删除或改名一个服务端入口会在下一次 reload 真正下线：chord 的 `remove` 让被移除类型的引用变 `gone`，`report.removed` 给出类型名；
+- reload 被拒绝（prepare 失败）时不发布清单，旧切面继续服务；下一次 reload 会重试；
+- 新增插件目录、或修复一次解析错误，仍需要重启进程；已知 ref 的重新解析只覆盖启动时解析过的那些。
+
+开发时加 `--dev`（`pnpm dev` 已经带上）：chord 会校验每次 cell 写入与暴露状态，把 schema 漂移提前暴露成一条 `invalid`，而不是等到远端消费者。
 
 Chord 的 `nodeLoader` 每次 reload 都会 import 一份新的模块副本，且不会 evict 旧副本（上游已知限制）。频繁 reload 会让进程内存增长；长期运行的会话可以定期重启进程。
 

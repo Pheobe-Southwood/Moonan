@@ -8,7 +8,7 @@ Moonan 原来的“基座（substrate）”把自己放在 Chord 的 host 之下
 
 - 把这个应用层改称 **平台（Platform）**；代码用 `Platform`、`createPlatform`、`packages/platform`，发布包名 `@moonan_ai/moonan` 与 `moonan` 命令保持不变。
 - 删除 `plugin.json` 与插件 ID。插件是目录/包这一层**分发与显示**分组；运行时身份是切面模块 URL。
-- 服务端切面始终一次 `host.load`，重载始终一次 `host.reload` 全部服务端切面，并 `await host.ready()`；不提供 per-plugin reload。
+- 服务端切面始终一次 `host.load`；需要 chord 提交时，重载始终一次 `host.reload` 全部服务端切面（纯 web 变化不产生提交；移除切面是一次 `host.reload([], { remove })`），并 `await host.ready()`；不提供 per-plugin reload。
 - 启动时服务端切面装载失败即关闭宿主并退出，不继续运行半装状态。
 - 浏览器清单发布 `facets`（显示名、版本、web URL、错误），不再发布插件 ID。
 

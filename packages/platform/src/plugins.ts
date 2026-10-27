@@ -77,19 +77,6 @@ function webAsset(file: string): { file: string; url: string; base: string; hash
 	};
 }
 
-/** Recompute every browser facet's content hash after a server reload committed. */
-export function refreshWebHashes(plugins: PluginFacets[]): void {
-	for (const plugin of plugins) {
-		if (!plugin.web) continue;
-		try {
-			plugin.web = webAsset(plugin.web.file);
-		} catch {
-			// A file that disappeared keeps its old hash; serving it will fail with a clear
-			// 404 and the shell shows the plugin error. This must not take the platform down.
-		}
-	}
-}
-
 function fromDirectory(dir: string, ref: string): PluginFacets {
 	const pkg = readPackage(dir);
 	const name = basename(dir);
@@ -226,6 +213,18 @@ export function resolvePluginRef(ref: string, baseDir = process.cwd()): PluginFa
 			error: error instanceof Error ? error.message : String(error),
 		};
 	}
+}
+
+/**
+ * Resolves every ref again.
+ *
+ * A reload uses this to notice a removed or renamed facet entry (the old facet name is then
+ * passed to chord's `remove`) and to recompute each web facet's content hash. The plugin
+ * directory itself is not rescanned: a newly added plugin directory still needs a restart,
+ * which is why the reload path only re-resolves the refs that were resolved at startup.
+ */
+export function resolvePlugins(refs: readonly string[], baseDir = process.cwd()): PluginFacets[] {
+	return refs.map((ref) => resolvePluginRef(ref, baseDir));
 }
 
 /** Every subdirectory of `directory` that carries at least one facet entry file. */

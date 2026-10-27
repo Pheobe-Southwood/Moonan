@@ -17,6 +17,12 @@ export interface StartOptions {
 	pluginsDir?: string;
 	/** The built shell. Defaults to `MOONAN_WEB_DIST`, then the copy shipped next to this file. */
 	webDist?: string;
+	/** Validate every cell write against its schema (chord's `dev`). Default: off. */
+	dev?: boolean;
+	/** Extra browser origins accepted besides same-origin. */
+	allowedOrigins?: readonly string[];
+	/** chord's per-link concurrent call limit. Default: no limit. */
+	maxCalls?: number;
 	version?: string;
 	logger?: Logger;
 }
@@ -55,6 +61,7 @@ export async function start(options: StartOptions = {}): Promise<Moonan> {
 		version,
 		...(options.plugins ? { plugins: options.plugins } : {}),
 		pluginsDir: options.pluginsDir ?? defaultPluginsDir(),
+		...(options.dev === undefined ? {} : { dev: options.dev }),
 		logger: logger.child("platform"),
 	});
 
@@ -68,6 +75,8 @@ export async function start(options: StartOptions = {}): Promise<Moonan> {
 			plugins: () => platform.plugins,
 			revision: () => platform.revision,
 			reload: platform.reload,
+			...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
+			...(options.maxCalls === undefined ? {} : { maxCalls: options.maxCalls }),
 			logger: logger.child("http"),
 		});
 

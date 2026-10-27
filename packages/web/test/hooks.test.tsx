@@ -85,6 +85,23 @@ describe("useRemote", () => {
 		expect(onFatal).toHaveBeenCalledTimes(1);
 		expect(host.hold).toHaveBeenCalledTimes(1);
 	});
+
+	it("warns once when a contract error has no onFatal handler", () => {
+		const { ref, status } = fakeRef();
+		const host = fakeHost(ref);
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const Probe = () => {
+			useRemote(host, Counter, {});
+			return null;
+		};
+		render(<Probe />);
+		act(() => status("gone", new ChordError("upgrade_required", "stale facet")));
+		expect(warn).toHaveBeenCalledTimes(1);
+		// A reference reports its terminal state once; a panel must not spam the console.
+		act(() => status("gone", new ChordError("upgrade_required", "stale facet")));
+		expect(warn).toHaveBeenCalledTimes(1);
+		warn.mockRestore();
+	});
 });
 
 describe("useReadable", () => {

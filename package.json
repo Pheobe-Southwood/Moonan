@@ -11,7 +11,7 @@
     "typecheck": "pnpm -r --parallel typecheck",
     "build": "pnpm -r build",
     "test": "pnpm -r --if-present test",
-    "dev": "pnpm build && node packages/platform/bin/moonan.js --plugin ./examples/clock-plugin"
+    "dev": "pnpm build && node packages/platform/bin/moonan.js --dev --plugin ./examples/clock-plugin"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

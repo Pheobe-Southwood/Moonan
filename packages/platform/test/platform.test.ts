@@ -489,7 +489,7 @@ export default defineFacet((api) => {
 		}
 	});
 
-	it("converges every manifest instance on the new code version", async () => {
+	it("converges every manifest instance on the new revision", async () => {
 		const current = (await (await fetch(`${moonan.url}/api/plugins`)).json()) as PluginsResponse;
 		const socket = new WebSocket(`${moonan.url.replace("http", "ws")}/ws`);
 		const client = createHost({ kind: "client", self: { id: "browser" } });

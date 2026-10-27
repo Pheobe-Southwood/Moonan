@@ -21,9 +21,10 @@ node packages/platform/bin/moonan.js --plugin ./examples/clock-plugin
 ```bash
 moonan --port 21315 --plugins-dir ~/.moonan/plugins   # 默认值 / defaults
 moonan --hostname 0.0.0.0                             # 局域网可访问 / reachable on the LAN
+moonan --dev                                          # 校验每次 cell 写入 / validate cell writes
 ```
 
-**平台不做鉴权**——端口对谁开放，谁就能驱动所有插件。只想本机用就别传 `--hostname`。
+**平台不做鉴权**——端口对谁开放，谁就能驱动所有插件。只想本机用就别传 `--hostname`。浏览器侧还有一道同源校验：跨源的 WebSocket 和内建 `POST /api/plugins/reload` 会被拒绝，其他 origin 用 `--allow-origin` 显式放行；这不是账号鉴权，也不保护直接访问端口的非浏览器客户端。
 
 ## 三个包 · Three packages
 
@@ -89,7 +90,8 @@ export default defineFacet((api) => {
 pnpm install
 pnpm typecheck
 pnpm build      # sdk → web（含 /runtime/*.js）→ moonan（内嵌 shell）
-pnpm test       # 分层守护 + 平台集成（解析、装载、路由、面板、热重载）
+pnpm test       # 分层守护 + 平台集成（解析、装载、路由、面板、热重载、官方语义对齐）
+pnpm dev        # build 后以 --dev 启动示例时钟插件
 ```
 
 需要 Node.js ≥ 22.19。

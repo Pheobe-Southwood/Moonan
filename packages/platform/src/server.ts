@@ -19,6 +19,13 @@ export interface WebServerOptions {
 	/** chord's code version: what a browser and an external tool compare to know a commit landed. */
 	revision: () => number;
 	reload: () => Promise<ReloadReport | undefined>;
+	/**
+	 * Extra browser origins accepted in addition to same-origin, matched exactly against the
+	 * `Origin` header (`http://host:port`). This is Moonan policy, not a chord concept.
+	 */
+	allowedOrigins?: readonly string[];
+	/** chord's per-link concurrent call limit. Default: chord's default (no limit). */
+	maxCalls?: number;
 	logger: Logger;
 }
 
@@ -27,6 +34,40 @@ export interface WebServerHandle {
 	port: number;
 	url: string;
 	close: () => Promise<void>;
+}
+
+/** One retry for an idempotent request that chord marked retryable (`upgrade_conflict`, `superseded`). */
+const RETRY_LIMIT = 1;
+const RETRY_DELAY_MS = 10;
+
+/**
+ * Moonan's origin policy, not a chord one.
+ *
+ * A browser sends `Origin`; a same-host origin is accepted, and so is an explicitly
+ * configured one. No `Origin` means a non-browser client (tests, curl), which is allowed —
+ * chord's own WebSocket test connects that way. `Origin: null` and malformed values are
+ * refused. Reverse proxies that rewrite `Host` are outside this check.
+ */
+function sameOrigin(request: IncomingMessage, allowedOrigins: readonly string[]): boolean {
+	const origin = request.headers.origin;
+	if (origin === undefined) return true;
+	if (origin === "null") return false;
+	if (allowedOrigins.includes(origin)) return true;
+
+	let parsed: URL;
+	try {
+		parsed = new URL(origin);
+	} catch {
+		return false;
+	}
+	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+	const host = request.headers.host;
+	if (host === undefined) return false;
+	return parsed.host.toLowerCase() === host.toLowerCase();
+}
+
+function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const MIME: Record<string, string> = {
@@ -84,10 +125,19 @@ function within(base: string, relative: string): string | undefined {
  */
 export async function startWebServer(options: WebServerOptions): Promise<WebServerHandle> {
 	const wss = new WebSocketServer({ noServer: true });
+	const allowedOrigins = options.allowedOrigins ?? [];
 	acceptWebSockets(wss, options.host, {
 		// No authentication by design (README): every connection acts as the same principal, so
-		// all browsers share one instance of every remote type they hold.
-		principal: () => ({ id: "browser" }),
+		// all browsers share one instance of every remote type they hold. The authenticator is
+		// still chord's official refusal point, so a cross-origin page is turned away there.
+		principal: (request) => {
+			if (!sameOrigin(request, allowedOrigins)) {
+				options.logger.warn(`refused a websocket from origin ${request.headers.origin ?? "(null)"}`);
+				return undefined;
+			}
+			return { id: "browser" };
+		},
+		...(options.maxCalls === undefined ? {} : { maxCalls: options.maxCalls }),
 		// chord closes a link whose peer announced another protocol version, and the peer closes
 		// too after reloading its page. Log it here, or a stale tab disappears without a trace.
 		onProtocolMismatch: ({ local, peer }) =>
@@ -149,6 +199,12 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 				sendJson(response, 405, { error: "method not allowed" });
 				return;
 			}
+			// State-changing built-in endpoint: refuse a cross-origin page. The plugin routes
+			// below decide their own policy; this one is the platform's own surface.
+			if (!sameOrigin(request, allowedOrigins)) {
+				sendJson(response, 403, { error: "forbidden" });
+				return;
+			}
 			const beforeWeb = webSignature(plugins());
 			try {
 				const report = await options.reload();
@@ -188,16 +244,55 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 		};
 		response.on("close", abortOnClose);
 		try {
-			const handled = await options.host.root(
-				async (ctx) => {
-					const view = options.host.registry(Routes);
-					const handler = view.get(`${method} ${pathname}`, ctx) ?? view.get(pathname, ctx);
-					if (!handler) return false;
-					await handler(request, response, ctx);
-					return true;
-				},
-				{ signal: controller.signal },
-			);
+			const idempotent = method === "GET" || method === "HEAD";
+			let handled = false;
+			for (let attempt = 0; ; attempt += 1) {
+				try {
+					handled = await options.host.root(
+						async (ctx) => {
+							const view = options.host.registry(Routes);
+							const handler = view.get(`${method} ${pathname}`, ctx) ?? view.get(pathname, ctx);
+							if (!handler) return false;
+							await handler(request, response, ctx);
+							return true;
+						},
+						{ signal: controller.signal },
+					);
+					break;
+				} catch (error) {
+					// chord marks upgrade_conflict and superseded retryable: the official recovery is
+					// to start a new root. A retry is only safe when nothing reached the response and
+					// the request is idempotent; otherwise the client gets a retryable 503.
+					if (isChordError(error) && error.retryable) {
+						const retry =
+							idempotent &&
+							attempt < RETRY_LIMIT &&
+							!response.headersSent &&
+							!response.writableEnded &&
+							!controller.signal.aborted;
+						if (retry) {
+							options.logger.warn(
+								`route ${method} ${pathname} hit ${error.code}${error.reason ? `/${error.reason}` : ""}; retrying as a new root`,
+							);
+							await delay(RETRY_DELAY_MS);
+							continue;
+						}
+						if (!response.headersSent && !response.writableEnded && !controller.signal.aborted) {
+							// Application policy, not a chord rule: a handler may already have had side
+							// effects, so a non-idempotent request is not replayed for the client.
+							response.setHeader("retry-after", "1");
+							sendJson(response, 503, {
+								error: errorMessage(error),
+								code: error.code,
+								...(error.reason ? { reason: error.reason } : {}),
+								retryable: true,
+							});
+							return;
+						}
+					}
+					throw error;
+				}
+			}
 			if (handled) return;
 		} catch (error) {
 			// A disconnect is not a server error: the root was aborted on purpose.

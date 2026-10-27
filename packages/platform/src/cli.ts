@@ -11,12 +11,19 @@ Options
   -H, --hostname <host>    Address to bind                    (default 127.0.0.1)
       --plugins-dir <dir>  Scan for plugin directories        (default ~/.moonan/plugins)
   -P, --plugin <ref>       Resolve a plugin: package name or directory (repeatable)
+      --dev                Validate every cell write against its schema (development)
+      --allow-origin <o>   Accept this browser origin besides same-origin (repeatable)
+      --max-calls <n>      Max concurrent calls per WebSocket link (default: no limit)
       --web-dist <dir>     Serve a built shell from <dir>     (default: the bundled one)
   -h, --help               Show this help
   -v, --version            Print the version
 
 The platform stores nothing: no database, no config file. A plugin that needs to keep
 data owns its own storage; this process only resolves facets, hosts and serves.
+
+There is no account authentication. Cross-origin WebSocket connections and the built-in
+reload endpoint are refused unless their origin is same-origin or listed with
+--allow-origin.
 `;
 
 interface Args {
@@ -24,13 +31,16 @@ interface Args {
 	hostname?: string;
 	pluginsDir?: string;
 	plugins: string[];
+	dev: boolean;
+	allowedOrigins: string[];
+	maxCalls?: number;
 	webDist?: string;
 	help: boolean;
 	version: boolean;
 }
 
 function parse(argv: readonly string[]): Args {
-	const args: Args = { plugins: [], help: false, version: false };
+	const args: Args = { plugins: [], dev: false, allowedOrigins: [], help: false, version: false };
 	for (let index = 0; index < argv.length; index += 1) {
 		const flag = argv[index];
 		const next = (): string => {
@@ -59,6 +69,19 @@ function parse(argv: readonly string[]): Args {
 			case "--plugin":
 				args.plugins.push(next());
 				break;
+			case "--dev":
+				args.dev = true;
+				break;
+			case "--allow-origin":
+				args.allowedOrigins.push(next());
+				break;
+			case "--max-calls": {
+				const raw = next();
+				const value = Number(raw);
+				if (!Number.isInteger(value) || value < 1) throw new Error(`invalid max-calls: ${raw}`);
+				args.maxCalls = value;
+				break;
+			}
 			case "--web-dist":
 				args.webDist = next();
 				break;
@@ -105,6 +128,9 @@ async function main(): Promise<void> {
 			...(args.hostname !== undefined ? { hostname: args.hostname } : {}),
 			...(args.pluginsDir !== undefined ? { pluginsDir: args.pluginsDir } : {}),
 			...(args.webDist !== undefined ? { webDist: args.webDist } : {}),
+			...(args.dev ? { dev: true } : {}),
+			...(args.allowedOrigins.length > 0 ? { allowedOrigins: args.allowedOrigins } : {}),
+			...(args.maxCalls !== undefined ? { maxCalls: args.maxCalls } : {}),
 			plugins: args.plugins,
 			logger,
 		});
@@ -118,6 +144,9 @@ async function main(): Promise<void> {
 
 	logger.info(`Moonan ${VERSION} listening on ${moonan.url}`);
 	logger.info(`plugins directory: ${args.pluginsDir ?? defaultPluginsDir()} (read-only)`);
+	if (args.dev) logger.info("dev mode: every cell write is validated against its schema");
+	if (args.maxCalls !== undefined) logger.info(`websocket call limit: ${args.maxCalls} concurrent calls per link`);
+	if (args.allowedOrigins.length > 0) logger.info(`extra browser origins: ${args.allowedOrigins.join(", ")}`);
 	if (moonan.plugins.length === 0) {
 		logger.warn("no plugins resolved: pass --plugin <package|dir>, or drop directories into the plugins directory");
 	}
@@ -127,7 +156,9 @@ async function main(): Promise<void> {
 	}
 	const hostname = args.hostname ?? "127.0.0.1";
 	if (!/^(127\.|::1$|localhost$)/.test(hostname)) {
-		logger.warn(`bound to ${hostname}: the interface has no authentication, so anyone who can reach this port can drive every plugin`);
+		logger.warn(
+			`bound to ${hostname}: there is no account authentication, so anyone who can reach this port can drive every plugin (cross-origin browsers are refused, but this is not a security boundary)`,
+		);
 	}
 
 	let closing = false;

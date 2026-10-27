@@ -39,10 +39,13 @@ export type FacetSetEntry = Static<typeof FacetSetSchema>;
  *
  * This is the seam that keeps the platform free of feature state. The loader knows which
  * modules exist; the browser cannot find that out alone (it has no filesystem and no
- * registry to ask), so exactly one read-only object carries it across.
+ * registry to ask), so exactly one read-only object carries it across. Chord names a
+ * server `Manifest` object as how browsers learn of changes (spec §6); the particular
+ * fields here are Moonan application state, not protocol fields.
  *
  * Contract version 3 changed `web` from a bare URL string to `{ url, hash }`. There is no
- * compatibility adapter: an older client gets `contract_mismatch` and reloads its page.
+ * compatibility adapter: a browser is mapped to `upgrade_required` and must load the new
+ * shell (a non-client consumer gets `contract_mismatch`).
  */
 export const Manifest = remote("moonan.manifest", {
 	version: 3,
@@ -56,8 +59,9 @@ export const Manifest = remote("moonan.manifest", {
 				facets: Type.Array(FacetSetSchema),
 				/**
 				 * chord's code version (`host.codeVersion`): 1 at startup, one higher after every
-				 * reload that committed. It is diagnostic here; a browser decides whether to
-				 * reload from each `web.hash`, not from this number.
+				 * reload that committed. This is Moonan application state, not chord's removed
+				 * `Shape.codeVersion`; a browser decides whether to reload from each `web.hash`,
+				 * and never from this number as a protocol value.
 				 */
 				revision: Type.Number(),
 			},
