@@ -31,11 +31,7 @@ function fakeRef(): {
 	const ref = {
 		status: "live",
 		error: undefined,
-		ready: Promise.resolve(),
 		contract: Counter,
-		variant: undefined,
-		shape: undefined,
-		onShape: () => () => {},
 		onStatus: (listener: (status: RefStatus, error: unknown) => void) => {
 			listeners.add(listener);
 			return () => listeners.delete(listener);

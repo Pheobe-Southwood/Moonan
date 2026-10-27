@@ -1,24 +1,11 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { request as httpRequest } from "node:http";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import {
-	createHost,
-	hostNamed,
-	method,
-	remote,
-	webSocketLink,
-	type Host,
-} from "@earendil-works/chord";
+import { rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { hostNamed, method, remote } from "@earendil-works/chord";
 import { Manifest } from "@moonan_ai/sdk";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { start, type Moonan } from "../src/index.js";
-import { silentLogger } from "../src/logger.js";
-
-const apps: Moonan[] = [];
-const dirs: string[] = [];
+import { appFor, cleanup, closeClient, connectClient, pluginDir, post, wsUrl } from "./support.js";
 
 const C1_SERVER = `
 import { ChordError, Routes, Type, defineFacet, local } from "@moonan_ai/sdk";
@@ -132,125 +119,7 @@ const Removable = remote("test.removable", {
 	},
 });
 
-async function tempDir(prefix: string): Promise<string> {
-	// Keep fixtures inside the workspace: a plugin resolves its bare imports
-	// (`@moonan_ai/sdk`) from its own tree, exactly like a real directory plugin.
-	const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-	const dir = await mkdtemp(join(root, "packages", "platform", prefix));
-	dirs.push(dir);
-	return dir;
-}
-
-async function pluginDir(source: string): Promise<string> {
-	const dir = await tempDir(".align-plugin-");
-	await writeFile(join(dir, "server.mjs"), source);
-	return dir;
-}
-
-async function appFor(
-	plugins: readonly string[],
-	options: { dev?: boolean; allowedOrigins?: readonly string[]; maxCalls?: number } = {},
-): Promise<Moonan> {
-	const app = await start({
-		port: 0,
-		hostname: "127.0.0.1",
-		plugins: [...plugins],
-		pluginsDir: await tempDir(".align-plugins-"),
-		logger: silentLogger,
-		...options,
-	});
-	apps.push(app);
-	return app;
-}
-
-function wsUrl(app: Moonan): string {
-	return `${app.url.replace(/^http/, "ws")}/ws`;
-}
-
-function waitOpen(socket: WebSocket): Promise<void> {
-	return new Promise((resolve, reject) => {
-		if (socket.readyState === WebSocket.OPEN) {
-			resolve();
-			return;
-		}
-		const timer = setTimeout(() => reject(new Error("websocket did not open")), 2_000);
-		socket.once("open", () => {
-			clearTimeout(timer);
-			resolve();
-		});
-		socket.once("error", (error) => {
-			clearTimeout(timer);
-			reject(error);
-		});
-	});
-}
-
-function waitClose(socket: WebSocket): Promise<boolean> {
-	return new Promise((resolve) => {
-		const timer = setTimeout(() => resolve(false), 2_000);
-		socket.once("close", () => {
-			clearTimeout(timer);
-			resolve(true);
-		});
-		socket.once("error", () => {
-			// The close event follows; keep the socket error from becoming unhandled.
-		});
-	});
-}
-
-async function connectClient(app: Moonan, origin?: string): Promise<{ socket: WebSocket; client: Host<unknown> }> {
-	const socket = new WebSocket(wsUrl(app), origin === undefined ? undefined : { origin });
-	const client = createHost({ kind: "client", self: { id: "browser" }, onError: () => {} });
-	// Create the link before the socket opens, as chord's own WebSocket test does.
-	client.connect(webSocketLink(socket as never), { principal: { id: "host" } });
-	await waitOpen(socket);
-	return { socket, client };
-}
-
-async function closeClient(socket: WebSocket, client: Host<unknown>): Promise<void> {
-	await client.close().catch(() => undefined);
-	socket.terminate();
-}
-
-function post(
-	url: string,
-	origin?: string,
-): Promise<{ status: number; body: string; retryAfter: string | null }> {
-	return new Promise((resolve, reject) => {
-		const parsed = new URL(url);
-		const request = httpRequest(
-			{
-				hostname: parsed.hostname,
-				port: parsed.port,
-				path: `${parsed.pathname}${parsed.search}`,
-				method: "POST",
-				headers: origin === undefined ? {} : { origin },
-			},
-			(response) => {
-				let body = "";
-				response.setEncoding("utf8");
-				response.on("data", (chunk: string) => {
-					body += chunk;
-				});
-				response.on("end", () => {
-					const header = response.headers["retry-after"];
-					resolve({
-						status: response.statusCode ?? 0,
-						body,
-						retryAfter: Array.isArray(header) ? (header[0] ?? null) : (header ?? null),
-					});
-				});
-			},
-		);
-		request.on("error", reject);
-		request.end();
-	});
-}
-
-afterEach(async () => {
-	await Promise.all(apps.splice(0).map((app) => app.close().catch(() => undefined)));
-	await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
-});
+afterEach(cleanup);
 
 describe("official alignment: C1 retryable roots", () => {
 	it("retries an idempotent request as a new root", async () => {
@@ -283,7 +152,11 @@ describe("official alignment: C2 origin policy", () => {
 		const app = await appFor([]);
 
 		const denied = new WebSocket(wsUrl(app), { origin: "http://evil.example" });
-		await expect(waitClose(denied)).resolves.toBe(true);
+		const closed = new Promise<boolean>((resolve) => {
+			denied.once("close", () => resolve(true));
+			denied.once("error", () => undefined); // the close event follows
+		});
+		await expect(closed).resolves.toBe(true);
 
 		const deniedPost = await post(`${app.url}/api/plugins/reload`, "http://evil.example");
 		expect(deniedPost.status).toBe(403);

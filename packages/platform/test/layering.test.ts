@@ -71,16 +71,13 @@ describe("layering", () => {
 		}
 	});
 
-	it("declares the three published directions in the docs", () => {
-		const readme = readFileSync(join(root, "README.md"), "utf8");
-		expect(readme).toMatch(/@moonan_ai\/sdk/);
-		expect(readme).toMatch(/@moonan_ai\/moonan/);
-	});
-
-	it("uses the platform vocabulary in the current guides", () => {
+	it("keeps the guides' vocabulary and the package names they publish", () => {
 		for (const file of ["README.md", "docs/architecture.md", "docs/plugins.md"]) {
 			const text = readFileSync(join(root, file), "utf8");
 			expect(text, file).not.toMatch(/基座|Substrate|substrate/);
 		}
+		const readme = readFileSync(join(root, "README.md"), "utf8");
+		expect(readme).toMatch(/@moonan_ai\/sdk/);
+		expect(readme).toMatch(/@moonan_ai\/moonan/);
 	});
 });
