@@ -9,7 +9,7 @@ my-plugin/
 └── web.js         # 浏览器切面
 ```
 
-两个切面都是 `defineFacet` 的返回值，都由平台交给 Chord 的 `nodeLoader`/浏览器 loader。**只有一个切面的插件也是完整插件**——纯后端插件没有 `web.js`，纯前端插件没有 `server.mjs`。
+两个切面都是 `defineFacet` 的返回值：服务端交给 chord 的 `nodeLoader`，浏览器交给 Moonan 自己的 loader（chord 只提供 Node 那个）。**只有一个切面的插件也是完整插件**——纯后端插件没有 `web.js`，纯前端插件没有 `server.mjs`。
 
 没有 `plugin.json`，也没有插件 ID。目录名或包名只是**显示名**；切面的模块 URL 才是运行时的身份，也是平台装载与重载的单位。
 
@@ -74,14 +74,14 @@ export default defineFacet((api) => {
 
 几个必须知道的事：
 
-- **`hostNamed("moonan")`**：服务端只有一个宿主，名字就是这个。写别的名字，浏览器会得到一个「该类型不在这个宿主上」的错误。
+- **`hostNamed("moonan")`**：服务端只有一个宿主，名字就是这个。写别的名字，`serve` 会当场拒绝（`"… is declared for host X, but moonan serves it"`），启动直接失败——错误停在服务端，浏览器根本看不到这个类型。
 - **生命周期**：默认的对象只活到最后一个引用被释放。想让它常驻，用 `{ lifetime: "host" }`——但只有 `local` 契约、且 `input` 接受 `{}` 的对象可以这样。
 - **任务**：`self.task(async (ctx) => {…})` 里用 `ctx.signal` 退出。对象释放时任务跟着停——别在插件里起一个平台关不掉的后台循环。
 - **注册表贡献**必须来自 `lifetime: "host"` 对象。这也是为什么例子末尾有一个空的 `Root` 对象。
 
 ## 契约要在两边各写一份
 
-浏览器切面拿不到服务端的模块（它是另一个进程、另一套打包），所以契约写两遍。两份不需要共享模块——Chord 认的是**指纹**：名字、版本、成员结构，以及这个类型住在哪个宿主（`host: hostNamed(...)` 也在指纹里，移动类型是破坏性改动）。写了不一致的 schema，浏览器会得到 `contract_mismatch`。
+浏览器切面拿不到服务端的模块（它是另一个进程、另一套打包），所以契约写两遍。两份不需要共享模块——Chord 认的是**指纹**：名字、版本、成员结构，以及这个类型住在哪个宿主（`host: hostNamed(...)` 也在指纹里，移动类型是破坏性改动）。写了不一致的 schema，浏览器会得到 `upgrade_required`（chord 对 client 的映射；宿主之间的消费者才是 `contract_mismatch`）。
 
 这是刻意的取舍：它换来的是插件可以零构建。有构建的插件当然可以把契约抽成第三个文件、两边 import 同一份；平台对两种写法一视同仁。
 
@@ -100,7 +100,7 @@ export default defineFacet((api) => {
 
 reload 时 chord 会用它检查新的提供者是否仍覆盖你手里的那份契约；不覆盖就拒绝这次 reload，而不是让一个半坏的插件继续跑。
 
-**只在同一个宿主里生效。** `uses` 检查的是「这次 reload 改到的、由本宿主提供的类型」。所以你写在服务端切面里是有效的（都在 `moonan` 宿主上）；浏览器切面消费服务端类型**不属于此列**——那个类型不在浏览器宿主上，这一条会被跳过，跨宿主的契约靠版本与 `contract_mismatch` 兜底。提供者被整个移除时，chord 对已不存在的 service 跳过这条检查；消费方的引用随移除变 `gone`，不会被一次 `contract_mismatch` 卡住。
+**只在同一个宿主里生效。** `uses` 检查的是「这次 reload 改到的、由本宿主提供的类型」。所以你写在服务端切面里是有效的（都在 `moonan` 宿主上）；浏览器切面消费服务端类型**不属于此列**——那个类型不在浏览器宿主上，这一条会被跳过，跨宿主的契约靠版本与 `upgrade_required`/`contract_mismatch` 兜底。提供者被整个移除时，chord 对已不存在的 service 跳过这条检查；消费方的引用随移除变 `gone`，不会被一次 `contract_mismatch` 卡住。
 
 `uses` 认的也是指纹，所以不需要共享模块：把契约再写一份丢进去即可。
 

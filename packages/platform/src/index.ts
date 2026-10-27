@@ -6,7 +6,7 @@ import { createLogger, type Logger } from "./logger.js";
 import { createPlatform, type Platform } from "./platform.js";
 import { startWebServer, type WebServerHandle } from "./server.js";
 
-export const VERSION = "0.0.3-alpha1";
+export const VERSION = "0.0.4-alpha1";
 
 export interface StartOptions {
 	port?: number;

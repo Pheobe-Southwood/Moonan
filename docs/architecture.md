@@ -141,7 +141,7 @@ Manifest（remote, per principal）
 ```text
 浏览器外壳启动
   │
-  ├── 先建 link，再等 socket open（服务端的 hello 在建连时就发出，晚订阅就永远收不到）
+  ├── 先建 link，再等 socket open（服务端的 hello 在 Connection 构造时就发出一次，link 建晚了就可能错过它——是顺序问题，不是网络问题）
   ├── 连 /ws，建 kind:"client" 宿主（整页只建一次）
   ├── host.hold(Manifest) → 引用立刻返回，可能仍是 loading
   ├── 一次 host.load([...web 切面 URL], { awaitHostObjects: false })
@@ -176,6 +176,14 @@ Manifest（remote, per principal）
 
 ## 零数据落在哪里
 
-平台没有任何一行写磁盘的代码。没有 `moonan.db`，没有配置文件，没有 `.moonan/state.json`。`--plugins-dir` 是**只读**的扫描目录。
+平台在运行时没有任何一行写磁盘的代码。没有 `moonan.db`，没有配置文件，没有 `.moonan/state.json`。`--plugins-dir` 是**只读**的扫描目录。
 
 结果：卸载一个插件 = 删掉它的包和它自己的数据文件，平台侧没有残留需要清理。升级平台不会碰你的数据。把仓库整个删掉，除了插件自己的数据，什么都不会丢。
+
+## 设计取舍
+
+**单宿主，启动失败即退出。** 所有服务端切面都装在同一个 chord 宿主里，共享一个代码版本。Chord 的 `install` 不是回滚事务：一个切面在 `api.serve` 之后抛错，它的服务已经留在宿主里。所以启动阶段只有两种诚实的结果——全部成功，或关闭宿主退出；按插件隔离进程是另一个量级的改动（要连带 cluster reload、relay 授权、跨宿主契约），不在当前范围内。
+
+**清单不提供旧契约的兼容适配。** `Manifest` 从 v2 升到 v3（`web` 从字符串变成 `{ url, hash }`）时没有写 `accepts` 适配器。旧外壳看不懂新契约，整页刷新才是诚实的补救；`accepts` 适合「新旧消费者并存于同一套外壳」，而这里外壳本身就随服务端一起部署。
+
+**平台不提供持久化与鉴权。** 插件自己决定存什么、存在哪；端口就是信任边界，同源校验只挡跨源浏览器，不是账号体系。
