@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": [
+    "src/contract.ts",
+    "src/schema.ts",
+    "src/util.ts",
+    "src/server.ts",
+    "src/store.ts",
+    "src/catalog.ts",
+    "src/runtime.ts",
+    "src/discovery.ts",
+    "src/service.ts",
+    "src/http.ts"
+  ]
+}

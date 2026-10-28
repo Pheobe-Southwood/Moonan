@@ -12,11 +12,12 @@ A local plugin workbench. The platform builds a Chord host, opens one port, reso
 
 ```bash
 pnpm install
-pnpm build
-node packages/platform/bin/moonan.js --plugin ./examples/clock-plugin
+pnpm dev
 ```
 
-打开 <http://127.0.0.1:21315>：一个每秒跳动的「时钟」标签页，数据来自服务端 Chord 对象；`GET /api/clock` 由插件的 `Routes` 注册表提供。
+打开 <http://127.0.0.1:21315>：一个每秒跳动的「时钟」标签页，和一个内置的「模型」标签页。
+`pnpm dev` 加载两个插件：`examples/clock-plugin` 和内置的 `@moonan_ai/ai-gateway`。
+只想启动模型网关时用 `pnpm start`。
 
 常用参数：
 
@@ -32,6 +33,25 @@ node packages/platform/bin/moonan.js --plugin ./examples/clock-plugin
 
 只想本机用，就别传 `--hostname`：平台不做账号鉴权，端口对谁开放，谁就能驱动所有插件。
 
+### 局域网 / Tailnet
+
+```bash
+pnpm start:tailnet   # 绑定 Tailscale IPv4，只从 tailnet 可达
+pnpm start:lan       # 绑定 0.0.0.0，局域网与 tailnet 都可达
+pnpm dev:tailnet     # 同上，dev + 时钟插件
+pnpm dev:lan
+```
+
+`start:tailnet` 会用 `tailscale ip -4` 自动找地址并打印 `http://100.x.y.z:21315`
+（有 MagicDNS 时也打印 `http://<node>.<tailnet>.ts.net:21315`）。自定义端口：
+
+```bash
+pnpm start:tailnet -- --port 21316
+```
+
+**平台没有账号鉴权。** 绑定 `0.0.0.0` 会让同一局域网内任何人都能驱动全部插件；优先用
+`start:tailnet`，并只把端口分享给可信设备。不要把 21315 转发到公网。
+
 ## 概念 · Concepts
 
 | 词 | 一句话 |
@@ -45,17 +65,37 @@ node packages/platform/bin/moonan.js --plugin ./examples/clock-plugin
 
 完整释义（含每个词的取舍与反例）见 [CONTEXT.md](CONTEXT.md)。
 
-## 三个包 · Three packages
+## 包 · Packages
 
 | 包 | 职责 | 面向谁 |
 |---|---|---|
 | `@moonan_ai/sdk` | 契约、注册表、浏览器钩子。根入口给两端与服务端用，`./web` 给浏览器切面用 | 插件作者 |
 | `@moonan_ai/web`（private） | 浏览器外壳与共享运行时打包器 | 平台自己 |
 | `@moonan_ai/moonan` | 平台：服务端宿主、单端口网关、插件/切面装载与 CLI | 使用者 |
+| `@moonan_ai/ai-gateway`（private） | 内置插件：在「模型」标签页配置 pi-ai 提供商与模型 | 使用者 |
 
-依赖方向是单向的：`moonan → sdk`、`web → sdk`、`sdk → chord`。平台不导入任何插件代码，只把切面 URL 交给 Chord——`packages/platform/test/layering.test.ts` 盯着这条线。
+依赖方向是单向的：`moonan → sdk`、`web → sdk`、`sdk → chord`，内置插件 `ai-gateway → sdk + pi-ai`。平台不导入任何插件代码，只把切面 URL 交给 Chord——`packages/platform/test/layering.test.ts` 盯着这条线。
 
 Chord 锁定在 `1.4.0`（`sdk`、`web`、`moonan` 都依赖这一版），插件按同一版本对齐。
+
+## 内置插件：ai-gateway
+
+[`packages/ai-gateway`](packages/ai-gateway/README.md) 是仓库内置的模型网关面板。它把 pi-ai 的提供商、模型和请求参数搬进
+一个服务端持久化的配置文件：
+
+- 内置目录来自 `@earendil-works/pi-ai@1.4.0`：42 个提供商，添加时导入它们的对话模型目录。
+- 自定义提供商支持 OpenAI 兼容、Anthropic、Google、Mistral、Bedrock、Vertex 等 API。
+- 每个模型都能逐字段编辑：上下文、输出上限、价格与阶梯价、输入模态、输入限制、推理等级映射、
+  提示缓存、采样参数、`compat` 兼容覆盖（按 API 从 pi-ai 的真实 schema 生成表单）、模型请求头。
+- 「拉取模型」从上游的 `/models`（Anthropic `/v1/models`、Google `models`、Ollama `/api/tags`）
+  读取目录；失败时按提供商回退到 pi-ai 内置目录，并把回退原因显示在面板上。
+- 密钥、提供商、模型、全局请求默认值全部写在服务端
+  `~/.moonan/ai-gateway/config.json`（可用 `MOONAN_AI_GATEWAY_HOME` /
+  `MOONAN_AI_GATEWAY_CONFIG` 改路径）。文件权限 `0600`，目录 `0700`；浏览器只拿到掩码。
+- 面板不写 `localStorage`、`sessionStorage` 或 IndexedDB。
+
+服务端切面重载不会丢配置：配置在 Chord 的本地 host-lifetime 对象里，落盘是原子替换。
+「高级」页可以显式从磁盘重新加载；主文件损坏时会尝试 `.bak`，再不行就保留 `.corrupt-*` 并从空配置开始。
 
 ## 写一个插件 · Writing a plugin
 
@@ -118,15 +158,16 @@ pnpm install
 pnpm typecheck
 pnpm build      # sdk → web（含 /runtime/*.js）→ moonan（内嵌 shell）
 pnpm test       # 分层守护 + 平台集成（解析、装载、路由、面板、热重载、官方语义对齐）
-pnpm dev        # build 后以 --dev 启动示例时钟插件
+pnpm dev        # build 后以 --dev 启动时钟插件与内置 ai-gateway
 ```
 
 需要 Node.js ≥ 22.19。
 
 ## 状态 · Status
 
-`0.0.4-alpha1`：平台建立在 Chord 之上，不含数据库、预设能力契约或功能语义。插件由切面组成；平台一次装载/重载全部服务端切面，启动失败即关闭宿主。
+`0.0.4-alpha2`：平台建立在 Chord 之上，不含数据库、预设能力契约或功能语义。插件由切面组成；平台一次装载/重载全部服务端切面，启动失败即关闭宿主。
 
+新增内置插件 `ai-gateway`：它在「模型」标签页配置 pi-ai 的提供商与模型，配置只保存在插件自己的服务端文件里。
 AI 对话尚未回归——它会作为一个普通插件回来，和时钟插件走同一条加载路径。
 
 ## 许可 · License

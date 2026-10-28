@@ -1,6 +1,6 @@
 {
   "name": "@moonan_ai/moonan",
-  "version": "0.0.4-alpha1",
+  "version": "0.0.4-alpha2",
   "description": "Moonan platform: builds a Chord host, resolves plugin facets, and serves them over a single port.",
   "type": "module",
   "license": "MIT",

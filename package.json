@@ -1,6 +1,6 @@
 {
   "name": "moonan-workspace",
-  "version": "0.0.4-alpha1",
+  "version": "0.0.4-alpha2",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.7.0",
@@ -11,13 +11,20 @@
     "typecheck": "pnpm -r --parallel typecheck",
     "build": "pnpm -r build",
     "test": "pnpm -r --if-present test",
-    "dev": "pnpm build && node packages/platform/bin/moonan.js --dev --plugin ./examples/clock-plugin"
+    "dev": "pnpm build && node packages/platform/bin/moonan.js --dev --plugin ./examples/clock-plugin --plugin @moonan_ai/ai-gateway",
+    "start": "pnpm build && node packages/platform/bin/moonan.js --plugin @moonan_ai/ai-gateway",
+    "dev:gateway": "pnpm build && node packages/platform/bin/moonan.js --dev --plugin @moonan_ai/ai-gateway",
+    "start:tailnet": "pnpm build && node scripts/tailnet-start.mjs",
+    "start:lan": "pnpm build && node scripts/tailnet-start.mjs --lan",
+    "dev:tailnet": "pnpm build && node scripts/tailnet-start.mjs --dev --clock",
+    "dev:lan": "pnpm build && node scripts/tailnet-start.mjs --dev --clock --lan"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
     "esbuild": "0.28.2",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "@moonan_ai/ai-gateway": "workspace:*"
   }
 }
