@@ -10,6 +10,7 @@ Options
   -p, --port <port>        Port to listen on                  (default 21315)
   -H, --hostname <host>    Address to bind                    (default 127.0.0.1)
       --plugins-dir <dir>  Scan for plugin directories        (default ~/.moonan/plugins)
+      --data-file <path>   Unified plugin data file            (default ~/.moonan/data.json)
   -P, --plugin <ref>       Resolve a plugin: package name or directory (repeatable)
       --dev                Validate every cell write against its schema (development)
       --allow-origin <o>   Accept this browser origin besides same-origin (repeatable)
@@ -18,8 +19,9 @@ Options
   -h, --help               Show this help
   -v, --version            Print the version
 
-The platform stores nothing: no database, no config file. A plugin that needs to keep
-data owns its own storage; this process only resolves facets, hosts and serves.
+The platform keeps exportable plugin data in one JSON file. A plugin registers a data
+codec to make its namespace part of export/import; private caches may still use their own
+files. The platform itself contains no feature semantics.
 
 There is no account authentication. Cross-origin WebSocket connections and the built-in
 reload endpoint are refused unless their origin is same-origin or listed with
@@ -30,6 +32,7 @@ interface Args {
 	port?: number;
 	hostname?: string;
 	pluginsDir?: string;
+	dataFile?: string;
 	plugins: string[];
 	dev: boolean;
 	allowedOrigins: string[];
@@ -64,6 +67,9 @@ function parse(argv: readonly string[]): Args {
 				break;
 			case "--plugins-dir":
 				args.pluginsDir = next();
+				break;
+			case "--data-file":
+				args.dataFile = next();
 				break;
 			case "-P":
 			case "--plugin":
@@ -127,6 +133,7 @@ async function main(): Promise<void> {
 			...(args.port !== undefined ? { port: args.port } : {}),
 			...(args.hostname !== undefined ? { hostname: args.hostname } : {}),
 			...(args.pluginsDir !== undefined ? { pluginsDir: args.pluginsDir } : {}),
+			...(args.dataFile !== undefined ? { dataFile: args.dataFile } : {}),
 			...(args.webDist !== undefined ? { webDist: args.webDist } : {}),
 			...(args.dev ? { dev: true } : {}),
 			...(args.allowedOrigins.length > 0 ? { allowedOrigins: args.allowedOrigins } : {}),
@@ -144,6 +151,7 @@ async function main(): Promise<void> {
 
 	logger.info(`Moonan ${VERSION} listening on ${moonan.url}`);
 	logger.info(`plugins directory: ${args.pluginsDir ?? defaultPluginsDir()} (read-only)`);
+	logger.info(`unified data file: ${moonan.dataFile}`);
 	if (args.dev) logger.info("dev mode: every cell write is validated against its schema");
 	if (args.maxCalls !== undefined) logger.info(`websocket call limit: ${args.maxCalls} concurrent calls per link`);
 	if (args.allowedOrigins.length > 0) logger.info(`extra browser origins: ${args.allowedOrigins.join(", ")}`);

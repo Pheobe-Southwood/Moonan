@@ -45,7 +45,7 @@ my-plugin/
 }
 ```
 
-一条规则值得记住：目录里的 `.js` 服务端入口，如果最近的 `package.json` 没有 `{"type":"module"}`，Node 会当 CommonJS 加载，`export default` 直接失败。平台沿 package scope 查找，所以插件目录的父目录声明 `"type":"module"` 也可以。平台会给出明确错误并跳过这个服务端切面；同目录的 `web.js` 仍可作为浏览器切面出现在清单里。要么写 `.mjs`，要么在目录或父目录加上 `"type": "module"`。
+一条规则值得记住：目录里的 `.js` 服务端入口，如果最近的 `package.json` 没有 `{"type":"module"}`，Node 会当 CommonJS 加载，`export default` 直接失败。平台沿 package scope 查找，所以插件目录的父目录声明 `"type":"module"` 也可以。平台会给出明确错误并跳过这个服务端切面；同目录的 `web.js` 仍可作为浏览器切面出现在 Web 切面目录里。要么写 `.mjs`，要么在目录或父目录加上 `"type": "module"`。
 
 ## 服务端切面
 
@@ -130,7 +130,7 @@ export default defineFacet((api) => {
 - 组件收到的 props **只有 `host`**。外壳不传状态、不传语言、不传用户——它没有这些东西。
 - `useRemote` 走的是 Chord 的 `host.hold`：引用**同步**返回，可能仍是 `loading`。它返回 chord 的 `Ref<C>`，所以成员是有类型的：单 variant 契约直接 `clock.at`；**多 variant 契约要先按 `ref.variant` 收窄**，否则 TypeScript 不知道该 variant 有哪些成员。
 - `useRefStatus` 读它的 `status` 决定渲染过渡态；`loading` 时状态成员会抛 `not_ready`，`useReadable` 的 fallback 只是占位，不是数据。（`not_ready` / `not_in_variant` 会安静地降级为 fallback；其他错误会被打成 `console.error`，不会被 fallback 掩盖。）
-- **不要用 `isFatalContractError` 把插件契约失配升级成整页刷新。** 官方的补救是重载 web 切面：外壳在 Manifest 报告 `web.hash` 变化时会做，面板只负责显示过期状态。若切面没变而 `upgrade_required` 持续出现，说明插件的 web 代码与契约不同步——重载同一文件或刷新整页都修不了，改插件才是修法。
+- **不要用 `isFatalContractError` 把插件契约失配升级成整页刷新。** 官方的补救是重载 web 切面：外壳在 WebFacetCatalog 报告 `web.hash` 变化时会做，面板只负责显示过期状态。若切面没变而 `upgrade_required` 持续出现，说明插件的 web 代码与契约不同步——重载同一文件或刷新整页都修不了，改插件才是修法。
 - `useReadable` 接受任何 chord `Readable<T>`——cell、derivation、别人对象的 state 成员都行，不限于本插件自己的契约。
 - 浏览器切面应当是一个**单个 ESM 文件**。浏览器没有模块 hook，重载时只有入口 URL 的缓存参数会变，相对 import 的子文件仍命中缓存——把切面拆成多文件，热重载就只换掉入口。
 - `title` 是纯字符串，外壳原样显示。面板自己决定写什么语言。
@@ -141,16 +141,94 @@ export default defineFacet((api) => {
 
 `@moonan_ai/sdk` 把 Chord 的原语再导出了：`remote`、`local`、`method`、`hostNamed`、`defineFacet`、`defineRegistry`、`Type`，以及 `forbidden`、`invalid`、`isChordError`、`BACKGROUND_CONTEXT`、`Context` 等错误/上下文入口。插件不直接依赖 Chord 也能写完整功能。想用更深的 API（`track`、`applyImmutable` 等），装 `@earendil-works/chord` 即可，版本对齐 `1.4.0`；浏览器切面还可以直接 `import "@earendil-works/chord/context"` 或 `/delta`，import map 已提供这两个入口。
 
-## 持久化
+## 统一数据
 
-平台不提供数据库，也不给数据目录。插件自己决定存哪、存什么：
+平台提供一个统一数据文件：默认 `~/.moonan/data.json`，可用 `MOONAN_DATA_FILE` 或
+`--data-file` 改。插件通过 `DataStore`（local、host-lifetime）读写自己的 namespace；要让
+数据参与统一导出/导入，再向 `DataCodecs` 注册一个 codec。
 
 ```js
-import { DatabaseSync } from "node:sqlite";
-const db = new DatabaseSync("/path/to/your-own.db");
+import { DataCodecs, DataStore, Type, defineFacet, local } from "@moonan_ai/sdk";
+
+const Root = local("example.data-root", {
+	version: 1,
+	input: Type.Object({}),
+	members: {},
+});
+
+export default defineFacet((api) => {
+	api.serve(Root, (_input, _p, self) => {
+		const data = self.get(DataStore, {});
+		const value = self.state("value", Type.String(), {
+			init: async (ctx) => {
+				const stored = await data.read({ namespace: "example/config" }, ctx);
+				return stored === undefined ? "empty" : String(stored.value);
+			},
+		});
+
+		self.register(DataCodecs, {
+			"example/config": {
+				namespace: "example/config",
+				version: 1,
+				migrate: (stored, from) => String(stored),
+				export: (stored) => stored,
+				import: (stored, from, current) => String(stored),
+			},
+		});
+
+		// 导入或外部 reload 后，把权威数据同步回投影 cell。
+		self.on("data", data.revision, async (_revision, ctx) => {
+			const stored = await data.read({ namespace: "example/config" }, ctx);
+			const next = stored === undefined ? "empty" : String(stored.value);
+			if (next !== value.value) value.replace(ctx, next);
+		});
+
+		return { value };
+	}, { lifetime: "host" });
+}, { uses: [DataStore] });
 ```
 
-这是零数据平台的直接后果：卸载插件 = 删掉它的包和它自己的文件，平台侧没有残留要清理。想跟着 Moonan 一起启动，就把数据文件放进插件自己的目录或环境变量指定的位置。
+- `read` 返回 `{ value, version } | undefined`，不查 codec；插件自己校验/迁移第一个值。
+- `update` 是推荐的读改写入口：它和 `importAll` 在同一个串行队列里，不会丢更新。
+- `write` 只做整值替换。
+- `exportAll` 只导出有 codec 的 namespace；`importAll` 要求每个 dataset 都有 codec，任一失败不写文件。
+- `includeSecrets` 默认 `false`；codec 的 `export` 负责脱敏，`import` 负责从 `current` 合并回被省略的密钥。
+- 数据文件损坏时先试 `.bak`；再不行保留 `.corrupt-*` 并从空数据开始。
+
+不想参与统一导出/导入的缓存或二进制资产，仍可由插件自己开文件；它们不在 `/api/data/export` 里。
+
+## 模型注册表
+
+其他服务端插件如果要使用 ai-gateway 配置好的模型，不直接 import ai-gateway 的内部模块，而是查
+`ModelProviders` 注册表：
+
+```js
+import { ModelProviders, Type, defineFacet, invalid, local } from "@moonan_ai/sdk";
+import { AI_GATEWAY_PROVIDER_ID, isAiGatewayModelProvider } from "@moonan_ai/ai-gateway/model-provider";
+
+const Root = local("example.chat-root", { version: 1, input: Type.Object({}), members: {} });
+
+export default defineFacet((api) => {
+	const providers = api.registry(ModelProviders);
+	api.serve(Root, (_input, _p, self) => {
+		// 在方法里用 ctx 查表，旧根看旧代码版本的表：
+		return {
+			ask: async (args, ctx) => {
+				const current = providers.get(AI_GATEWAY_PROVIDER_ID, ctx);
+				if (!isAiGatewayModelProvider(current)) throw invalid("args", "ai-gateway is not installed");
+				const runtime = current.runtime();
+				const model = runtime.models.getModel(args.provider, args.model);
+				// 用 pi-ai 的 Models API 发起请求
+			},
+		};
+	}, { lifetime: "host" });
+});
+```
+
+- 注册表值来自 host-lifetime 对象的 `self.register(ModelProviders, ...)`；表随代码版本替换。
+- `list()` 是 key-free 的模型目录；`runtime()` 是 server-only 的 `MutableModels`，含凭据，绝不能给浏览器。
+- 消费者不需要 `uses`（注册表不是契约）；如果还直接消费 `DataStore` 等契约，再写 `uses`。
+- ai-gateway 未安装时 `get` 返回 `undefined`，消费者自行降级。
 
 ## 检查平台解析到了什么
 
@@ -166,14 +244,14 @@ curl http://127.0.0.1:21315/api/plugins
 curl -X POST http://127.0.0.1:21315/api/plugins/reload
 ```
 
-没有 body，也没有插件 ID：平台先重新解析所有已知 ref（删除/改名的入口因此变成 `remove` 的切面，web 文件的内容 hash 也重算）。需要 chord 提交时（有服务端切面，或需要移除切面），把**全部服务端切面**放进同一个 `host.reload` 批次，然后 `await host.ready()`；纯 web 变化只更新清单，不产生 chord 提交。这样：
+没有 body，也没有插件 ID：平台先重新解析所有已知 ref（删除/改名的入口因此变成 `remove` 的切面，web 文件的内容 hash 也重算）。需要 chord 提交时（有服务端切面，或需要移除切面），把**全部服务端切面**放进同一个 `host.reload` 批次，然后 `await host.ready()`；纯 web 变化只更新 Web 切面目录，不产生 chord 提交。这样：
 
 - breaking contract 的 provider 与 consumer 永远在同一批里，不会被拆开；
-- 新宿主对象激活失败会变成一次失败请求，而不是「reload 成功但对象没起来」；提交本身已经生效，所以清单仍会发布已提交的切面集合；
+- 新宿主对象激活失败会变成一次失败请求，而不是「reload 成功但对象没起来」；提交本身已经生效，所以目录仍会发布已提交的切面集合；
 - 旧代码在旧根跑完后退休，这是 Chord 自己的事务语义；
 - web facet 的内容 hash 变化时，响应里的 `reloadBrowser` 为 true；只改服务端时它是 false；
 - 删除或改名一个服务端入口会在下一次 reload 真正下线：chord 的 `remove` 让被移除类型的引用变 `gone`，`report.removed` 给出类型名；
-- reload 被拒绝（prepare 失败）时不发布清单，旧切面继续服务；下一次 reload 会重试；
+- reload 被拒绝（prepare 失败）时不发布目录，旧切面继续服务；下一次 reload 会重试；
 - 新增插件目录、或修复一次解析错误，仍需要重启进程；已知 ref 的重新解析只覆盖启动时解析过的那些。
 
 开发时加 `--dev`（`pnpm dev` 已经带上）：chord 会校验每次 cell 写入与暴露状态，把 schema 漂移提前暴露成一条 `invalid`，而不是等到远端消费者。

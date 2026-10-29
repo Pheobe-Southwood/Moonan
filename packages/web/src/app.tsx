@@ -1,5 +1,5 @@
 import { isChordError, type Host } from "@earendil-works/chord";
-import { Manifest, type FacetSetEntry } from "@moonan_ai/sdk";
+import { WebFacetCatalog, type FacetSetEntry } from "@moonan_ai/sdk";
 import { useReadable, useRefStatus, useRemote, type PanelContribution } from "@moonan_ai/sdk/web";
 import { useEffect, useState } from "react";
 import { useConnection } from "./chord/connection.js";
@@ -11,7 +11,7 @@ import { reloadOnce } from "./chord/reload.js";
  * The shell knows no panel and holds no application state.
  *
  * Every tab is registered by a plugin's browser facet into this host's `Panels`
- * registry, and the list of facets to load comes from the platform's `Manifest`. Adding
+ * registry, and the list of facets to load comes from the platform's `WebFacetCatalog`. Adding
  * a feature means shipping a plugin, never editing this file.
  */
 function currentRoute(panels: PanelContribution[]): string {
@@ -98,14 +98,14 @@ function Shell({ host, version, panels }: { host: Host<unknown>; version: string
 
 function Bootstrapped() {
 	const { host, error } = useConnection();
-	const [manifestFatal, setManifestFatal] = useState<unknown>(null);
-	const manifest = useRemote(host, Manifest, {}, { onFatal: setManifestFatal });
-	const manifestStatus = useRefStatus(manifest);
-	const version = useReadable<string>(manifest?.version, "");
-	const facets = useReadable<FacetSetEntry[]>(manifest?.facets, []);
+	const [catalogFatal, setCatalogFatal] = useState<unknown>(null);
+	const catalog = useRemote(host, WebFacetCatalog, {}, { onFatal: setCatalogFatal });
+	const catalogStatus = useRefStatus(catalog);
+	const version = useReadable<string>(catalog?.version, "");
+	const facets = useReadable<FacetSetEntry[]>(catalog?.facets, []);
 	const panels = usePanels(host);
 
-	const live = manifestStatus === "live";
+	const live = catalogStatus === "live";
 	// Chord owns the facet transaction; the hook owns only the shell's ledger of what is
 	// installed (see facets.ts for the commit-vs-ready rules).
 	const { signature: installedSignature, failures, batchFailure } = useFacetBatches(host, live, facets);
@@ -118,29 +118,29 @@ function Bootstrapped() {
 		if (live) setEverLive(true);
 	}, [live]);
 
-	// A Manifest that cannot bind will never become useful: the page needs the build that
+	// A WebFacetCatalog that cannot bind will never become useful: the page needs the build that
 	// knows the provider contract. `useRemote` reports only after its bounded retries, and
 	// contract errors do not retry at all.
 	useEffect(() => {
-		if (!manifestFatal) return;
+		if (!catalogFatal) return;
 		if (
-			isChordError(manifestFatal, "contract_mismatch") ||
-			isChordError(manifestFatal, "upgrade_required")
+			isChordError(catalogFatal, "contract_mismatch") ||
+			isChordError(catalogFatal, "upgrade_required")
 		) {
-			reloadOnce("manifest contract mismatch");
+			reloadOnce("web facet catalog contract mismatch");
 		}
-	}, [manifestFatal]);
+	}, [catalogFatal]);
 
 	if (error) {
 		// The shell that would know the user's language is exactly what failed to negotiate.
 		return <Recovery title="界面版本不匹配 · UI version mismatch" detail="服务端已经更新，请刷新页面。 Reload the page to continue." />;
 	}
 
-	if (manifestFatal) {
+	if (catalogFatal) {
 		return (
 			<Recovery
 				title="界面需要刷新 · Reload required"
-				detail={manifestFatal instanceof Error ? manifestFatal.message : String(manifestFatal)}
+				detail={catalogFatal instanceof Error ? catalogFatal.message : String(catalogFatal)}
 			/>
 		);
 	}

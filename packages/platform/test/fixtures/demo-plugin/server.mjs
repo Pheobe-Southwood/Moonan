@@ -13,7 +13,7 @@ import {
  *
  * It is a fixture, not a demo: a directory plugin with two facets, one remote object and one
  * plain HTTP route. `web.js` declares the same contract a second time and registers a panel,
- * which is what the manifest tests want an entry for.
+ * which is what the catalog tests want an entry for.
  *
  * It lives under `packages/platform/` on purpose, so its bare imports (`@moonan_ai/sdk`)
  * resolve from the platform's own `node_modules`, exactly like a real directory plugin.

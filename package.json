@@ -1,6 +1,6 @@
 {
   "name": "moonan-workspace",
-  "version": "0.0.4-alpha2",
+  "version": "0.0.5-alpha1",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.7.0",

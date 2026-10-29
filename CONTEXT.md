@@ -1,6 +1,6 @@
 # Moonan
 
-一个本地运行的插件工作台：平台只提供宿主、网络、插件发现与切面装载，所有功能——包括 AI 对话——都是插件。
+一个本地运行的插件工作台：平台只提供宿主、网络、插件发现、切面装载、Web 切面目录与统一数据，所有功能——包括 AI 对话——都是插件。
 
 ## 语言
 
@@ -9,7 +9,7 @@
 _Avoid_: 平台, platform
 
 **平台（Platform）**
-Moonan 的应用层：拥有进程、端口、插件发现、切面装载、清单与浏览器外壳。它不含功能语义：不知道对话、模型或面板是什么。
+Moonan 的应用层：拥有进程、端口、插件发现、切面装载、Web 切面目录、统一数据与浏览器外壳。它不含功能语义：不知道对话、模型或面板是什么。
 _Avoid_: 基座, substrate, 内核, kernel, 核心, core, 运行时, runtime, 宿主
 
 **宿主（Host）**
@@ -28,12 +28,28 @@ _Avoid_: 半边, 部分, 入口, 模块
 用 TypeBox 描述的、可以在两端各自写一份的对象说明。契约的身份是指纹（名字 + 版本 + 成员），不是模块实例。
 _Avoid_: 接口, interface, API, 类型定义
 
-**清单（Manifest）**
-平台向浏览器公布的唯一远程对象：已解析插件的显示名、版本、来源（包 / 目录）、浏览器切面 `{ url, hash }` 与错误。浏览器据此决定加载哪些浏览器切面、以及何时因为内容 hash 变化而重载。只有一个 host-lifetime 的 `ManifestStore` 持有权威状态，每个 `Manifest` 只是它的远程视图。
-_Avoid_: 插件列表, 配置, config
+**Web 切面目录（WebFacetCatalog）**
+平台向浏览器公布的唯一远程对象：已解析插件的显示名、版本、来源（包 / 目录）、浏览器切面 `{ url, hash }` 与错误。浏览器据此决定加载哪些浏览器切面、以及何时因为内容 hash 变化而重载。只有一个 host-lifetime 的 `WebFacetCatalogStore` 持有权威状态，每个 `WebFacetCatalog` 只是它的远程视图。
+_Avoid_: 清单, manifest, 插件列表, 配置, config
+
+**数据存储（DataStore）**
+平台唯一的统一数据文件，local、host-lifetime。插件按 namespace 读写 JSON 数据集；`DataStore` 负责原子写入、备份、导出/导入和 revision。它不知道任何插件的 schema。
+_Avoid_: 数据库, database, 配置文件, config file
+
+**数据集（Dataset）**
+`DataStore` 中一个命名 JSON 值：`{ value, version }`。namespace 是稳定字符串（建议 `包名/数据集`），version 属于数据本身，不属于 Chord 契约。
+_Avoid_: 表, table, 文档, document
+
+**数据编解码器（DataCodec）**
+插件贡献到 `DataCodecs` 注册表的导出/导入逻辑：当前版本、`migrate`、`export`（负责脱敏）、`import`（负责校验/合并）。平台只按 namespace 调用，不理解内容。
+_Avoid_: 序列化器, serializer, 迁移器, migrator
+
+**模型提供商（ModelProvider）**
+服务端 `ModelProviders` 注册表的一项：`id`、`title`、key-free 的 `list()` 与 server-only 的 `runtime()`。ai-gateway 用它暴露 pi-ai 的 `MutableModels`；消费者按 id 查找，不直接依赖插件内部。
+_Avoid_: 模型列表, model list, 供应商, vendor
 
 **注册表（Registry）**
-插件**贡献**东西的唯一通道：键值表，整表随代码版本替换。平台只按名字读取，永远不知道是谁注册的。
+插件**贡献**东西的唯一通道：键值表，整表随代码版本替换。平台只按名字读取，永远不知道是谁注册的。`Routes`、`Panels`、`DataCodecs`、`ModelProviders` 都是注册表。
 _Avoid_: 钩子, hook, 事件总线, 回调
 
 **路由注册表（Routes）**

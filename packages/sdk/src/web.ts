@@ -15,9 +15,9 @@ export { isChordError } from "@earendil-works/chord";
 
 /**
  * A `gone` error that no new reference can fix: the consumer was built against a contract the
- * provider no longer covers. For the shell's own contracts (the platform `Manifest`, or a
+ * provider no longer covers. For the shell's own contracts (the platform `WebFacetCatalog`, or a
  * protocol mismatch) the page needs the new build. For a plugin's contract, chord's remedy is
- * to reload the web facets; the shell does that when the manifest reports changed facets.
+ * to reload the web facets; the shell does that when the WebFacetCatalog reports changed facets.
  */
 export function isFatalContractError(error: unknown): boolean {
 	return isChordError(error, "contract_mismatch") || isChordError(error, "upgrade_required");
@@ -146,7 +146,7 @@ export function useRemote<C extends AnyContract>(
 
 			// A contract that the provider no longer covers cannot be fixed by taking another
 			// reference. The shell owns the official remedy (reload the web facets when the
-			// manifest reports changed facets); a panel only reports it upward, and without an
+			// WebFacetCatalog reports changed facets); a panel only reports it upward, and without an
 			// `onFatal` handler it says once what the developer can do.
 			if (isFatalContractError(error)) {
 				const handler = onFatal.current;
@@ -160,7 +160,7 @@ export function useRemote<C extends AnyContract>(
 				if (!warned.current) {
 					warned.current = true;
 					console.warn(
-						"[chord] a reference is gone because its contract no longer binds. The shell reloads web facets when the Manifest reports changed facets; if this persists, the plugin's web code and contract are out of sync.",
+						"[chord] a reference is gone because its contract no longer binds. The shell reloads web facets when the WebFacetCatalog reports changed facets; if this persists, the plugin's web code and contract are out of sync.",
 						error,
 					);
 				}

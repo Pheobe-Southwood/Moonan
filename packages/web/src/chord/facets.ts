@@ -26,15 +26,15 @@ export function facetSignature(facets: readonly FacetSetEntry[]): string {
 }
 
 /**
- * Keeps the browser host's facet set in step with the manifest.
+ * Keeps the browser host's facet set in step with the WebFacetCatalog.
  *
  * Chord owns the transaction and the compatibility decision: `host.load` installs and (unless
  * deferred) waits for host objects, and `host.reload` resolves at the commit, before host
  * objects activate. The ledger therefore advances at the commit, not before the request and
  * not only after `ready()`: a failing activation does not roll the code back, so forgetting
- * the commit would make the next manifest publish look like no change at all. A reload that
+ * the commit would make the next WebFacetCatalog publish look like no change at all. A reload that
  * rejects before the commit is transactional — the old facets keep running — and the old
- * signature stays, so the next manifest publish retries.
+ * signature stays, so the next WebFacetCatalog publish retries.
  *
  * The web hash is only a "this module changed" trigger. Whether the new module fits the
  * provider contract remains chord's decision (`contract_mismatch`/`upgrade_required`).
@@ -58,7 +58,7 @@ export function useFacetBatches(
 		// A replaced host starts with no facets, whatever the previous host had installed.
 		const previous = ledger !== null && ledger.host === host ? ledger : null;
 		if (ledger !== null && previous === null) setSignature("");
-		// The first install always runs; later batches only when the manifest reports a change.
+		// The first install always runs; later batches only when the WebFacetCatalog reports a change.
 		if (previous !== null && previous.signature === next) return;
 		const removed = previous === null ? [] : previous.urls.filter((url) => !urls.includes(url));
 		let current = true;

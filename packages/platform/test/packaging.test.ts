@@ -9,7 +9,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const PUBLISHED = ["packages/sdk", "packages/platform", "packages/ai-gateway"] as const;
 const PRIVATE = ["packages/web"] as const;
 
-interface Manifest {
+interface PackageJson {
 	name?: string;
 	version?: string;
 	private?: boolean;
@@ -20,8 +20,8 @@ interface Manifest {
 	peerDependencies?: Record<string, string>;
 }
 
-function manifest(area: string): Manifest {
-	return JSON.parse(readFileSync(join(root, area, "package.json"), "utf8")) as Manifest;
+function packageJson(area: string): PackageJson {
+	return JSON.parse(readFileSync(join(root, area, "package.json"), "utf8")) as PackageJson;
 }
 
 /** `moonan --version` prints this constant, so it is the version everything else must agree on. */
@@ -43,27 +43,27 @@ function sourceVersion(): string {
 describe("packaging", () => {
 	it("marks the published packages public and the build-only one private", () => {
 		for (const area of PUBLISHED) {
-			const pkg = manifest(area);
+			const pkg = packageJson(area);
 			expect(pkg.private, `${area} must be publishable`).not.toBe(true);
 			// Scoped packages default to restricted; without this the publish is refused.
 			expect(pkg.publishConfig?.access, `${area} publishConfig.access`).toBe("public");
 		}
 		for (const area of PRIVATE) {
-			expect(manifest(area).private, `${area} must stay private`).toBe(true);
+			expect(packageJson(area).private, `${area} must stay private`).toBe(true);
 		}
 	});
 
 	it("ships dist in every published package", () => {
 		for (const area of PUBLISHED) {
-			expect(manifest(area).files, `${area} files`).toContain("dist");
+			expect(packageJson(area).files, `${area} files`).toContain("dist");
 		}
 	});
 
 	it("keeps every version equal to the one `moonan --version` prints", () => {
 		const version = sourceVersion();
-		expect(manifest(".").version, "workspace version").toBe(version);
+		expect(packageJson(".").version, "workspace version").toBe(version);
 		for (const area of [...PUBLISHED, ...PRIVATE]) {
-			expect(manifest(area).version, `${area} version`).toBe(version);
+			expect(packageJson(area).version, `${area} version`).toBe(version);
 		}
 	});
 
@@ -72,12 +72,12 @@ describe("packaging", () => {
 		// installable if the target is on npm, so a private workspace package may appear as a
 		// build-time devDependency and nowhere else.
 		const privateNames = PRIVATE.map((area) => {
-			const name = manifest(area).name;
+			const name = packageJson(area).name;
 			expect(name, `${area} name`).toBeTruthy();
 			return name!;
 		});
 		for (const area of PUBLISHED) {
-			const pkg = manifest(area);
+			const pkg = packageJson(area);
 			for (const name of privateNames) {
 				expect(pkg.dependencies?.[name], `${area} dependencies`).toBeUndefined();
 				expect(pkg.peerDependencies?.[name], `${area} peerDependencies`).toBeUndefined();

@@ -3,16 +3,18 @@ import { createServer } from "node:http";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createHost, webSocketLink } from "@earendil-works/chord";
 import WebSocket from "ws";
 import { start } from "../../../platform/dist/index.js";
 import { silentLogger } from "../../../platform/dist/logger.js";
 import { AiGateway } from "../../dist/contract.js";
-import { defaultSettings } from "../../dist/store.js";
+import { defaultSettings } from "../../dist/config.js";
 
 const home = await mkdtemp(join(tmpdir(), "moonan-gateway-home-"));
 const pluginsDir = await mkdtemp(join(tmpdir(), "moonan-gateway-plugins-"));
-process.env.MOONAN_AI_GATEWAY_HOME = home;
+const dataFile = join(home, "data.json");
+const consumerDir = fileURLToPath(new URL("./consumer-plugin", import.meta.url));
 
 const upstream = createServer((request, response) => {
 	if (request.url === "/v1/models" && request.headers.authorization === "Bearer sk-upstream-12345678") {
@@ -80,7 +82,13 @@ async function waitFor(read, predicate, label) {
 }
 
 try {
-	app = await start({ port: 0, plugins: ["@moonan_ai/ai-gateway"], pluginsDir, logger: silentLogger });
+	app = await start({
+		port: 0,
+		plugins: ["@moonan_ai/ai-gateway", consumerDir],
+		pluginsDir,
+		dataFile,
+		logger: silentLogger,
+	});
 	client = await connect(app);
 	const ref = client.ref;
 
@@ -146,14 +154,39 @@ try {
 	assert.equal(status.models, 4);
 	assert.equal(status.storage.exists, true);
 	assert.equal(status.storage.mode, "0600");
+	assert.equal(status.storage.dataPath, dataFile);
+	assert.equal(status.storage.namespace, "ai-gateway/config");
+	assert.equal(status.storage.datasets, 1);
 
 	const configText = await (await fetch(`${app.url}/api/ai-gateway/config`)).text();
 	assert.ok(!configText.includes("sk-upstream-12345678"));
 	assert.ok(configText.includes("•••• 5678"));
 
-	const raw = await readFile(join(home, "config.json"), "utf8");
+	const exported = await (await fetch(`${app.url}/api/data/export`)).json();
+	assert.ok(exported.datasets.some((dataset) => dataset.namespace === "ai-gateway/config"));
+	assert.ok(!JSON.stringify(exported).includes("sk-upstream-12345678"));
+	const withSecrets = await (await fetch(`${app.url}/api/data/export?includeSecrets=1`)).json();
+	assert.ok(JSON.stringify(withSecrets).includes("sk-upstream-12345678"));
+	const importResponse = await fetch(`${app.url}/api/data/import`, {
+		method: "POST",
+		body: JSON.stringify(exported),
+	});
+	assert.equal(importResponse.status, 200);
+	await waitFor(
+		() => ref.snapshot.value,
+		(value) => value.providers[0]?.hasKey === true,
+		"redacted import preserved the key",
+	);
+
+	const consumer = await (await fetch(`${app.url}/api/model-provider`)).json();
+	assert.ok(consumer.models.includes("hand-written"));
+	assert.equal(consumer.model, "hand-written");
+
+	const raw = await readFile(dataFile, "utf8");
+	const stored = JSON.parse(raw);
 	assert.ok(raw.includes("sk-upstream-12345678"));
-	assert.equal((await stat(join(home, "config.json"))).mode & 0o777, 0o600);
+	assert.equal(stored.datasets["ai-gateway/config"].version, 1);
+	assert.equal((await stat(dataFile)).mode & 0o777, 0o600);
 
 	const reload = await fetch(`${app.url}/api/plugins/reload`, { method: "POST" });
 	assert.equal(reload.status, 200);
@@ -161,8 +194,8 @@ try {
 	assert.equal(ref.snapshot.value.providers[0]?.models.length, 4);
 
 	const edited = JSON.parse(raw);
-	edited.providers[0].name = "Atlas Renamed";
-	await writeFile(join(home, "config.json"), JSON.stringify(edited, null, 2), "utf8");
+	edited.datasets["ai-gateway/config"].value.providers[0].name = "Atlas Renamed";
+	await writeFile(dataFile, JSON.stringify(edited, null, 2), "utf8");
 	const reloaded = await ref.reloadFromDisk();
 	assert.equal(reloaded.providers[0]?.name, "Atlas Renamed");
 
@@ -178,7 +211,13 @@ try {
 	await closeClient(client);
 	client = undefined;
 	await app.close();
-	app = await start({ port: 0, plugins: ["@moonan_ai/ai-gateway"], pluginsDir, logger: silentLogger });
+	app = await start({
+		port: 0,
+		plugins: ["@moonan_ai/ai-gateway", consumerDir],
+		pluginsDir,
+		dataFile,
+		logger: silentLogger,
+	});
 	client = await connect(app);
 	const restored = await waitFor(
 		() => client.ref.snapshot.value,

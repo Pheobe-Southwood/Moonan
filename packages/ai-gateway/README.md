@@ -30,19 +30,23 @@ pnpm start        # 同上去掉 chord 的写入校验
 
 ## 数据放在哪
 
-默认文件是 `~/.moonan/ai-gateway/config.json`：
+配置是平台统一数据文件里的 `ai-gateway/config` 数据集，默认文件
+`~/.moonan/data.json`：
 
-- 目录 `0700`，文件 `0600`，写入采用临时文件 + fsync + rename 的原子替换；
-- 每次保存前把上一版复制到 `config.json.bak`；
-- 主文件损坏时先尝试 `.bak`；两者都不可用时把主文件保留为 `config.json.corrupt-<timestamp>.json`；
-- API Key 以明文保存在这个文件里（面板不假装它是密钥链），快照和 HTTP 响应只含 `hasKey` 与末四位提示。
+- 平台目录 `0700`，文件 `0600`；写入采用临时文件 + fsync + rename 的原子替换；
+- 每次保存前把上一版复制到 `data.json.bak`；
+- 主文件损坏时先尝试 `.bak`；两者都不可用时保留 `data.json.corrupt-<timestamp>.json`；
+- API Key 以明文保存在统一数据文件里（面板不假装它是密钥链），快照和 HTTP 响应只含 `hasKey` 与末四位提示；
+- `/api/data/export` 默认脱敏，`?includeSecrets=1` 才导出明文；导入脱敏包时按 provider id 保留已有密钥。
 
-路径可用环境变量覆盖：
+路径可用 `--data-file` 或环境变量覆盖：
 
 ```bash
-MOONAN_AI_GATEWAY_HOME=/path/to/dir node packages/platform/bin/moonan.js --plugin @moonan_ai/ai-gateway
-MOONAN_AI_GATEWAY_CONFIG=/path/to/config.json node packages/platform/bin/moonan.js --plugin @moonan_ai/ai-gateway
+node packages/platform/bin/moonan.js --plugin @moonan_ai/ai-gateway --data-file /path/to/data.json
+MOONAN_DATA_FILE=/path/to/data.json node packages/platform/bin/moonan.js --plugin @moonan_ai/ai-gateway
 ```
+
+旧的 `~/.moonan/ai-gateway/config.json` 不再读取；如需保留配置，请先手动备份并重新录入。这是 v0.0.x alpha 的破坏性变更。
 
 ## 配置了什么
 
@@ -81,6 +85,25 @@ MOONAN_AI_GATEWAY_CONFIG=/path/to/config.json node packages/platform/bin/moonan.
 返回值会归一化上下文窗口、输出上限、模态、价格和 reasoning 标记，跳过 embedding / 音频 /
 图像生成这类非对话条目。导入时可以选择跳过或覆盖同名模型。
 
+## 给其他插件用
+
+服务端切面把配置好的模型注册进 `ModelProviders`（id `ai-gateway`）。其他服务端插件按 id 查找，
+不需要依赖 ai-gateway 的内部模块：
+
+```js
+import { ModelProviders } from "@moonan_ai/sdk";
+import { AI_GATEWAY_PROVIDER_ID, isAiGatewayModelProvider } from "@moonan_ai/ai-gateway/model-provider";
+
+const providers = api.registry(ModelProviders);
+const provider = providers.get(AI_GATEWAY_PROVIDER_ID, ctx);
+if (isAiGatewayModelProvider(provider)) {
+	const runtime = provider.runtime(); // { models: MutableModels, warnings, revision }
+	const model = runtime.models.getModel("atlas", "hand-written");
+}
+```
+
+`runtime()` 含凭据，只能服务端使用；不要放进浏览器切面或远程 Chord 对象。
+
 ## 服务端接口
 
 面板通过 Chord 对象读写；同一个服务也暴露只读/探测接口，方便脚本验收：
@@ -105,4 +128,4 @@ pnpm --filter @moonan_ai/ai-gateway test
 ```
 
 浏览器切面是单个 ESM（`dist/web.js`），只从 shell 的 import map 取 React、Chord、TypeBox 和 SDK。
-服务端切面是 `dist/server.js`，通过包 `exports` 的 `.` 与 `./web` 被平台解析。
+服务端切面是 `dist/server.js`，通过包 `exports` 的 `.` 与 `./web` 被平台解析；`./model-provider` 给消费者提供类型辅助。

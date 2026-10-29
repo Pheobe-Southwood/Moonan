@@ -20,6 +20,7 @@ const apps: Moonan[] = [];
 const dirs: string[] = [];
 
 export interface AppOptions {
+	readonly dataFile?: string;
 	readonly dev?: boolean;
 	readonly allowedOrigins?: readonly string[];
 	readonly maxCalls?: number;
@@ -30,6 +31,13 @@ export async function tempDir(prefix: string): Promise<string> {
 	const dir = await mkdtemp(join(root, "packages", "platform", prefix));
 	dirs.push(dir);
 	return dir;
+}
+
+/** A fresh temporary unified data file; removed by `cleanup()`. */
+export async function tempDataFile(): Promise<string> {
+	const dir = await mkdtemp(join(tmpdir(), "moonan-data-"));
+	dirs.push(dir);
+	return join(dir, "data.json");
 }
 
 /** A directory plugin whose server facet is `source`. */
@@ -43,11 +51,13 @@ export async function pluginDir(source: string): Promise<string> {
 export async function appFor(plugins: readonly string[], options: AppOptions = {}): Promise<Moonan> {
 	const pluginsDir = await mkdtemp(join(tmpdir(), "moonan-plugins-"));
 	dirs.push(pluginsDir);
+	const dataFile = options.dataFile ?? (await tempDataFile());
 	const app = await start({
 		port: 0,
 		hostname: "127.0.0.1",
 		plugins: [...plugins],
 		pluginsDir,
+		dataFile,
 		logger: silentLogger,
 		...options,
 	});

@@ -11,7 +11,7 @@ import {
 	sanitizeEndpoint,
 } from "./util.js";
 
-export const GATEWAY_VERSION = "0.0.4-alpha2";
+export const GATEWAY_VERSION = "0.0.5-alpha1";
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const MAX_ERROR_BODY = 400;
 

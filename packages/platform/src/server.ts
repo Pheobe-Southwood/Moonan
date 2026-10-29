@@ -3,10 +3,16 @@ import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, resolve, sep } from "node:path";
 import { acceptWebSockets, isChordError, type Host, type ReloadReport } from "@earendil-works/chord";
-import { Routes } from "@moonan_ai/sdk";
+import { Routes, type DataBundle, type DataImportReport, type DataStoreStorageInfo } from "@moonan_ai/sdk";
 import { WebSocketServer } from "ws";
 import type { Logger } from "./logger.js";
 import { describe, errorMessage, type PluginFacets, type Principal, webSignature } from "./types.js";
+
+export interface WebServerData {
+	status(): Promise<DataStoreStorageInfo>;
+	export(options: { includeSecrets: boolean }): Promise<DataBundle>;
+	import(bundle: unknown): Promise<DataImportReport>;
+}
 
 export interface WebServerOptions {
 	host: Host<Principal>;
@@ -19,6 +25,8 @@ export interface WebServerOptions {
 	/** chord's code version: what a browser and an external tool compare to know a commit landed. */
 	revision: () => number;
 	reload: () => Promise<ReloadReport | undefined>;
+	/** The platform's unified data surface. */
+	data: WebServerData;
 	/**
 	 * Extra browser origins accepted in addition to same-origin, matched exactly against the
 	 * `Origin` header (`http://host:port`). This is Moonan policy, not a chord concept.
@@ -87,14 +95,40 @@ const MIME: Record<string, string> = {
 	".txt": "text/plain; charset=utf-8",
 };
 
-function sendJson(response: ServerResponse, status: number, body: unknown): void {
+function sendJson(
+	response: ServerResponse,
+	status: number,
+	body: unknown,
+	headers: Record<string, string> = {},
+): void {
 	const payload = JSON.stringify(body);
 	response.writeHead(status, {
 		"content-type": "application/json; charset=utf-8",
 		"cache-control": "no-store",
 		"content-length": Buffer.byteLength(payload),
+		...headers,
 	});
 	response.end(payload);
+}
+
+const MAX_DATA_BODY = 16 * 1024 * 1024;
+
+async function readJsonBody(request: IncomingMessage): Promise<unknown> {
+	let size = 0;
+	const chunks: Buffer[] = [];
+	for await (const chunk of request) {
+		const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+		size += buffer.byteLength;
+		if (size > MAX_DATA_BODY) throw new Error("request body is too large");
+		chunks.push(buffer);
+	}
+	if (chunks.length === 0) return undefined;
+	const text = Buffer.concat(chunks).toString("utf8");
+	try {
+		return JSON.parse(text);
+	} catch {
+		throw new Error("request body is not valid JSON");
+	}
 }
 
 async function sendFile(response: ServerResponse, file: string, cache: boolean): Promise<boolean> {
@@ -182,6 +216,68 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 		const pathname = decodeURIComponent(url.pathname);
 		const method = request.method ?? "GET";
 
+		if (pathname === "/api/data/status") {
+			if (method !== "GET") {
+				sendJson(response, 405, { error: "method not allowed" });
+				return;
+			}
+			if (!sameOrigin(request, allowedOrigins)) {
+				sendJson(response, 403, { error: "forbidden" });
+				return;
+			}
+			try {
+				sendJson(response, 200, await options.data.status());
+			} catch (error) {
+				sendJson(response, 500, { error: errorMessage(error) });
+			}
+			return;
+		}
+
+		if (pathname === "/api/data/export") {
+			if (method !== "GET") {
+				sendJson(response, 405, { error: "method not allowed" });
+				return;
+			}
+			if (!sameOrigin(request, allowedOrigins)) {
+				sendJson(response, 403, { error: "forbidden" });
+				return;
+			}
+			try {
+				const includeSecrets = url.searchParams.get("includeSecrets") === "1";
+				const bundle = await options.data.export({ includeSecrets });
+				sendJson(response, 200, bundle, {
+					"content-disposition": `attachment; filename="moonan-data-${Date.now()}.json"`,
+					...(includeSecrets ? { "x-moonan-secrets": "included" } : {}),
+				});
+			} catch (error) {
+				sendJson(response, 500, { error: errorMessage(error) });
+			}
+			return;
+		}
+
+		if (pathname === "/api/data/import") {
+			if (method !== "POST") {
+				sendJson(response, 405, { error: "method not allowed" });
+				return;
+			}
+			if (!sameOrigin(request, allowedOrigins)) {
+				sendJson(response, 403, { error: "forbidden" });
+				return;
+			}
+			try {
+				const bundle = await readJsonBody(request);
+				sendJson(response, 200, await options.data.import(bundle));
+			} catch (error) {
+				sendJson(response, 400, {
+					error: errorMessage(error),
+					...(isChordError(error)
+						? { code: error.code, ...(error.reason ? { reason: error.reason } : {}) }
+						: {}),
+				});
+			}
+			return;
+		}
+
 		if (pathname === "/api/plugins") {
 			sendJson(response, 200, {
 				version: options.version,
@@ -211,7 +307,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 				// `reloadBrowser` means "the browser facet set or its code changed", not "the
 				// server committed". A web file's content hash is the signal; a server-only
 				// change leaves it untouched. A browser that is not a cluster participant
-				// learns this through `Manifest` and swaps its own facets with `host.reload`.
+				// learns this through `WebFacetCatalog` and swaps its own facets with `host.reload`.
 				const afterWeb = webSignature(plugins());
 				sendJson(response, 200, {
 					ok: true,

@@ -35,20 +35,20 @@ export const FacetSetSchema = Type.Object({
 export type FacetSetEntry = Static<typeof FacetSetSchema>;
 
 /**
- * The only object the platform publishes: which browser facets the browser host must load.
+ * The only object the platform publishes: the catalog of browser facets the browser host
+ * must load.
  *
  * This is the seam that keeps the platform free of feature state. The loader knows which
  * modules exist; the browser cannot find that out alone (it has no filesystem and no
- * registry to ask), so exactly one read-only object carries it across. Chord names a
- * server `Manifest` object as how browsers learn of changes (spec §6); the particular
- * fields here are Moonan application state, not protocol fields.
+ * registry to ask), so exactly one read-only object carries it across.
  *
- * Contract version 3 changed `web` from a bare URL string to `{ url, hash }`. There is no
- * compatibility adapter: a browser is mapped to `upgrade_required` and must load the new
- * shell (a non-client consumer gets `contract_mismatch`).
+ * The name is deliberately about what it carries: a catalog of web facets. It is not a
+ * package manifest and it is not a general application manifest. This is a fresh contract
+ * (version 1) with no compatibility adapter: an old shell gets `upgrade_required` and
+ * reloads the page.
  */
-export const Manifest = remote("moonan.manifest", {
-	version: 3,
+export const WebFacetCatalog = remote("moonan.web-facets", {
+	version: 1,
 	input: Type.Object({}),
 	host: hostNamed("moonan"),
 	variants: {

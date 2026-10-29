@@ -389,14 +389,16 @@ export type GatewayOptions = Static<typeof GatewayOptionsSchema>;
 
 export const StorageInfoSchema = Type.Object(
 	{
-		configPath: Type.String(),
+		dataPath: Type.String(),
 		backupPath: Type.String(),
-		directory: Type.String(),
+		namespace: Type.String(),
 		exists: Type.Boolean(),
 		mode: Type.Optional(Type.String()),
 		writable: Type.Boolean(),
 		lastSavedAt: Type.Optional(Type.String()),
 		notice: Type.Optional(Type.String()),
+		revision: Type.Number(),
+		datasets: Type.Number(),
 	},
 	{ additionalProperties: false },
 );
@@ -560,7 +562,7 @@ export const GatewayHealthSchema = Type.Object(
 	{
 		ok: Type.Boolean(),
 		version: Type.String(),
-		configPath: Type.String(),
+		dataPath: Type.String(),
 		providers: Type.Integer(),
 		enabledProviders: Type.Integer(),
 		models: Type.Integer(),

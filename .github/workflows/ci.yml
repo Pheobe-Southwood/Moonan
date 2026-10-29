@@ -42,6 +42,7 @@ jobs:
           check packages/platform/dist/web/index.html
           # The built-in gateway plugin ships both facets as package exports.
           check packages/ai-gateway/dist/server.js
+          check packages/ai-gateway/dist/model-provider.js
           check packages/ai-gateway/dist/web.js
           # A plugin imported at runtime resolves these through the import map, so all of
           # them have to exist by these exact names.

@@ -1,13 +1,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Manifest, type FacetSetEntry } from "@moonan_ai/sdk";
+import { WebFacetCatalog, type FacetSetEntry } from "@moonan_ai/sdk";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Moonan } from "../src/index.js";
 import { silentLogger } from "../src/logger.js";
 import { createPlatform } from "../src/platform.js";
 import { resolvePluginRef } from "../src/plugins.js";
-import { appFor, cleanup, closeClient, connectClient, pluginDir, tempDir } from "./support.js";
+import { appFor, cleanup, closeClient, connectClient, pluginDir, tempDataFile, tempDir } from "./support.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..", "..");
@@ -84,6 +84,7 @@ describe("the platform", () => {
 		const platform = await createPlatform({
 			version: "test",
 			plugins: [join(root, "does-not-exist"), demoDir],
+			dataFile: await tempDataFile(),
 			logger: silentLogger,
 		});
 		try {
@@ -126,6 +127,7 @@ export default defineFacet((api) => {
 		const platform = await createPlatform({
 			version: "test",
 			plugins: [consumerDir, providerDir],
+			dataFile: await tempDataFile(),
 			logger: silentLogger,
 		});
 		try {
@@ -162,6 +164,7 @@ export default defineFacet((api) => {
 		const platform = await createPlatform({
 			version: "test",
 			plugins: [consumerDir, providerDir],
+			dataFile: await tempDataFile(),
 			logger: silentLogger,
 		});
 		try {
@@ -193,7 +196,7 @@ export default defineFacet((api) => {
 		await writeFile(join(own, "index.js"), 'throw new Error("the plugin imports its own chord");\n');
 		await writeFile(join(dir, "server.mjs"), 'import "@earendil-works/chord";\nexport default { setup() {} };\n');
 
-		await expect(createPlatform({ version: "test", plugins: [dir, demoDir], logger: silentLogger })).rejects.toThrow(
+		await expect(createPlatform({ version: "test", plugins: [dir, demoDir], dataFile: await tempDataFile(), logger: silentLogger })).rejects.toThrow(
 			/the plugin imports its own chord/,
 		);
 	});
@@ -213,7 +216,7 @@ export default defineFacet((api) => {
 
 		// chord's install is not a rollback transaction: continuing would leave Angry's
 		// service behind. The platform closes the host and refuses to start instead.
-		await expect(createPlatform({ version: "test", plugins: [dir], logger: silentLogger })).rejects.toThrow(
+		await expect(createPlatform({ version: "test", plugins: [dir], dataFile: await tempDataFile(), logger: silentLogger })).rejects.toThrow(
 			/setup said no/,
 		);
 	});
@@ -236,24 +239,24 @@ export default defineFacet((api) => {
 		}
 	});
 
-	it("installs the manifest facet in the same batch, so a plugin host object can consume it", async () => {
-		const dir = await tempDir(".manifest-batch-");
+	it("installs the catalog facet in the same batch, so a plugin host object can consume it", async () => {
+		const dir = await tempDir(".catalog-batch-");
 		await writeFile(
 			join(dir, "server.mjs"),
-			`import { Manifest, Type, defineFacet, local, method } from "@moonan_ai/sdk";
+			`import { WebFacetCatalog, Type, defineFacet, local, method } from "@moonan_ai/sdk";
 const Probe = local("test.probe", { version: 1, input: Type.Object({}), members: { revision: method(undefined, Type.Number()) } });
 export default defineFacet((api) => {
 	api.serve(Probe, (_input, _principal, self) => {
-		const manifest = self.get(Manifest, {});
-		return { revision: () => manifest.revision.value };
+		const catalog = self.get(WebFacetCatalog, {});
+		return { revision: () => catalog.revision.value };
 	}, { lifetime: "host" });
-}, { uses: [Manifest] });
+}, { uses: [WebFacetCatalog] });
 `,
 		);
 
-		const platform = await createPlatform({ version: "test", plugins: [dir], logger: silentLogger });
+		const platform = await createPlatform({ version: "test", plugins: [dir], dataFile: await tempDataFile(), logger: silentLogger });
 		try {
-			// The assertion is that startup resolved: if the manifest facet were installed after
+			// The assertion is that startup resolved: if the catalog facet were installed after
 			// the plugin batch, Probe's activation would fail with `unknown_type`.
 			expect(platform.plugins[0]?.serverInstalled).toBe(true);
 		} finally {
@@ -386,22 +389,22 @@ export default defineFacet((api) => {
 		expect(plugin.server).toMatch(/plugin\/server\.js$/);
 	});
 
-	it("converges every manifest instance on the new revision", async () => {
+	it("converges every catalog instance on the new revision", async () => {
 		const current = (await (await fetch(`${moonan.url}/api/plugins`)).json()) as PluginsResponse;
 		const { socket, client } = await connectClient(moonan);
 		// chord keys objects by principal, so this is a different object from the browser's:
 		// the fan-out has to reach both, and neither is written by iterating a list here.
-		const hostManifest = await moonan.host.get(Manifest, {});
+		const hostCatalog = await moonan.host.get(WebFacetCatalog, {});
 		try {
-			const manifest = await client.get(Manifest, {});
-			expect(manifest.version.value).toEqual(expect.any(String));
-			expect((manifest.facets.value as FacetSetEntry[]).map((facet) => facet.name)).toContain("demo-plugin");
-			const before = manifest.revision.value as number;
+			const catalog = await client.get(WebFacetCatalog, {});
+			expect(catalog.version.value).toEqual(expect.any(String));
+			expect((catalog.facets.value as FacetSetEntry[]).map((facet) => facet.name)).toContain("demo-plugin");
+			const before = catalog.revision.value as number;
 			// A new instance starts at the current revision, not at zero: otherwise every
 			// reconnect would look like a code change and make the shell reload for nothing.
 			expect(before).toBe(current.revision);
-			expect(hostManifest.revision.value).toBe(before);
-			const watch = (ref: typeof manifest, from: number) =>
+			expect(hostCatalog.revision.value).toBe(before);
+			const watch = (ref: typeof catalog, from: number) =>
 				new Promise<number>((resolve) => {
 					const stop = ref.revision.subscribe((value: number) => {
 						if (value > from) {
@@ -410,8 +413,8 @@ export default defineFacet((api) => {
 						}
 					});
 				});
-			const seen = watch(manifest, before);
-			const hostSeen = watch(hostManifest, before);
+			const seen = watch(catalog, before);
+			const hostSeen = watch(hostCatalog, before);
 			const response = await fetch(`${moonan.url}/api/plugins/reload`, { method: "POST" });
 			expect(response.status).toBe(200);
 			const body = (await response.json()) as { revision: number };
@@ -420,9 +423,9 @@ export default defineFacet((api) => {
 			// event through its publication queue, so the cells settle a moment later.
 			await expect(seen).resolves.toBeGreaterThan(before);
 			await expect(hostSeen).resolves.toBeGreaterThan(before);
-			manifest.release();
+			catalog.release();
 		} finally {
-			hostManifest.release();
+			hostCatalog.release();
 			await closeClient(socket, client);
 		}
 	});

@@ -1,6 +1,6 @@
 {
   "name": "@moonan_ai/ai-gateway",
-  "version": "0.0.4-alpha2",
+  "version": "0.0.5-alpha1",
   "type": "module",
   "description": "Moonan's AI gateway plugin: configure pi-ai providers and models from the 模型 tab.",
   "license": "MIT",
@@ -13,6 +13,10 @@
     ".": {
       "types": "./src/server.ts",
       "default": "./dist/server.js"
+    },
+    "./model-provider": {
+      "types": "./src/model-provider.ts",
+      "default": "./dist/model-provider.js"
     },
     "./web": {
       "types": "./src/web/web.tsx",

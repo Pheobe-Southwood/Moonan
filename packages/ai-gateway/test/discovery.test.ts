@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { presetById, presetToProviderConfig } from "../src/catalog.js";
 import { discoverModels } from "../src/discovery.js";
 import type { GatewayConfig, ProviderConfig } from "../src/schema.js";
-import { emptyConfig } from "../src/store.js";
+import { emptyConfig } from "../src/config.js";
 
 let server: Server;
 let baseUrl: string;

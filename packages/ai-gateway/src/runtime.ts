@@ -126,7 +126,10 @@ function modelConfigToModel(model: ModelConfig, provider: ProviderConfig): Model
  * `createProvider` path pi-ai's own built-ins use, so a bad API id, a missing Base URL or
  * an unsupported compatibility shape shows up here rather than in a future chat call.
  */
-export function buildProviderRuntime(getConfig: () => GatewayConfig, provider: ProviderConfig): ProviderRuntime {
+export function buildProvider(
+	getConfig: () => GatewayConfig,
+	provider: ProviderConfig,
+): { provider: Provider; warnings: string[] } {
 	const warnings: string[] = [];
 	const preset = provider.presetId ? presetById(provider.presetId) : undefined;
 	const models: Model<Api>[] = [];
@@ -172,10 +175,36 @@ export function buildProviderRuntime(getConfig: () => GatewayConfig, provider: P
 		models,
 		...(Object.keys(apiMap).length > 0 ? { api: apiMap } : {}),
 	});
+	return { provider: runtimeProvider, warnings };
+}
 
+export function buildProviderRuntime(getConfig: () => GatewayConfig, provider: ProviderConfig): ProviderRuntime {
+	const built = buildProvider(getConfig, provider);
 	const runtimeModels = createModels({ credentials: new ConfigCredentialStore(getConfig) });
-	runtimeModels.setProvider(runtimeProvider);
-	return { provider: runtimeProvider, models: runtimeModels, warnings };
+	runtimeModels.setProvider(built.provider);
+	return { provider: built.provider, models: runtimeModels, warnings: built.warnings };
+}
+
+/**
+ * The runtime exposed through `ModelProviders`.
+ *
+ * One `MutableModels` owns every enabled provider, so a consumer can resolve any configured
+ * provider/model from the same handle. Credentials are read live from the gateway config;
+ * the handle itself is rebuilt when the config revision changes.
+ */
+export function buildGatewayModels(getConfig: () => GatewayConfig): {
+	models: MutableModels;
+	warnings: string[];
+} {
+	const warnings: string[] = [];
+	const models = createModels({ credentials: new ConfigCredentialStore(getConfig) });
+	for (const provider of getConfig().providers) {
+		if (!provider.enabled) continue;
+		const built = buildProvider(getConfig, provider);
+		warnings.push(...built.warnings);
+		models.setProvider(built.provider);
+	}
+	return { models, warnings };
 }
 
 /** Resolve auth exactly as a future request would, including provider env overrides. */

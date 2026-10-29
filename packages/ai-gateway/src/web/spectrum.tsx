@@ -60,7 +60,7 @@ export function GatewayHeader({
 					<Figure value={String(providers.length)} label="提供商" />
 					<Figure value={String(models)} label="模型" tone={models > 0 ? "violet" : undefined} />
 					<Figure value={formatTokens(max)} label="最长上下文" />
-					<Figure value={snapshot.storage.mode ?? (snapshot.storage.exists ? "—" : "待写入")} label="配置文件权限" tone="jade" />
+					<Figure value={snapshot.storage.mode ?? (snapshot.storage.exists ? "—" : "待写入")} label="数据文件权限" tone="jade" />
 				</div>
 			</div>
 			<section className="gw-spectrum" aria-label="模型上下文窗口分布">
@@ -135,7 +135,7 @@ export function StorageNote({ snapshot }: { snapshot: GatewaySnapshot }) {
 		<div className="gw-rail-note">
 			<LockIcon size={11} />
 			<span>
-				{snapshot.storage.exists ? "已写入" : "等待首次写入"}，{snapshot.storage.configPath}
+				{snapshot.storage.exists ? "已写入" : "等待首次写入"}，{snapshot.storage.dataPath}
 			</span>
 		</div>
 	);

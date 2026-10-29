@@ -27,10 +27,10 @@ const EMPTY = Type.Object({});
  * It is local and host-lifetime: exactly one instance exists while the server facet is
  * loaded, every browser view reads it through {@link AiGateway}, and every HTTP route
  * writes through it. Reloading the server facet replaces the code but not this object,
- * so the config cell (and its loaded value) survives.
+ * so the config cell survives as a projection of the platform DataStore dataset.
  */
 export const GatewayState = local("moonan.ai-gateway.state", {
-	version: 1,
+	version: 2,
 	input: EMPTY,
 	members: {
 		snapshot: GatewaySnapshotSchema,
@@ -55,7 +55,7 @@ export const GatewayState = local("moonan.ai-gateway.state", {
  * visible to every panel on the next Chord revision.
  */
 export const AiGateway = remote("moonan.ai-gateway", {
-	version: 1,
+	version: 2,
 	input: EMPTY,
 	host: hostNamed("moonan"),
 	variants: {

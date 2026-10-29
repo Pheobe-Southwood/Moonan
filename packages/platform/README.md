@@ -1,8 +1,8 @@
 # @moonan_ai/moonan
 
 Moonan 平台：建一个 Chord 宿主、开一个端口、把插件目录/包解析成切面模块 URL、把 HTTP 交给插件的
-`Routes` 注册表，并发布一份 `Manifest` 告诉浏览器该加载哪些切面。它不含任何功能语义——面板、模型、
-对话都是插件。
+`Routes` 注册表、发布 `WebFacetCatalog` 告诉浏览器该加载哪些切面，并维护一个统一的 `moonan:data` 文件。
+它不含任何功能语义——面板、模型、对话都是插件。
 
 ```bash
 npx @moonan_ai/moonan --plugin @moonan_ai/ai-gateway
@@ -23,6 +23,7 @@ moonan --plugin @moonan_ai/ai-gateway
 | `-p, --port <n>` | 监听端口（默认 `21315`） |
 | `-H, --hostname <addr>` | 绑定地址（默认 `127.0.0.1`） |
 | `--plugins-dir <dir>` | 扫描插件目录（默认 `~/.moonan/plugins`） |
+| `--data-file <path>` | 统一数据文件（默认 `~/.moonan/data.json`） |
 | `-P, --plugin <ref>` | 追加一个插件：包名或目录，可重复 |
 | `--dev` | 校验每次 cell 写入与暴露状态（Chord dev 模式） |
 | `--allow-origin <o>` | 同源之外额外放行一个浏览器 origin，可重复 |
@@ -34,7 +35,7 @@ moonan --plugin @moonan_ai/ai-gateway
 
 - **没有账号鉴权。** 同源校验与 `--allow-origin` 只拒绝跨源浏览器，不是安全边界。绑定非回环地址时，
   能访问端口的人就能驱动全部插件。
-- **平台不落盘。** 没有数据库、没有配置文件；要持久化的插件自己开自己的文件。
+- **平台只落一个统一数据文件。** `moonan:data` 维护 `~/.moonan/data.json`；插件注册 `DataCodecs` 后，其 namespace 才能被统一导出/导入。
 - **单宿主、启动即定。** 一个服务端切面在 `setup` 里抛错会让整次启动失败。
 - **重载粒度是切面。** `POST /api/plugins/reload` 把全部服务端切面放进一次 `host.reload`。
 
@@ -42,7 +43,7 @@ moonan --plugin @moonan_ai/ai-gateway
 
 | 包 | 作用 |
 |---|---|
-| `@moonan_ai/sdk` | 写插件用的契约、注册表与浏览器钩子 |
+| `@moonan_ai/sdk` | 写插件用的契约、`DataCodecs`/`ModelProviders` 注册表与浏览器钩子 |
 | `@moonan_ai/ai-gateway` | 「模型」面板：配置 pi-ai 的提供商与模型 |
 
 文档：<https://github.com/Pheobe-Southwood/Moonan#readme>

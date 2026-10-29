@@ -1,6 +1,6 @@
 /**
  * Reload the page once, with a guard so a server that is still incompatible does not make
- * the shell loop. Both a protocol mismatch and a Manifest contract mismatch use this: the
+ * the shell loop. Both a protocol mismatch and a WebFacetCatalog contract mismatch use this: the
  * old shell cannot be repaired in place, and the new build is the only thing that knows the
  * new contracts.
  */

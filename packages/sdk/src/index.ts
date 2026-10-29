@@ -2,17 +2,38 @@
  * `@moonan_ai/sdk` — everything a plugin needs on either side of the wire.
  *
  * The root entry is shared by the server facet and the browser facet: contracts,
- * registries and the Chord primitives they are built from. Browser-only surface (the
- * `Panels` registry and the React hooks) lives in `@moonan_ai/sdk/web`, because it needs
- * React and the root entry must stay importable from a Node facet.
+ * registries (including `DataCodecs` and `ModelProviders`) and the Chord primitives they
+ * are built from. Browser-only surface (the `Panels` registry and the React hooks) lives
+ * in `@moonan_ai/sdk/web`, because it needs React and the root entry must stay importable
+ * from a Node facet.
  */
 export {
-	Manifest,
+	WebFacetCatalog,
 	FacetSetSchema,
 	WebFacetSchema,
 	type FacetSetEntry,
 	type WebFacet,
-} from "./manifest.js";
+} from "./web-facet-catalog.js";
+export {
+	DataStore,
+	DataCodecs,
+	DataBundleSchema,
+	DataImportReportSchema,
+	DataStoreStorageInfoSchema,
+	StoredDatasetSchema,
+	defineDataset,
+	type DataBundle,
+	type DataImportReport,
+	type DataStoreStorageInfo,
+	type DatasetCodec,
+	type DatasetExportOptions,
+	type StoredDataset,
+} from "./data.js";
+export {
+	ModelProviders,
+	type ModelInfo,
+	type ModelProvider,
+} from "./model-provider.js";
 export { Routes, type RouteHandler } from "./routes.js";
 
 /** Chord primitives, re-exported so a plugin needs two dependencies instead of three. */

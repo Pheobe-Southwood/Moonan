@@ -1,7 +1,7 @@
 import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { hostNamed, method, remote } from "@earendil-works/chord";
-import { Manifest } from "@moonan_ai/sdk";
+import { WebFacetCatalog } from "@moonan_ai/sdk";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
@@ -172,9 +172,9 @@ describe("official alignment: C2 origin policy", () => {
 		const app = await appFor([]);
 		const same = await connectClient(app, app.url);
 		try {
-			const manifest = await same.client.get(Manifest, {});
-			expect(manifest.version.value).toEqual(expect.any(String));
-			manifest.release();
+			const catalog = await same.client.get(WebFacetCatalog, {});
+			expect(catalog.version.value).toEqual(expect.any(String));
+			catalog.release();
 		} finally {
 			await closeClient(same.socket, same.client);
 		}
@@ -182,9 +182,9 @@ describe("official alignment: C2 origin policy", () => {
 		const allowedApp = await appFor([], { allowedOrigins: ["http://allowed.example"] });
 		const allowed = await connectClient(allowedApp, "http://allowed.example");
 		try {
-			const manifest = await allowed.client.get(Manifest, {});
-			expect(manifest.facets.value).toEqual(expect.any(Array));
-			manifest.release();
+			const catalog = await allowed.client.get(WebFacetCatalog, {});
+			expect(catalog.facets.value).toEqual(expect.any(Array));
+			catalog.release();
 		} finally {
 			await closeClient(allowed.socket, allowed.client);
 		}
@@ -253,14 +253,14 @@ describe("official alignment: C5 removed facets", () => {
 });
 
 describe("official alignment: B1 failed reload", () => {
-	it("does not publish a manifest reset when the reload is refused", async () => {
+	it("does not publish a catalog reset when the reload is refused", async () => {
 		const dir = await pluginDir(B1_SERVER);
 		const app = await appFor([dir]);
 		const { socket, client } = await connectClient(app);
 		try {
-			const manifest = await client.get(Manifest, {});
+			const catalog = await client.get(WebFacetCatalog, {});
 			const events: string[] = [];
-			const stop = manifest.facets.events((event) => events.push(event.type));
+			const stop = catalog.facets.events((event) => events.push(event.type));
 			expect(events).toEqual(["snap"]);
 
 			await writeFile(join(dir, "server.mjs"), 'export default { setup() { throw new Error("boom"); } };');
@@ -273,7 +273,7 @@ describe("official alignment: B1 failed reload", () => {
 			expect(events).toEqual(["snap"]);
 
 			stop();
-			manifest.release();
+			catalog.release();
 		} finally {
 			await closeClient(socket, client);
 		}

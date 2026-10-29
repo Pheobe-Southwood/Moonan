@@ -356,7 +356,7 @@ export function ProviderAdvanced({
 		setError(undefined);
 		try {
 			await gateway.reloadFromDisk();
-			onToast("success", "已从磁盘重新加载", "内存状态已替换为文件内容。");
+			onToast("success", "已从统一数据文件重新加载", "内存状态已替换为统一数据文件的内容。");
 		} catch (cause) {
 			const message = cause instanceof Error ? cause.message : String(cause);
 			setError(message);
@@ -499,12 +499,18 @@ export function ProviderAdvanced({
 				</Button>
 			</div>
 
-			<Section title="服务端文件" note="这里的值不经过浏览器存储。">
+			<Section title="统一数据文件" note="这里的值不经过浏览器存储；平台把可导出数据放在同一个文件里。">
 				<div className="gw-notice" data-tone="info" style={{ display: "grid", gap: 4 }}>
 					<div>
 						<span className="gw-hint">配置文件</span>
 						<div style={{ fontFamily: "var(--gw-mono)", fontSize: 10.5, overflowWrap: "anywhere" }}>
-							{snapshot.storage.configPath}
+							{snapshot.storage.dataPath}
+						</div>
+					</div>
+					<div>
+						<span className="gw-hint">数据集</span>
+						<div style={{ fontFamily: "var(--gw-mono)", fontSize: 10.5, overflowWrap: "anywhere" }}>
+							{snapshot.storage.namespace}
 						</div>
 					</div>
 					<div>
@@ -521,7 +527,7 @@ export function ProviderAdvanced({
 				</div>
 				<div className="gw-inline" style={{ marginTop: 12 }}>
 					<Button variant="ghost" onClick={() => void reload()} disabled={reloading}>
-						<RefreshIcon size={12} /> {reloading ? "重新加载中…" : "从磁盘重新加载"}
+						<RefreshIcon size={12} /> {reloading ? "重新加载中…" : "从统一数据文件重新加载"}
 					</Button>
 				</div>
 			</Section>

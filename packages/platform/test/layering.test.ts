@@ -16,29 +16,35 @@ function sources(area: string, pattern = /\.(ts|tsx|mjs|js)$/): { file: string; 
 		});
 }
 
-function manifest(area: string): { name?: string; dependencies?: Record<string, string>; devDependencies?: Record<string, string>; peerDependencies?: Record<string, string> } {
+function packageJson(area: string): { name?: string; dependencies?: Record<string, string>; devDependencies?: Record<string, string>; peerDependencies?: Record<string, string> } {
 	return JSON.parse(readFileSync(join(root, area, "package.json"), "utf8"));
 }
 
 /**
  * The architecture, asserted rather than assumed.
  *
- * The platform's whole claim is that it stores nothing and knows no feature. That is easy to
- * break with one import and hard to notice: `pnpm build` would still succeed. These are
- * the lines that must not be crossed.
+ * The platform's claim is that it knows no feature. Its one persistence seam is the
+ * `moonan:data` facet; everything else writes no files. That is easy to break with one
+ * import and hard to notice: `pnpm build` would still succeed. These are the lines that
+ * must not be crossed.
  */
 describe("layering", () => {
-	it("has no database or persistence code anywhere in the platform", () => {
-		for (const area of ["packages/platform/src", "packages/sdk/src", "packages/web/src"]) {
+	it("confines file writes to the platform data facet", () => {
+		const allowed = new Set(["packages/platform/src/data.ts"]);
+		for (const { file, text } of sources("packages/platform/src")) {
+			if (allowed.has(file)) continue;
+			expect(text, file).not.toMatch(/writeFile|copyFile|\bmkdir\(|\bchmod\(|\brename\(/);
+		}
+		for (const area of ["packages/sdk/src", "packages/web/src"]) {
 			for (const { file, text } of sources(area)) {
-				expect(text, file).not.toMatch(/node:sqlite|better-sqlite3|CREATE TABLE|\.db["'`]/);
+				expect(text, file).not.toMatch(/node:fs|node:sqlite|better-sqlite3/);
 			}
 		}
 	});
 
 	it("keeps AI packages out of the platform and the SDK", () => {
 		for (const area of ["packages/platform", "packages/sdk", "packages/web", "."]) {
-			const deps = { ...manifest(area).dependencies, ...manifest(area).devDependencies, ...manifest(area).peerDependencies };
+			const deps = { ...packageJson(area).dependencies, ...packageJson(area).devDependencies, ...packageJson(area).peerDependencies };
 			for (const name of Object.keys(deps)) {
 				expect(name, `${area}/package.json`).not.toMatch(/pi-(ai|agent-core|mcp|durable)|openai|anthropic/);
 			}

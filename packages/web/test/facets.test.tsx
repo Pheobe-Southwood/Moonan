@@ -132,7 +132,7 @@ describe("useFacetBatches", () => {
 		await waitFor(() => expect(result.current.signature).toBe("/facets/a/web.js#h1"));
 
 		await act(async () => {
-			// Same manifest, new host: the new host has no facets installed yet.
+			// Same catalog, new host: the new host has no facets installed yet.
 			rerender({ host: second.host, live: true, facets: [facet("a", "/facets/a/web.js", "h1")] });
 		});
 
@@ -140,7 +140,7 @@ describe("useFacetBatches", () => {
 		expect(first.load).toHaveBeenCalledTimes(1);
 	});
 
-	it("does nothing until the manifest is live", async () => {
+	it("does nothing until the catalog is live", async () => {
 		const fake = fakeHost();
 		renderHook((props: Props) => useFacetBatches(props.host, props.live, props.facets), {
 			initialProps: { host: fake.host, live: false, facets: [facet("a", "/facets/a/web.js", "h1")] },
