@@ -37,6 +37,7 @@ pnpm start        # 同上去掉 chord 的写入校验
 - 每次保存前把上一版复制到 `data.json.bak`；
 - 主文件损坏时先尝试 `.bak`；两者都不可用时保留 `data.json.corrupt-<timestamp>.json`；
 - API Key 以明文保存在统一数据文件里（面板不假装它是密钥链），快照和 HTTP 响应只含 `hasKey` 与末四位提示；
+- `headers` 与 `env` 不是密钥字段：它们会随远程快照与默认导出一起带出，只放区域、项目 ID 之类的非密钥内容；
 - `/api/data/export` 默认脱敏，`?includeSecrets=1` 才导出明文；导入脱敏包时按 provider id 保留已有密钥。
 
 路径可用 `--data-file` 或环境变量覆盖：

@@ -231,6 +231,8 @@ export default defineFacet((api) => {
 
 - 注册表值来自 host-lifetime 对象的 `self.register(ModelProviders, ...)`；表随代码版本替换。
 - `list()` 是 key-free 的模型目录；`runtime()` 是 server-only 的 `MutableModels`，含凭据，绝不能给浏览器。
+- 同一个 code version 内，`runtime()` 返回同一个 `MutableModels` 实例；不要对它 `setProvider` / `deleteProvider`，那会改到别的消费者手里的实例。
+- `runtime().models.stream/complete` 是进程内调用，不是 Chord 调用：长请求放进 `self.task` 或短根，并把 `ctx.signal` 传进 pi-ai 的 options，取消才会跟着根走。
 - 消费者不需要 `uses`（注册表不是契约）；如果还直接消费 `DataStore` 等契约，再写 `uses`。
 - ai-gateway 未安装时 `get` 返回 `undefined`，消费者自行降级。
 

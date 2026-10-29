@@ -2,8 +2,9 @@ import { Value } from "typebox/value";
 import {
 	invalid,
 	type Ctx,
-	type Ref,
 	type DataStore,
+	type DataStoreStorageInfo,
+	type Ref,
 	type StoredDataset,
 } from "@moonan_ai/sdk";
 import {
@@ -126,14 +127,17 @@ export class GatewayService {
 		return this.options.version;
 	}
 
-	snapshot(source: GatewayConfig = this.options.getConfig()): GatewaySnapshot {
+	snapshot(
+		source: GatewayConfig = this.options.getConfig(),
+		storage: DataStoreStorageInfo = this.options.data.storage.value,
+	): GatewaySnapshot {
 		return {
 			version: this.options.version,
 			generatedAt: source.updatedAt,
 			providers: source.providers.map(providerView),
 			presets: presetSummaries(),
 			settings: cloneJson(source.settings),
-			storage: this.storageInfo(),
+			storage: this.storageView(storage),
 			options: gatewayOptions(),
 		};
 	}
@@ -152,7 +156,16 @@ export class GatewayService {
 	}
 
 	storageInfo(): StorageInfo {
-		const info = this.options.data.storage.value;
+		return this.storageView(this.options.data.storage.value);
+	}
+
+	/**
+	 * The gateway's view of the platform data file. It is derived from the store's
+	 * `storage` cell, so the snapshot's `storage` block must be recomputed whenever that
+	 * cell changes (the snapshot derivation lists it as a source), not only when the
+	 * gateway's own config cell does.
+	 */
+	private storageView(info: DataStoreStorageInfo): StorageInfo {
 		return {
 			dataPath: info.file,
 			backupPath: info.backup,

@@ -182,6 +182,18 @@ try {
 	assert.ok(consumer.models.includes("hand-written"));
 	assert.equal(consumer.model, "hand-written");
 
+	// Another plugin writes a dataset of its own. Only the store's `storage` cell changes,
+	// so a gateway snapshot that only followed its own `config` cell would stay stale.
+	assert.equal(ref.snapshot.value.storage.datasets, 1);
+	const touch = await fetch(`${app.url}/api/data-touch`);
+	assert.equal(touch.status, 200);
+	const touched = await waitFor(
+		() => ref.snapshot.value,
+		(value) => value.storage.datasets === 2,
+		"gateway snapshot storage",
+	);
+	assert.ok(touched.storage.revision > 0);
+
 	const raw = await readFile(dataFile, "utf8");
 	const stored = JSON.parse(raw);
 	assert.ok(raw.includes("sk-upstream-12345678"));

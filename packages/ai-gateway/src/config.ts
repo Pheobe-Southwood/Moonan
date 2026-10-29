@@ -6,7 +6,15 @@ import { cloneJson, nowIso } from "./util.js";
 /** The only dataset ai-gateway owns in the platform data store. */
 export const AI_GATEWAY_DATASET = "ai-gateway/config";
 
-/** Stored shape version; it belongs to the dataset, not to the Chord contract. */
+/**
+ * Stored shape version; it belongs to the dataset, not to the Chord contract.
+ *
+ * Chord versions a *cell* separately (`self.state(name, schema, init, { version, migrate })`).
+ * A `GatewayConfigSchema` change is two bumps: raise this constant for the data at rest
+ * (codec `migrate`, and the `config` cell's `init`), and raise the `config` cell's state
+ * version with a cell `migrate` for the value a reload keeps in memory. Bumping only the
+ * dataset version leaves the reload refused with "schema changed without a raised version".
+ */
 export const GATEWAY_CONFIG_VERSION = 1;
 
 export function defaultSettings(): GatewaySettings {
@@ -46,7 +54,11 @@ export function migrateConfig(value: unknown, fromVersion: number): GatewayConfi
 	return clean;
 }
 
-/** Key-free copy for the default export/HTTP snapshot. */
+/**
+ * Key-free copy for export/import. It drops `apiKey`/`keyUpdatedAt` only: `headers` and
+ * `env` are ordinary provider configuration here, not credentials, so keep secrets out of
+ * them (they also travel in the remote snapshot).
+ */
 export function redactConfig(config: GatewayConfig): GatewayConfig {
 	const next = cloneJson(config);
 	for (const provider of next.providers) {
