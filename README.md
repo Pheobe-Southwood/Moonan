@@ -8,16 +8,29 @@ A local plugin workbench. The platform builds a Chord host, opens one port, reso
 
 ---
 
-## 快速开始 · Quick start
+## 安装 · Install
+
+```bash
+npx @moonan_ai/moonan --plugin @moonan_ai/ai-gateway
+# 或者装下来长期用
+npm i -g @moonan_ai/moonan @moonan_ai/ai-gateway
+moonan --plugin @moonan_ai/ai-gateway
+```
+
+平台本身不带面板：不传 `--plugin`，打开的就是一个没有标签页的空壳。`@moonan_ai/ai-gateway`
+是「模型」面板那个插件，要和平台**装在同一个项目或同一个全局前缀**里——插件按自己的位置解析
+`@earendil-works/chord`，两处安装会解析出两份 chord，切面就装不上了。装好打开
+<http://127.0.0.1:21315> 即可。
+
+## 从源码开始 · From source
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-打开 <http://127.0.0.1:21315>：一个每秒跳动的「时钟」标签页，和一个内置的「模型」标签页。
-`pnpm dev` 加载两个插件：`examples/clock-plugin` 和内置的 `@moonan_ai/ai-gateway`。
-只想启动模型网关时用 `pnpm start`。
+打开 <http://127.0.0.1:21315>：一个内置的「模型」标签页。`pnpm dev` 以 `--dev` 启动并加载
+`@moonan_ai/ai-gateway`；不要 chord 的写入校验时用 `pnpm start`。
 
 常用参数：
 
@@ -38,7 +51,7 @@ pnpm dev
 ```bash
 pnpm start:tailnet   # 绑定 Tailscale IPv4，只从 tailnet 可达
 pnpm start:lan       # 绑定 0.0.0.0，局域网与 tailnet 都可达
-pnpm dev:tailnet     # 同上，dev + 时钟插件
+pnpm dev:tailnet     # 同上，带 --dev（校验每次 cell 写入）
 pnpm dev:lan
 ```
 
@@ -70,9 +83,9 @@ pnpm start:tailnet -- --port 21316
 | 包 | 职责 | 面向谁 |
 |---|---|---|
 | `@moonan_ai/sdk` | 契约、注册表、浏览器钩子。根入口给两端与服务端用，`./web` 给浏览器切面用 | 插件作者 |
-| `@moonan_ai/web`（private） | 浏览器外壳与共享运行时打包器 | 平台自己 |
+| `@moonan_ai/web`（private） | 浏览器外壳与共享运行时打包器；构建产物随 `@moonan_ai/moonan` 一起发布 | 平台自己 |
 | `@moonan_ai/moonan` | 平台：服务端宿主、单端口网关、插件/切面装载与 CLI | 使用者 |
-| `@moonan_ai/ai-gateway`（private） | 内置插件：在「模型」标签页配置 pi-ai 提供商与模型 | 使用者 |
+| `@moonan_ai/ai-gateway` | 内置插件，也是独立发布的包：在「模型」标签页配置 pi-ai 提供商与模型 | 使用者 |
 
 依赖方向是单向的：`moonan → sdk`、`web → sdk`、`sdk → chord`，内置插件 `ai-gateway → sdk + pi-ai`。平台不导入任何插件代码，只把切面 URL 交给 Chord——`packages/platform/test/layering.test.ts` 盯着这条线。
 
@@ -135,7 +148,7 @@ export default defineFacet((api) => {
 - **注册表贡献必须来自 `{ lifetime: "host" }` 对象**：`Routes` 与 `Panels` 都一样。
 - **浏览器切面是单个 ESM 文件**：浏览器没有模块 hook，重载只会换掉入口。
 
-完整的插件写法（目录与包两种来源、`uses`、持久化、热重载）见 [docs/plugins.md](docs/plugins.md)，可运行的例子见 [examples/clock-plugin](examples/clock-plugin)。
+完整的插件写法（目录与包两种来源、`uses`、持久化、热重载）见 [docs/plugins.md](docs/plugins.md)。
 
 ## 运行时边界 · Runtime boundaries
 
@@ -150,6 +163,7 @@ export default defineFacet((api) => {
 - [CONTEXT.md](CONTEXT.md) — 词汇表：平台、宿主、插件、切面、契约、清单、注册表、面板
 - [docs/architecture.md](docs/architecture.md) — 进程、一次请求、一次装载、一次重载、一次广播的完整路径
 - [docs/plugins.md](docs/plugins.md) — 写一个插件：来源、服务端切面、契约、浏览器切面、热重载
+- [docs/release.md](docs/release.md) — 发布：版本真源、发布顺序、`latest` 策略、CI 与手动命令
 
 ## 开发 · Development
 
@@ -157,8 +171,8 @@ export default defineFacet((api) => {
 pnpm install
 pnpm typecheck
 pnpm build      # sdk → web（含 /runtime/*.js）→ moonan（内嵌 shell）
-pnpm test       # 分层守护 + 平台集成（解析、装载、路由、面板、热重载、官方语义对齐）
-pnpm dev        # build 后以 --dev 启动时钟插件与内置 ai-gateway
+pnpm test       # 分层守护 + 打包守护 + 平台集成（解析、装载、路由、面板、热重载、官方语义对齐）
+pnpm dev        # build 后以 --dev 启动内置 ai-gateway
 ```
 
 需要 Node.js ≥ 22.19。
@@ -167,8 +181,8 @@ pnpm dev        # build 后以 --dev 启动时钟插件与内置 ai-gateway
 
 `0.0.4-alpha2`：平台建立在 Chord 之上，不含数据库、预设能力契约或功能语义。插件由切面组成；平台一次装载/重载全部服务端切面，启动失败即关闭宿主。
 
-新增内置插件 `ai-gateway`：它在「模型」标签页配置 pi-ai 的提供商与模型，配置只保存在插件自己的服务端文件里。
-AI 对话尚未回归——它会作为一个普通插件回来，和时钟插件走同一条加载路径。
+`sdk` / `moonan` / `ai-gateway` 三个包已发布到 npm；`ai-gateway` 在「模型」标签页配置 pi-ai 的提供商与模型，
+配置只保存在插件自己的服务端文件里。AI 对话尚未回归——它会作为一个普通插件回来，和 `ai-gateway` 走同一条加载路径。
 
 ## 许可 · License
 

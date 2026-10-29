@@ -27,21 +27,6 @@ importers:
         specifier: ^5.0.5
         version: 5.0.5(@types/node@22.20.5)(happy-dom@21.0.4)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15))
 
-  examples/clock-plugin:
-    dependencies:
-      '@earendil-works/chord':
-        specifier: 1.4.0
-        version: 1.4.0
-      '@moonan_ai/sdk':
-        specifier: workspace:*
-        version: link:../../packages/sdk
-      react:
-        specifier: ^19.3.1
-        version: 19.3.1
-      typebox:
-        specifier: 1.3.27
-        version: 1.3.27
-
   packages/ai-gateway:
     dependencies:
       '@earendil-works/pi-ai':

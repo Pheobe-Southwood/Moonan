@@ -4,11 +4,14 @@ Moonan 的内置「模型」插件。它把 pi-ai 的提供商和模型配置搬
 写在服务端——浏览器只拿快照，不写任何浏览器存储。
 
 ```bash
-# 从仓库根目录
+# 装好平台再加载这个插件（两者要在同一棵树里）
+npm i -g @moonan_ai/moonan @moonan_ai/ai-gateway
+moonan --plugin @moonan_ai/ai-gateway
+
+# 或者从仓库根目录
 pnpm install
-pnpm dev          # 时钟 + 模型两个标签页
-# 或只要模型面板
-pnpm start
+pnpm dev          # 只加载模型面板
+pnpm start        # 同上去掉 chord 的写入校验
 ```
 
 打开 <http://127.0.0.1:21315/#/ai-gateway>，通过「添加提供商」接入第一路上游。

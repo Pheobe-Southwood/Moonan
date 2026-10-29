@@ -1,0 +1,96 @@
+name: Publish
+
+# Releasing is a tag, not a button: the tag has to name the version that is already in
+# package.json, and the same commit can be tagged again without failing (versions that are
+# already on npm are skipped). `workflow_dispatch` exists for a re-run without a new tag.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Read the version and check the tag against it
+        run: |
+          version=$(node -p "require('./packages/platform/package.json').version")
+          if [ "${{ github.ref_type }}" = "tag" ] && [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match package version ${version}"
+            exit 1
+          fi
+          echo "publishing version ${version}"
+          echo "version=${version}" >> "$GITHUB_ENV"
+
+      - run: pnpm typecheck
+
+      - run: pnpm build
+
+      - run: pnpm test
+
+      - name: Publish in dependency order
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          # `sdk` first: the other two depend on it, and pnpm rewrites `workspace:*` to this
+          # exact version, so it has to exist before they are installed by anyone.
+          publish() {
+            local dir="$1" name="$2"
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "${name}@${version} is already on npm, skipping"
+              return 0
+            fi
+            ( cd "${dir}" && pnpm publish --tag alpha --access public --no-git-checks --provenance )
+          }
+          publish packages/sdk @moonan_ai/sdk
+          publish packages/platform @moonan_ai/moonan
+          publish packages/ai-gateway @moonan_ai/ai-gateway
+
+      - name: Point latest at this version
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # An alpha version deliberately takes `latest`: the alternative is that
+          # `npx @moonan_ai/moonan` keeps resolving to the pre-0.0.4 product.
+          #
+          # A freshly published version is not readable immediately: npm answers the first
+          # publish of a name with a `0.0.0-stage` placeholder and the real version only
+          # becomes visible once its review finishes (observed: one to three minutes). Poll
+          # instead of failing on that transient 404, and say what to do if it never appears.
+          set -euo pipefail
+          for name in @moonan_ai/sdk @moonan_ai/moonan @moonan_ai/ai-gateway; do
+            for attempt in $(seq 1 40); do
+              if npm view "${name}@${version}" version >/dev/null 2>&1; then
+                npm dist-tag add "${name}@${version}" latest
+                break
+              fi
+              if [ "${attempt}" = "40" ]; then
+                echo "${name}@${version} is not visible on npm after 10 minutes."
+                echo "Check the Staged Packages tab on npmjs.com (or 'npm stage list <pkg>' with npm >= 11.15);"
+                echo "a staged version has to be approved with 2FA before it goes live."
+                exit 1
+              fi
+              sleep 15
+            done
+          done

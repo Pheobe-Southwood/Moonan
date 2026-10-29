@@ -1,10 +1,14 @@
 {
   "name": "@moonan_ai/ai-gateway",
   "version": "0.0.4-alpha2",
-  "private": true,
   "type": "module",
-  "description": "Moonan's built-in AI gateway plugin: configure pi-ai providers and models from the 模型 tab.",
+  "description": "Moonan's AI gateway plugin: configure pi-ai providers and models from the 模型 tab.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pheobe-Southwood/Moonan.git",
+    "directory": "packages/ai-gateway"
+  },
   "exports": {
     ".": {
       "types": "./src/server.ts",
@@ -20,6 +24,9 @@
     "dist",
     "src"
   ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "pnpm run build:server && pnpm run build:web",
@@ -36,6 +43,11 @@
   "peerDependencies": {
     "react": ">=19.0.0"
   },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/node": "^22.20.5",
     "@types/react": "^19.3.0",
@@ -45,5 +57,20 @@
     "@earendil-works/chord": "1.4.0",
     "@types/ws": "^8.18.2",
     "ws": "^8.22.0"
+  },
+  "keywords": [
+    "moonan",
+    "plugin",
+    "ai",
+    "gateway",
+    "pi-ai",
+    "chord"
+  ],
+  "homepage": "https://github.com/Pheobe-Southwood/Moonan#readme",
+  "bugs": {
+    "url": "https://github.com/Pheobe-Southwood/Moonan/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

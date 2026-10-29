@@ -28,7 +28,7 @@ my-plugin/
 
 所以一个插件目录要么自带 `node_modules`（`npm i @earendil-works/chord @moonan_ai/sdk typebox`），要么放在一个能向上找到这些依赖的目录里。同版本经 Node 的 realpath 去重后仍是**同一个模块实例**，因此「一个进程一份 Chord」不需要平台做任何事；解析不到的插件带着 `error` 停下来，`/api/plugins` 能看到，启动日志 warn 一句。
 
-`examples/clock-plugin` 就是这么写的：`package.json` 声明 `@earendil-works/chord` 与 `@moonan_ai/sdk`，pnpm 把它们链到工作区里的同一份。
+这是发布形态下最容易踩的一条：平台与插件装在同一棵树里（同一项目或同一全局前缀），npm/pnpm 才会把 `@earendil-works/chord` 去重成一份；装在两个前缀里就是两份。
 
 ### 目录插件的 `package.json`
 

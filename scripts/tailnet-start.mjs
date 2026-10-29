@@ -17,14 +17,13 @@ Options
   --lan            Bind 0.0.0.0 (LAN + tailnet) instead of the Tailscale IPv4
   --port <n>       Port to listen on (default 21315)
   --dev            Validate every cell write (chord dev mode)
-  --clock          Also load examples/clock-plugin
   -h, --help       Show this help
 
 Run this through \`pnpm start:tailnet\` / \`pnpm start:lan\`, which build first.
 `);
 }
 
-const options = { lan: false, port: "21315", dev: false, clock: false, help: false };
+const options = { lan: false, port: "21315", dev: false, help: false };
 const argv = process.argv.slice(2);
 for (let index = 0; index < argv.length; index += 1) {
 	const flag = argv[index];
@@ -46,9 +45,6 @@ for (let index = 0; index < argv.length; index += 1) {
 		}
 		case "--dev":
 			options.dev = true;
-			break;
-		case "--clock":
-			options.clock = true;
 			break;
 		case "-h":
 		case "--help":
@@ -131,7 +127,6 @@ const args = [
 	"--port",
 	options.port,
 	...(options.dev ? ["--dev"] : []),
-	...(options.clock ? ["--plugin", "./examples/clock-plugin"] : []),
 	"--plugin",
 	"@moonan_ai/ai-gateway",
 ];

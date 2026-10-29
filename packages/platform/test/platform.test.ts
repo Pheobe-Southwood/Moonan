@@ -9,8 +9,10 @@ import { createPlatform } from "../src/platform.js";
 import { resolvePluginRef } from "../src/plugins.js";
 import { appFor, cleanup, closeClient, connectClient, pluginDir, tempDir } from "./support.js";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const clockDir = join(root, "examples", "clock-plugin");
+const here = dirname(fileURLToPath(import.meta.url));
+const root = join(here, "..", "..", "..");
+// A real directory plugin with both facets, inside the workspace so its bare imports resolve.
+const demoDir = join(here, "fixtures", "demo-plugin");
 
 let moonan: Moonan;
 
@@ -21,7 +23,7 @@ interface PluginsResponse {
 }
 
 beforeAll(async () => {
-	moonan = await appFor([clockDir]);
+	moonan = await appFor([demoDir]);
 });
 
 afterAll(cleanup);
@@ -30,16 +32,16 @@ describe("the platform", () => {
 	it("loads a directory plugin and publishes its facets", async () => {
 		const body = (await (await fetch(`${moonan.url}/api/plugins`)).json()) as PluginsResponse;
 		expect(body.experimental).toBe(true);
-		const clock = body.plugins.find((plugin) => plugin.name === "clock-plugin");
-		expect(clock).toBeDefined();
-		expect("id" in clock!).toBe(false);
-		expect(clock?.error).toBeUndefined();
-		expect(clock?.web?.url).toMatch(/^\/facets\/[0-9a-f]{12}\/web\.js$/);
-		expect(clock?.source).toBe("directory");
+		const demo = body.plugins.find((plugin) => plugin.name === "demo-plugin");
+		expect(demo).toBeDefined();
+		expect("id" in demo!).toBe(false);
+		expect(demo?.error).toBeUndefined();
+		expect(demo?.web?.url).toMatch(/^\/facets\/[0-9a-f]{12}\/web\.js$/);
+		expect(demo?.source).toBe("directory");
 	});
 
 	it("serves the plugin's HTTP route from the Routes registry", async () => {
-		const response = await fetch(`${moonan.url}/api/clock`);
+		const response = await fetch(`${moonan.url}/api/demo`);
 		expect(response.status).toBe(200);
 		const body = (await response.json()) as { now: number; label: string };
 		expect(typeof body.now).toBe("number");
@@ -48,8 +50,8 @@ describe("the platform", () => {
 
 	it("refuses to read outside a facet's directory", async () => {
 		const body = (await (await fetch(`${moonan.url}/api/plugins`)).json()) as PluginsResponse;
-		const clock = body.plugins.find((plugin) => plugin.name === "clock-plugin");
-		const base = clock!.web!.url.replace(/web\.js$/, "");
+		const demo = body.plugins.find((plugin) => plugin.name === "demo-plugin");
+		const base = demo!.web!.url.replace(/web\.js$/, "");
 		// The segment is percent-encoded so `new URL` cannot normalise it away before we see it.
 		const response = await fetch(`${moonan.url}${base}..%2f..%2fpackage.json`);
 		expect(response.status).not.toBe(200);
@@ -71,7 +73,7 @@ describe("the platform", () => {
 			report?: { codeVersion: number };
 		};
 		expect(body.ok).toBe(true);
-		// The clock's server facet is reloaded, but its web file is unchanged. The browser
+		// The fixture's server facet is reloaded, but its web file is unchanged. The browser
 		// must not reload on a server-only code-version bump.
 		expect(body.reloadBrowser).toBe(false);
 		expect(body.revision).toBeGreaterThan(before);
@@ -81,14 +83,14 @@ describe("the platform", () => {
 	it("reports a resolution failure without taking the others down", async () => {
 		const platform = await createPlatform({
 			version: "test",
-			plugins: [join(root, "does-not-exist"), clockDir],
+			plugins: [join(root, "does-not-exist"), demoDir],
 			logger: silentLogger,
 		});
 		try {
 			const broken = platform.plugins.find((plugin) => plugin.ref.includes("does-not-exist"));
 			expect(broken?.error).toMatch(/no such directory/);
-			const clock = platform.plugins.find((plugin) => plugin.name === "clock-plugin");
-			expect(clock?.serverInstalled).toBe(true);
+			const demo = platform.plugins.find((plugin) => plugin.name === "demo-plugin");
+			expect(demo?.serverInstalled).toBe(true);
 		} finally {
 			await platform.close();
 		}
@@ -191,7 +193,7 @@ export default defineFacet((api) => {
 		await writeFile(join(own, "index.js"), 'throw new Error("the plugin imports its own chord");\n');
 		await writeFile(join(dir, "server.mjs"), 'import "@earendil-works/chord";\nexport default { setup() {} };\n');
 
-		await expect(createPlatform({ version: "test", plugins: [dir, clockDir], logger: silentLogger })).rejects.toThrow(
+		await expect(createPlatform({ version: "test", plugins: [dir, demoDir], logger: silentLogger })).rejects.toThrow(
 			/the plugin imports its own chord/,
 		);
 	});
@@ -393,7 +395,7 @@ export default defineFacet((api) => {
 		try {
 			const manifest = await client.get(Manifest, {});
 			expect(manifest.version.value).toEqual(expect.any(String));
-			expect((manifest.facets.value as FacetSetEntry[]).map((facet) => facet.name)).toContain("clock-plugin");
+			expect((manifest.facets.value as FacetSetEntry[]).map((facet) => facet.name)).toContain("demo-plugin");
 			const before = manifest.revision.value as number;
 			// A new instance starts at the current revision, not at zero: otherwise every
 			// reconnect would look like a code change and make the shell reload for nothing.

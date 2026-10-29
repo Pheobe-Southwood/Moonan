@@ -11,13 +11,12 @@
     "typecheck": "pnpm -r --parallel typecheck",
     "build": "pnpm -r build",
     "test": "pnpm -r --if-present test",
-    "dev": "pnpm build && node packages/platform/bin/moonan.js --dev --plugin ./examples/clock-plugin --plugin @moonan_ai/ai-gateway",
+    "dev": "pnpm build && node packages/platform/bin/moonan.js --dev --plugin @moonan_ai/ai-gateway",
     "start": "pnpm build && node packages/platform/bin/moonan.js --plugin @moonan_ai/ai-gateway",
-    "dev:gateway": "pnpm build && node packages/platform/bin/moonan.js --dev --plugin @moonan_ai/ai-gateway",
     "start:tailnet": "pnpm build && node scripts/tailnet-start.mjs",
     "start:lan": "pnpm build && node scripts/tailnet-start.mjs --lan",
-    "dev:tailnet": "pnpm build && node scripts/tailnet-start.mjs --dev --clock",
-    "dev:lan": "pnpm build && node scripts/tailnet-start.mjs --dev --clock --lan"
+    "dev:tailnet": "pnpm build && node scripts/tailnet-start.mjs --dev",
+    "dev:lan": "pnpm build && node scripts/tailnet-start.mjs --dev --lan"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

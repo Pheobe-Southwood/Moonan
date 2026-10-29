@@ -59,5 +59,11 @@ jobs:
           fi
           exit $missing
 
+      - name: Pack the publishable packages
+        run: |
+          # What gets published is decided by `files`, not by what happens to be on disk.
+          # `--dry-run` reports the tarball contents without writing one.
+          pnpm -r --filter "./packages/*" exec npm pack --dry-run
+
       - name: Test
         run: pnpm test

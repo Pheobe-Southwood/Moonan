@@ -56,5 +56,8 @@
   "homepage": "https://github.com/Pheobe-Southwood/Moonan#readme",
   "bugs": {
     "url": "https://github.com/Pheobe-Southwood/Moonan/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
