@@ -43,7 +43,7 @@ moonan --plugin @moonan_ai/ai-gateway
 
 | 包 | 作用 |
 |---|---|
-| `@moonan_ai/sdk` | 写插件用的契约、`DataCodecs`/`ModelProviders` 注册表与浏览器钩子 |
+| `@moonan_ai/sdk` | 写插件用的通用契约、`DataCodecs` 与浏览器钩子 |
 | `@moonan_ai/ai-gateway` | 「模型」面板：配置 pi-ai 的提供商与模型 |
 
 文档：<https://github.com/Pheobe-Southwood/Moonan#readme>

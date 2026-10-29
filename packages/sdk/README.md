@@ -59,20 +59,30 @@ export default defineFacet((api) => {
 ## 约定
 
 - 契约在两端**各写一份**：Chord 认指纹（名字、版本、成员、类型住在哪个宿主），不认模块实例。
-- 注册表贡献（`Routes`、`Panels`、`DataCodecs`、`ModelProviders`）必须来自 `{ lifetime: "host" }` 的对象。
-- 需要统一导出/导入的数据放 `DataStore`，并注册 `DataCodecs`；需要给其他插件用模型时注册 `ModelProviders`。
+- 注册表贡献（`Routes`、`Panels`、`DataCodecs`）必须来自 `{ lifetime: "host" }` 的对象。
+- 功能专属注册表由对应的插件包定义，例如 ai-gateway 的 `ModelProviders`；SDK 只提供通用的 `defineRegistry`。
+- 需要统一导出/导入的数据放 `DataStore`，并注册 `DataCodecs`；功能能力（如模型）由对应插件包自己定义注册表。
 - 服务端宿主名固定为 `"moonan"`；写别的名字，`api.serve` 会当场拒绝。
 - 浏览器切面是**单个 ESM 文件**：浏览器没有模块 hook，重载只换入口。
 
-## 统一数据与模型
+## 统一数据
 
 ```js
-import { DataCodecs, DataStore, ModelProviders } from "@moonan_ai/sdk";
+import { DataCodecs, DataStore } from "@moonan_ai/sdk";
 ```
 
 - `DataStore` 是平台唯一的统一数据文件（local、host-lifetime）；`read` 返回 `{ value, version }`，`update` 是串行读改写，`exportAll`/`importAll` 由平台 HTTP 表面调用。
 - `DataCodecs` 是插件贡献的导出/导入 codec 注册表；没有 codec 的 namespace 不会进入统一导出。
-- `ModelProviders` 是服务端模型提供商注册表；`list()` 是 key-free 目录，`runtime()` 是 server-only 运行时，不能给浏览器。
+
+## 功能注册表
+
+功能专属的注册表不属于 SDK。例如模型能力由 ai-gateway 自己定义并导出：
+
+```js
+import { ModelProviders } from "@moonan_ai/ai-gateway/model-provider";
+```
+
+消费方按 id 查找，平台和 SDK 不需要认识 `ModelInfo`。后续的图像、语音等能力也应各自定义自己的注册表。
 
 完整写法：<https://github.com/Pheobe-Southwood/Moonan/blob/main/docs/plugins.md> ·
 词汇表：<https://github.com/Pheobe-Southwood/Moonan/blob/main/CONTEXT.md>

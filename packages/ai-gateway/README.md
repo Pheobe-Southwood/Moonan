@@ -87,12 +87,16 @@ MOONAN_DATA_FILE=/path/to/data.json node packages/platform/bin/moonan.js --plugi
 
 ## 给其他插件用
 
-服务端切面把配置好的模型注册进 `ModelProviders`（id `ai-gateway`）。其他服务端插件按 id 查找，
-不需要依赖 ai-gateway 的内部模块：
+服务端切面把配置好的模型注册进 `ModelProviders`（id `ai-gateway`）。这个注册表和 `ModelInfo`
+类型由 ai-gateway 自己定义并导出，不属于 SDK/平台；其他服务端插件按 id 查找，不需要依赖
+ai-gateway 的内部模块：
 
 ```js
-import { ModelProviders } from "@moonan_ai/sdk";
-import { AI_GATEWAY_PROVIDER_ID, isAiGatewayModelProvider } from "@moonan_ai/ai-gateway/model-provider";
+import {
+	AI_GATEWAY_PROVIDER_ID,
+	ModelProviders,
+	isAiGatewayModelProvider,
+} from "@moonan_ai/ai-gateway/model-provider";
 
 const providers = api.registry(ModelProviders);
 const provider = providers.get(AI_GATEWAY_PROVIDER_ID, ctx);

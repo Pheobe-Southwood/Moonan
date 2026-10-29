@@ -203,8 +203,12 @@ export default defineFacet((api) => {
 `ModelProviders` 注册表：
 
 ```js
-import { ModelProviders, Type, defineFacet, invalid, local } from "@moonan_ai/sdk";
-import { AI_GATEWAY_PROVIDER_ID, isAiGatewayModelProvider } from "@moonan_ai/ai-gateway/model-provider";
+import { Type, defineFacet, invalid, local } from "@moonan_ai/sdk";
+import {
+	AI_GATEWAY_PROVIDER_ID,
+	ModelProviders,
+	isAiGatewayModelProvider,
+} from "@moonan_ai/ai-gateway/model-provider";
 
 const Root = local("example.chat-root", { version: 1, input: Type.Object({}), members: {} });
 

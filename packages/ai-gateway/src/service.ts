@@ -2,7 +2,6 @@ import { Value } from "typebox/value";
 import {
 	invalid,
 	type Ctx,
-	type ModelInfo,
 	type Ref,
 	type DataStore,
 	type StoredDataset,
@@ -30,7 +29,7 @@ import {
 	migrateConfig,
 } from "./config.js";
 import { discoverModels } from "./discovery.js";
-import type { AiGatewayRuntime } from "./model-provider.js";
+import type { AiGatewayRuntime, ModelInfo } from "./model-provider.js";
 import type { SerialQueue } from "./queue.js";
 import { buildGatewayModels } from "./runtime.js";
 import {

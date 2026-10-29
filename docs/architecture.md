@@ -110,7 +110,7 @@ POST /api/plugins/reload        ← 无 body；没有“按插件 ID”这回事
 - 改了 web.js / 增删 web 切面：hash 变 → `true`；
 - 纯前端插件没有服务端切面：`host.reload` 跳过，但仍发布新 hash，所以也能通过同一个 POST 更新。
 
-`moonan:data` 与 `moonan:web-facets` 不在插件 reload 批次里：它们的契约/实现保持，插件 reload 只替换插件切面以及 `DataCodecs`/`ModelProviders` 的注册表。平台 facet 改代码需要重启进程。
+`moonan:data` 与 `moonan:web-facets` 不在插件 reload 批次里：它们的契约/实现保持，插件 reload 只替换插件切面以及 `DataCodecs`、`ModelProviders` 等注册表；`ModelProviders` 由 ai-gateway 自己定义，平台不参与。平台 facet 改代码需要重启进程。
 
 ### 官方信号 vs 平台信号
 

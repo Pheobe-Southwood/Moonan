@@ -77,7 +77,7 @@ pnpm start:tailnet -- --port 21316
 | 注册表 Registry | 插件贡献东西的唯一通道：键值表，整表随代码版本替换 |
 | Web 切面目录 WebFacetCatalog | 平台公布给浏览器的唯一远程对象：已解析的切面、显示名、版本与错误 |
 | 数据存储 DataStore | 平台唯一的统一数据文件：插件按 namespace 读写，导出/导入由平台协调 |
-| 模型提供商 ModelProviders | 服务端注册表：ai-gateway 等插件贡献模型运行时，其他插件按 id 查找 |
+| 模型提供商 ModelProviders | ai-gateway 自己定义并导出的服务端注册表：其他插件按 id 查找模型运行时 |
 
 完整释义（含每个词的取舍与反例）见 [CONTEXT.md](CONTEXT.md)。
 
@@ -85,7 +85,7 @@ pnpm start:tailnet -- --port 21316
 
 | 包 | 职责 | 面向谁 |
 |---|---|---|
-| `@moonan_ai/sdk` | 契约、注册表（含 `DataCodecs`/`ModelProviders`）、浏览器钩子。根入口给两端与服务端用，`./web` 给浏览器切面用 | 插件作者 |
+| `@moonan_ai/sdk` | 通用契约、`DataCodecs`、浏览器钩子。根入口给两端与服务端用，`./web` 给浏览器切面用 | 插件作者 |
 | `@moonan_ai/web`（private） | 浏览器外壳与共享运行时打包器；构建产物随 `@moonan_ai/moonan` 一起发布 | 平台自己 |
 | `@moonan_ai/moonan` | 平台：服务端宿主、单端口网关、`moonan:data`、插件/切面装载与 CLI | 使用者 |
 | `@moonan_ai/ai-gateway` | 内置插件，也是独立发布的包：在「模型」标签页配置 pi-ai 提供商与模型 | 使用者 |
@@ -198,7 +198,7 @@ pnpm dev        # build 后以 --dev 启动内置 ai-gateway
 
 ## 状态 · Status
 
-`0.0.5-alpha1`：平台建立在 Chord 之上，不含预设能力契约或功能语义；唯一的持久化是 `moonan:data` 统一数据文件。插件由切面组成；平台一次装载/重载全部服务端切面，启动失败即关闭宿主。
+`0.0.5-alpha2`：平台建立在 Chord 之上，不含预设能力契约或功能语义；唯一的持久化是 `moonan:data` 统一数据文件。插件由切面组成；平台一次装载/重载全部服务端切面，启动失败即关闭宿主。
 
 `sdk` / `moonan` / `ai-gateway` 三个包已发布到 npm；`ai-gateway` 在「模型」标签页配置 pi-ai 的提供商与模型，
 配置保存在平台统一数据文件的 `ai-gateway/config` 数据集里，并通过 `ModelProviders` 暴露给其他服务端插件。AI 对话尚未回归——它会作为一个普通插件回来，和 `ai-gateway` 走同一条加载路径。

@@ -1,6 +1,7 @@
-import { ModelProviders, Routes, Type, defineFacet, local } from "@moonan_ai/sdk";
+import { Routes, Type, defineFacet, local } from "@moonan_ai/sdk";
 import {
 	AI_GATEWAY_PROVIDER_ID,
+	ModelProviders,
 	isAiGatewayModelProvider,
 } from "@moonan_ai/ai-gateway/model-provider";
 

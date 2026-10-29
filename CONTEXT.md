@@ -45,7 +45,7 @@ _Avoid_: 表, table, 文档, document
 _Avoid_: 序列化器, serializer, 迁移器, migrator
 
 **模型提供商（ModelProvider）**
-服务端 `ModelProviders` 注册表的一项：`id`、`title`、key-free 的 `list()` 与 server-only 的 `runtime()`。ai-gateway 用它暴露 pi-ai 的 `MutableModels`；消费者按 id 查找，不直接依赖插件内部。
+ai-gateway 包定义并导出的 `ModelProviders` 注册表的一项：`id`、`title`、key-free 的 `list()` 与 server-only 的 `runtime()`。ai-gateway 用它暴露 pi-ai 的 `MutableModels`；消费者按 id 查找，不直接依赖插件内部。
 _Avoid_: 模型列表, model list, 供应商, vendor
 
 **注册表（Registry）**

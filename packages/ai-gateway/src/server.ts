@@ -1,7 +1,6 @@
 import {
 	DataCodecs,
 	DataStore,
-	ModelProviders,
 	Routes,
 	defineFacet,
 	invalid,
@@ -19,6 +18,7 @@ import { GATEWAY_VERSION } from "./discovery.js";
 import { gatewayRoutes } from "./http.js";
 import {
 	AI_GATEWAY_PROVIDER_ID,
+	ModelProviders,
 	createAiGatewayModelProvider,
 } from "./model-provider.js";
 import { SerialQueue } from "./queue.js";
