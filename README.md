@@ -198,7 +198,7 @@ pnpm dev        # build 后以 --dev 启动内置 ai-gateway
 
 ## 状态 · Status
 
-`0.0.5-alpha2`：平台建立在 Chord 之上，不含预设能力契约或功能语义；唯一的持久化是 `moonan:data` 统一数据文件。插件由切面组成；平台一次装载/重载全部服务端切面，启动失败即关闭宿主。
+`0.0.5-alpha3`：平台建立在 Chord 之上，不含预设能力契约或功能语义；唯一的持久化是 `moonan:data` 统一数据文件。插件由切面组成；平台一次装载/重载全部服务端切面，启动失败即关闭宿主。
 
 `sdk` / `moonan` / `ai-gateway` 三个包已发布到 npm；`ai-gateway` 在「模型」标签页配置 pi-ai 的提供商与模型，
 配置保存在平台统一数据文件的 `ai-gateway/config` 数据集里，并通过 `ModelProviders` 暴露给其他服务端插件。AI 对话尚未回归——它会作为一个普通插件回来，和 `ai-gateway` 走同一条加载路径。

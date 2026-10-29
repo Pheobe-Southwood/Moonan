@@ -1,6 +1,6 @@
 {
   "name": "@moonan_ai/sdk",
-  "version": "0.0.5-alpha2",
+  "version": "0.0.5-alpha3",
   "description": "Moonan plugin SDK: contracts, registries and browser hooks for plugin authors.",
   "type": "module",
   "license": "MIT",

@@ -43,7 +43,7 @@ npm dist-tag add @moonan_ai/ai-gateway@<version> latest
 
 ## dist-tag 策略
 
-版本号是预发布（`0.0.5-alpha2` 这种），但仍然同时占 `latest`：
+版本号是预发布（`0.0.5-alpha3` 这种），但仍然同时占 `latest`：
 
 - `alpha` 标签记这一代的历史；
 - `latest` 决定 `npx @moonan_ai/moonan` 装到哪一版。注册表里的 `latest` 曾经停在 Chord 重写前的
@@ -63,7 +63,7 @@ npm dist-tag add @moonan_ai/ai-gateway@<version> latest
    标签不会变成"重复发布"失败——手动发过的版本可以安全地补标签。
 
 ```bash
-git tag v0.0.5-alpha2 && git push origin v0.0.5-alpha2
+git tag v0.0.5-alpha3 && git push origin v0.0.5-alpha3
 ```
 
 ## 发布不是立刻可见的
