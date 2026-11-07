@@ -73,7 +73,7 @@ pnpm start:tailnet -- --port 21316
 | 平台 Platform | 拥有进程、端口、插件发现、切面装载、Web 切面目录、统一数据与外壳；不含任何功能语义 |
 | 宿主 Host | Chord 创建的对象容器。这里有两个：服务端宿主与浏览器宿主 |
 | 切面 Facet | 插件在某一种宿主里的那一半代码；身份是模块 URL，也是装载与重载的单位 |
-| 契约 Contract | 用 TypeBox 描述的、两端各写一份的对象说明；身份是指纹，不是模块实例 |
+| 契约 Contract | 用 JSON Schema 描述的、两端各写一份的对象说明（构建器来自 `@earendil-works/pi-schema`）；身份是指纹，不是模块实例 |
 | 注册表 Registry | 插件贡献东西的唯一通道：键值表，整表随代码版本替换 |
 | Web 切面目录 WebFacetCatalog | 平台公布给浏览器的唯一远程对象：已解析的切面、显示名、版本与错误 |
 | 数据存储 DataStore | 平台唯一的统一数据文件：插件按 namespace 读写，导出/导入由平台协调 |
@@ -90,16 +90,16 @@ pnpm start:tailnet -- --port 21316
 | `@moonan_ai/moonan` | 平台：服务端宿主、单端口网关、`moonan:data`、插件/切面装载与 CLI | 使用者 |
 | `@moonan_ai/ai-gateway` | 内置插件，也是独立发布的包：在「模型」标签页配置 pi-ai 提供商与模型 | 使用者 |
 
-依赖方向是单向的：`moonan → sdk`、`web → sdk`、`sdk → chord`，内置插件 `ai-gateway → sdk + pi-ai`。平台不导入任何插件代码，只把切面 URL 交给 Chord——`packages/platform/test/layering.test.ts` 盯着这条线。
+依赖方向是单向的：`moonan → sdk`、`web → sdk`、`sdk → chord + pi-schema`，内置插件 `ai-gateway → sdk + pi-ai`（契约构建器一律从 sdk 取，所以插件不需要直接依赖 pi-schema）。平台不导入任何插件代码，只把切面 URL 交给 Chord——`packages/platform/test/layering.test.ts` 盯着这条线。
 
-Chord 锁定在 `1.4.0`（`sdk`、`web`、`moonan` 都依赖这一版），插件按同一版本对齐。
+Chord 锁定在 `1.5.0`（`sdk`、`web`、`moonan` 都依赖这一版），契约 schema 用 `@earendil-works/pi-schema` `1.5.0` 的构建器写；插件按同一版本对齐。
 
 ## 内置插件：ai-gateway
 
 [`packages/ai-gateway`](packages/ai-gateway/README.md) 是仓库内置的模型网关面板。它把 pi-ai 的提供商、模型和请求参数搬进
 统一数据文件中的一个数据集：
 
-- 内置目录来自 `@earendil-works/pi-ai@1.4.0`：42 个提供商，添加时导入它们的对话模型目录。
+- 内置目录来自 `@earendil-works/pi-ai@1.5.0`：42 个提供商，添加时导入它们的对话模型目录。
 - 自定义提供商支持 OpenAI 兼容、Anthropic、Google、Mistral、Bedrock、Vertex 等 API。
 - 每个模型都能逐字段编辑：上下文、输出上限、价格与阶梯价、输入模态、输入限制、推理等级映射、
   提示缓存、采样参数、`compat` 兼容覆盖（按 API 从 pi-ai 的真实 schema 生成表单）、模型请求头。
@@ -143,18 +143,18 @@ my-plugin/
 服务端最小形态：
 
 ```js
-import { Type, defineFacet, hostNamed, method, remote } from "@moonan_ai/sdk";
+import { defineFacet, hostNamed, method, remote, num, obj } from "@moonan_ai/sdk";
 
 const Clock = remote("moonan.clock", {
 	version: 1,
-	input: Type.Object({}),
+	input: obj({}, { open: true }),
 	host: hostNamed("moonan"),
-	variants: { v1: { state: { at: Type.Number() }, methods: { tick: method() } } },
+	variants: { v1: { state: { at: num() }, methods: { tick: method() } } },
 });
 
 export default defineFacet((api) => {
 	api.serve(Clock, (_input, _principal, self) => {
-		const at = self.state("at", Type.Number(), Date.now());
+		const at = self.state("at", num(), Date.now());
 		return { variant: "v1", at, tick: (ctx) => at.change(ctx, () => Date.now()) };
 	});
 });
@@ -197,6 +197,8 @@ pnpm dev        # build 后以 --dev 启动内置 ai-gateway
 需要 Node.js ≥ 22.19。
 
 ## 状态 · Status
+
+`0.1.0`：契约 schema 从 TypeBox 换到 `@earendil-works/pi-schema`（Chord 1.5.0 的官方写法），`sdk` 不再导出 `Type`，改用 `obj`、`str`、`num`、`literal`、`record` 等构建器；契约 JSON 与指纹不变，旧页面只会整页刷新一次。平台建立在 Chord 之上，不含预设能力契约或功能语义；唯一的持久化是 `moonan:data` 统一数据文件。插件由切面组成；平台一次装载/重载全部服务端切面，启动失败即关闭宿主。
 
 `0.0.5-alpha3`：平台建立在 Chord 之上，不含预设能力契约或功能语义；唯一的持久化是 `moonan:data` 统一数据文件。插件由切面组成；平台一次装载/重载全部服务端切面，启动失败即关闭宿主。
 

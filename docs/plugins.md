@@ -24,9 +24,9 @@ my-plugin/
 
 ### 依赖从哪来
 
-服务端切面由 Node 按它**自己的位置**解析依赖，平台不接管这一步。这也是 Chord 的规矩：`nodeLoader` 只换掉切面目录里的模块副本，裸说明符（`@earendil-works/chord`、`typebox`、`@moonan_ai/sdk`）仍交给 Node。
+服务端切面由 Node 按它**自己的位置**解析依赖，平台不接管这一步。这也是 Chord 的规矩：`nodeLoader` 只换掉切面目录里的模块副本，裸说明符（`@earendil-works/chord`、`@earendil-works/pi-schema`、`@moonan_ai/sdk`）仍交给 Node。
 
-所以一个插件目录要么自带 `node_modules`（`npm i @earendil-works/chord @moonan_ai/sdk typebox`），要么放在一个能向上找到这些依赖的目录里。同版本经 Node 的 realpath 去重后仍是**同一个模块实例**，因此「一个进程一份 Chord」不需要平台做任何事；解析不到的插件带着 `error` 停下来，`/api/plugins` 能看到，启动日志 warn 一句。
+所以一个插件目录要么自带 `node_modules`（`npm i @earendil-works/chord @moonan_ai/sdk`，要直接 import `@earendil-works/pi-schema` 的 `lit`/`map` 时再加它），要么放在一个能向上找到这些依赖的目录里。同版本经 Node 的 realpath 去重后仍是**同一个模块实例**，因此「一个进程一份 Chord」不需要平台做任何事；解析不到的插件带着 `error` 停下来，`/api/plugins` 能看到，启动日志 warn 一句。
 
 这是发布形态下最容易踩的一条：平台与插件装在同一棵树里（同一项目或同一全局前缀），npm/pnpm 才会把 `@earendil-works/chord` 去重成一份；装在两个前缀里就是两份。
 
@@ -38,9 +38,8 @@ my-plugin/
 {
 	"type": "module",
 	"dependencies": {
-		"@earendil-works/chord": "1.4.0",
-		"@moonan_ai/sdk": "workspace:*",
-		"typebox": "1.3.27"
+		"@earendil-works/chord": "1.5.0",
+		"@moonan_ai/sdk": "workspace:*"
 	}
 }
 ```
@@ -50,15 +49,15 @@ my-plugin/
 ## 服务端切面
 
 ```js
-import { Routes, Type, defineFacet, hostNamed, local, method, remote } from "@moonan_ai/sdk";
+import { Routes, defineFacet, hostNamed, local, method, remote, num, obj } from "@moonan_ai/sdk";
 
 const Clock = remote("moonan.clock", {
 	version: 1,
-	input: Type.Object({}),
+	input: obj({}, { open: true }),
 	host: hostNamed("moonan"),
 	variants: {
 		v1: {
-			state: { at: Type.Number() },
+			state: { at: num() },
 			methods: { tick: method() },
 		},
 	},
@@ -66,7 +65,7 @@ const Clock = remote("moonan.clock", {
 
 export default defineFacet((api) => {
 	api.serve(Clock, (_input, _principal, self) => {
-		const at = self.state("at", Type.Number(), Date.now());
+		const at = self.state("at", num(), Date.now());
 		return { variant: "v1", at, tick: (ctx) => at.change(ctx, () => Date.now()) };
 	});
 });
@@ -108,7 +107,7 @@ reload 时 chord 会用它检查新的提供者是否仍覆盖你手里的那份
 
 ```js
 import { Panels, useReadable, useRemote } from "@moonan_ai/sdk/web";
-import { defineFacet, local, method, Type } from "@moonan_ai/sdk";
+import { defineFacet, local, method, obj } from "@moonan_ai/sdk";
 import { createElement as h } from "react";
 
 function Panel({ host }) {
@@ -117,7 +116,7 @@ function Panel({ host }) {
 	return h("div", null, new Date(at).toLocaleTimeString());
 }
 
-const Root = local("moonan.clock.web", { version: 1, input: Type.Object({}), members: { noop: method() } });
+const Root = local("moonan.clock.web", { version: 1, input: obj({}, { open: true }), members: { noop: method() } });
 
 export default defineFacet((api) => {
 	api.serve(Root, (_input, _p, self) => {
@@ -135,11 +134,11 @@ export default defineFacet((api) => {
 - 浏览器切面应当是一个**单个 ESM 文件**。浏览器没有模块 hook，重载时只有入口 URL 的缓存参数会变，相对 import 的子文件仍命中缓存——把切面拆成多文件，热重载就只换掉入口。
 - `title` 是纯字符串，外壳原样显示。面板自己决定写什么语言。
 - `order` 决定标签顺序，同值保持注册顺序。
-- 你不需要打包。`import "react"`、`import "@moonan_ai/sdk/web"` 由外壳的 import map 指到 `/runtime/*.js`：整个页面只有一份 React、一份 Chord。多一份 React 会让 hooks 报错——而且表现为「面板不出现」，不是一条明确的报错。
+- 你不需要打包。`import "react"`、`import "@moonan_ai/sdk/web"`、`import "@earendil-works/pi-schema"` 由外壳的 import map 指到 `/runtime/*.js`：整个页面只有一份 React、一份 Chord、一份 pi-schema。多一份 React 会让 hooks 报错——而且表现为「面板不出现」，不是一条明确的报错。
 
 ## 直接用 Chord
 
-`@moonan_ai/sdk` 把 Chord 的原语再导出了：`remote`、`local`、`method`、`hostNamed`、`defineFacet`、`defineRegistry`、`Type`，以及 `forbidden`、`invalid`、`isChordError`、`BACKGROUND_CONTEXT`、`Context` 等错误/上下文入口。插件不直接依赖 Chord 也能写完整功能。想用更深的 API（`track`、`applyImmutable` 等），装 `@earendil-works/chord` 即可，版本对齐 `1.4.0`；浏览器切面还可以直接 `import "@earendil-works/chord/context"` 或 `/delta`，import map 已提供这两个入口。
+`@moonan_ai/sdk` 把 Chord 的原语再导出了：`remote`、`local`、`method`、`hostNamed`、`defineFacet`、`defineRegistry`，以及 `forbidden`、`invalid`、`isChordError`、`BACKGROUND_CONTEXT`、`Context` 等错误/上下文入口。契约 schema 的构建器也在这里：`obj`、`str`、`num`、`int`、`bool`、`nul`、`unknown`、`arr`、`union`、`opt`、`literal`、`record`、`compile`，以及类型 `Schema`、`Static`（都是 `@earendil-works/pi-schema` 的再导出；`literal`、`record` 是 SDK 补的两个指纹稳定形式，写契约时用它俩而不是 `lit`/`map`）。插件不直接依赖 Chord 也能写完整功能。想用更深的 API（`track`、`applyImmutable` 等），装 `@earendil-works/chord` 即可，版本对齐 `1.5.0`；浏览器切面还可以直接 `import "@earendil-works/chord/context"` 或 `/delta`，import map 已提供这两个入口。
 
 ## 统一数据
 
@@ -148,18 +147,18 @@ export default defineFacet((api) => {
 数据参与统一导出/导入，再向 `DataCodecs` 注册一个 codec。
 
 ```js
-import { DataCodecs, DataStore, Type, defineFacet, local } from "@moonan_ai/sdk";
+import { DataCodecs, DataStore, defineFacet, local, obj, str } from "@moonan_ai/sdk";
 
 const Root = local("example.data-root", {
 	version: 1,
-	input: Type.Object({}),
+	input: obj({}, { open: true }),
 	members: {},
 });
 
 export default defineFacet((api) => {
 	api.serve(Root, (_input, _p, self) => {
 		const data = self.get(DataStore, {});
-		const value = self.state("value", Type.String(), {
+		const value = self.state("value", str(), {
 			init: async (ctx) => {
 				const stored = await data.read({ namespace: "example/config" }, ctx);
 				return stored === undefined ? "empty" : String(stored.value);
@@ -203,14 +202,14 @@ export default defineFacet((api) => {
 `ModelProviders` 注册表：
 
 ```js
-import { Type, defineFacet, invalid, local } from "@moonan_ai/sdk";
+import { defineFacet, invalid, local, obj } from "@moonan_ai/sdk";
 import {
 	AI_GATEWAY_PROVIDER_ID,
 	ModelProviders,
 	isAiGatewayModelProvider,
 } from "@moonan_ai/ai-gateway/model-provider";
 
-const Root = local("example.chat-root", { version: 1, input: Type.Object({}), members: {} });
+const Root = local("example.chat-root", { version: 1, input: obj({}, { open: true }), members: {} });
 
 export default defineFacet((api) => {
 	const providers = api.registry(ModelProviders);
