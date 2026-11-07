@@ -1,5 +1,6 @@
-import { Value } from "typebox/value";
+import { copyJson } from "@earendil-works/chord";
 import {
+	compile,
 	invalid,
 	type Ctx,
 	type DataStore,
@@ -34,7 +35,6 @@ import type { AiGatewayRuntime, ModelInfo } from "./model-provider.js";
 import type { SerialQueue } from "./queue.js";
 import { buildGatewayModels } from "./runtime.js";
 import {
-	cloneJson,
 	displayNameFromId,
 	isValidProviderId,
 	keyHint,
@@ -53,12 +53,13 @@ export interface GatewayServiceOptions {
 
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
+const modelValidator = compile(ModelConfigSchema);
+
 function validateModel(value: ModelConfig): ModelConfig {
-	const clean = cloneJson(value);
-	if (!Value.Check(ModelConfigSchema, clean)) {
-		const first = [...Value.Errors(ModelConfigSchema, clean)][0];
-		const path = first?.instancePath || "(root)";
-		throw invalid("args", `模型校验失败：${path} ${first?.message ?? "shape mismatch"}`);
+	const clean = copyJson(value) as ModelConfig;
+	if (!modelValidator.check(clean)) {
+		const first = modelValidator.errors(clean)[0];
+		throw invalid("args", `模型校验失败：${first?.path || "/"} ${first?.message ?? "shape mismatch"}`);
 	}
 	if (!clean.input.some((input) => input === "text")) clean.input = ["text", ...clean.input];
 	clean.input = [...new Set(clean.input)];
@@ -78,7 +79,7 @@ function defaultDiscoveredModel(discovered: DiscoveredModel, provider: ProviderC
 		...(emptyToUndefined(discovered.api) ? { api: emptyToUndefined(discovered.api) } : {}),
 		type: "chat",
 		input: discovered.input && discovered.input.length > 0 ? [...discovered.input] : ["text"],
-		cost: discovered.cost ? cloneJson(discovered.cost) : { ...ZERO_COST },
+		cost: discovered.cost ? (copyJson(discovered.cost) as ModelConfig["cost"]) : { ...ZERO_COST },
 		contextWindow: discovered.contextWindow ?? 128_000,
 		maxTokens: discovered.maxTokens ?? 8_192,
 		reasoning: discovered.reasoning ?? false,
@@ -99,13 +100,13 @@ function providerView(provider: ProviderConfig): ProviderView {
 		enabled: provider.enabled,
 		api: provider.api,
 		baseUrl: provider.baseUrl,
-		...(provider.headers ? { headers: cloneJson(provider.headers) } : {}),
-		...(provider.env ? { env: cloneJson(provider.env) } : {}),
+		...(provider.headers ? { headers: copyJson(provider.headers) as ProviderConfig["headers"] } : {}),
+		...(provider.env ? { env: copyJson(provider.env) as ProviderConfig["env"] } : {}),
 		hasKey: Boolean(provider.apiKey),
 		...(keyHint(provider.apiKey) ? { keyHint: keyHint(provider.apiKey) } : {}),
 		...(provider.keyUpdatedAt ? { keyUpdatedAt: provider.keyUpdatedAt } : {}),
 		authKind: preset?.summary.authKind ?? "api-key",
-		models: provider.models.map((model) => cloneJson(model)),
+		models: provider.models.map((model) => copyJson(model) as ModelConfig),
 		...(provider.createdAt ? { createdAt: provider.createdAt } : {}),
 		...(provider.updatedAt ? { updatedAt: provider.updatedAt } : {}),
 	};
@@ -136,7 +137,7 @@ export class GatewayService {
 			generatedAt: source.updatedAt,
 			providers: source.providers.map(providerView),
 			presets: presetSummaries(),
-			settings: cloneJson(source.settings),
+			settings: copyJson(source.settings) as GatewaySettings,
 			storage: this.storageView(storage),
 			options: gatewayOptions(),
 		};
@@ -263,8 +264,12 @@ export class GatewayService {
 				api: emptyToUndefined(input.api) ?? "openai-completions",
 				baseUrl: normalizeBaseUrl(input.baseUrl),
 				...(apiKey ? { apiKey, keyUpdatedAt: at } : {}),
-				...(input.headers && Object.keys(input.headers).length > 0 ? { headers: cloneJson(input.headers) } : {}),
-				...(input.env && Object.keys(input.env).length > 0 ? { env: cloneJson(input.env) } : {}),
+				...(input.headers && Object.keys(input.headers).length > 0
+					? { headers: copyJson(input.headers) as ProviderConfig["headers"] }
+					: {}),
+				...(input.env && Object.keys(input.env).length > 0
+					? { env: copyJson(input.env) as ProviderConfig["env"] }
+					: {}),
 				models: [],
 				createdAt: at,
 				updatedAt: at,
@@ -303,11 +308,11 @@ export class GatewayService {
 			if (patch.enabled !== undefined) provider.enabled = patch.enabled;
 			if (patch.headers !== undefined) {
 				if (Object.keys(patch.headers).length === 0) delete provider.headers;
-				else provider.headers = cloneJson(patch.headers);
+				else provider.headers = copyJson(patch.headers) as ProviderConfig["headers"];
 			}
 			if (patch.env !== undefined) {
 				if (Object.keys(patch.env).length === 0) delete provider.env;
-				else provider.env = cloneJson(patch.env);
+				else provider.env = copyJson(patch.env) as ProviderConfig["env"];
 			}
 			if (patch.apiKey !== undefined) {
 				const key = patch.apiKey.trim();
@@ -350,7 +355,7 @@ export class GatewayService {
 	): Promise<ModelConfig> {
 		return this.mutate(ctx, (config, at) => {
 			const provider = mustProvider(config, providerId);
-			const model = validateModel({ ...cloneJson(input), updatedAt: at });
+			const model = validateModel({ ...(copyJson(input) as ModelConfig), updatedAt: at });
 			model.id = model.id.trim();
 			model.name = model.name.trim() || model.id;
 			if (!model.id) throw invalid("args", "模型 ID 不能为空。");
@@ -375,7 +380,7 @@ export class GatewayService {
 				provider.models[existingIndex] = model;
 			}
 			provider.updatedAt = at;
-			return cloneJson(model);
+			return copyJson(model) as ModelConfig;
 		});
 	}
 
@@ -432,9 +437,9 @@ export class GatewayService {
 
 	async setSettings(settings: GatewaySettings, ctx: Ctx): Promise<GatewaySettings> {
 		return this.mutate(ctx, (config, at) => {
-			config.settings = cloneJson(settings);
+			config.settings = copyJson(settings) as GatewaySettings;
 			config.updatedAt = at;
-			return cloneJson(config.settings);
+			return copyJson(config.settings) as GatewaySettings;
 		});
 	}
 
@@ -455,7 +460,10 @@ export class GatewayService {
 	async reloadFromDisk(ctx: Ctx): Promise<GatewaySnapshot> {
 		return this.serialize(async () => {
 			await this.options.data.reload(ctx);
-			const stored = await this.options.data.read({ namespace: this.options.namespace }, ctx);
+			const stored = (await this.options.data.read(
+				{ namespace: this.options.namespace },
+				ctx,
+			)) as StoredDataset | undefined;
 			if (stored === undefined) throw invalid("data", "the gateway dataset is missing from the data store");
 			const config = migrateConfig(stored.value, stored.version);
 			this.options.commit(config, ctx);
@@ -484,12 +492,12 @@ export class GatewayService {
 					update: async (current: StoredDataset | undefined) => {
 						const base =
 							current === undefined ? emptyConfig() : migrateConfig(current.value, current.version);
-						const next = cloneJson(base);
+						const next = copyJson(base) as GatewayConfig;
 						result = await change(next, at);
 						next.updatedAt = at;
 						// Chord's diff cost walks every value and does not tolerate an own property set
 						// to undefined. JSON is the contract boundary, so sanitize once here.
-						const published = cloneJson(next);
+						const published = copyJson(next) as GatewayConfig;
 						assertConfig(published);
 						return { value: published, version: GATEWAY_CONFIG_VERSION };
 					},

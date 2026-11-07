@@ -7,8 +7,9 @@
 		<title>Moonan</title>
 		<!--
 			The shared runtime for plugins loaded at runtime. Every plugin bundle imports these
-			bare specifiers, and this map is what makes one React instance (and one Chord
-			instance) serve the shell and every plugin. Built by scripts/build-runtime.mjs.
+			bare specifiers, and this map is what makes one React instance (and one Chord, one
+			pi-schema instance) serve the shell and every plugin. Built by
+			scripts/build-runtime.mjs.
 		-->
 		<script type="importmap">
 			{
@@ -21,8 +22,7 @@
 					"@earendil-works/chord/context": "/runtime/chord-context.js",
 					"@earendil-works/chord/delta": "/runtime/chord-delta.js",
 					"@earendil-works/chord/output": "/runtime/chord-output.js",
-					"typebox": "/runtime/typebox.js",
-					"typebox/value": "/runtime/typebox-value.js",
+					"@earendil-works/pi-schema": "/runtime/pi-schema.js",
 					"@moonan_ai/sdk": "/runtime/sdk.js",
 					"@moonan_ai/sdk/web": "/runtime/sdk-web.js"
 				}

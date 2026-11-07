@@ -1,13 +1,24 @@
 import { local, method, type Facet, type Ref } from "@earendil-works/chord";
-import { FacetSetSchema, WebFacetCatalog, type FacetSetEntry } from "@moonan_ai/sdk";
-import { Type, type Static } from "typebox";
+import {
+	FacetSetSchema,
+	WebFacetCatalog,
+	arr,
+	num,
+	obj,
+	str,
+	type FacetSetEntry,
+	type Static,
+} from "@moonan_ai/sdk";
 
 /** What every `WebFacetCatalog` instance exposes, from one host-lifetime store. */
-export const WebFacetCatalogSnapshotSchema = Type.Object({
-	version: Type.String(),
-	facets: Type.Array(FacetSetSchema),
-	revision: Type.Number(),
-});
+export const WebFacetCatalogSnapshotSchema = obj(
+	{
+		version: str(),
+		facets: arr(FacetSetSchema),
+		revision: num(),
+	},
+	{ open: true },
+);
 export type WebFacetCatalogSnapshot = Static<typeof WebFacetCatalogSnapshotSchema>;
 
 /**
@@ -19,11 +30,11 @@ export type WebFacetCatalogSnapshot = Static<typeof WebFacetCatalogSnapshotSchem
  */
 export const WebFacetCatalogStore = local("moonan.web-facets.store", {
 	version: 1,
-	input: Type.Object({}),
+	input: obj({}, { open: true }),
 	members: {
-		version: Type.String(),
-		facets: Type.Array(FacetSetSchema),
-		revision: Type.Number(),
+		version: str(),
+		facets: arr(FacetSetSchema),
+		revision: num(),
 		update: method(WebFacetCatalogSnapshotSchema),
 	},
 });

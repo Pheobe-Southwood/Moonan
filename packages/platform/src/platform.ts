@@ -234,9 +234,13 @@ export async function createPlatform(options: PlatformOptions): Promise<Platform
 
 	const exportData = async (exportOptions: { includeSecrets?: boolean } = {}): Promise<DataBundle> => {
 		if (!dataStore) throw new Error("the data store is not ready");
-		return host.root((ctx) =>
+		// The store validates every exported value as strict JSON (`checkJson`) before it
+		// returns, but the contract types values `unknown`, so the platform re-asserts the
+		// portable envelope it hands to its own HTTP surface.
+		const bundle = await host.root((ctx) =>
 			dataStore!.exportAll({ includeSecrets: exportOptions.includeSecrets ?? false }, ctx),
 		);
+		return bundle as DataBundle;
 	};
 
 	const importData = async (bundle: unknown): Promise<DataImportReport> => {

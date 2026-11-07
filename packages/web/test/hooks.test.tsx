@@ -6,7 +6,7 @@ import {
 	type Ref,
 	type RefStatus,
 } from "@earendil-works/chord";
-import { Type } from "typebox";
+import { num, obj } from "@moonan_ai/sdk";
 import { useReadable, useRemote } from "@moonan_ai/sdk/web";
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -17,8 +17,10 @@ afterEach(cleanup);
 
 const Counter = local("test.counter", {
 	version: 1,
-	input: Type.Object({}),
-	members: { value: Type.Number() },
+	// An open object: no `additionalProperties` key, so the contract's JSON and fingerprint
+	// stay what they were before the pi-schema migration.
+	input: obj({}, { open: true }),
+	members: { value: num() },
 });
 
 function fakeRef(): {

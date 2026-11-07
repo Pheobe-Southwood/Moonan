@@ -73,5 +73,33 @@ export {
 	type Context,
 } from "@earendil-works/chord/context";
 
-/** The schema builder every contract is written with. */
-export { Type, type Static, type TSchema } from "typebox";
+/**
+ * The schema layer every contract is written with (pi-schema's builders), plus the two
+ * fingerprint-stable forms: `literal` and `record`. See `./schema.ts`.
+ */
+export {
+	arr,
+	bool,
+	bytes,
+	compile,
+	int,
+	literal,
+	nul,
+	nullable,
+	num,
+	obj,
+	oneOf,
+	opt,
+	record,
+	str,
+	tuple,
+	union,
+	unknown,
+	type Annotations,
+	type JsonSchema,
+	type Optional,
+	type Schema,
+	type Static,
+	type StaticObject,
+	type ValidationError,
+} from "./schema.js";

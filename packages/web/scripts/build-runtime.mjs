@@ -7,11 +7,12 @@ import { build, context } from "esbuild";
  * Builds the modules the import map in `index.html` points at.
  *
  * A plugin's browser facet is `import()`ed at runtime, so it cannot be bundled with the
- * shell: it has to resolve `react`, `@earendil-works/chord` and `@moonan_ai/sdk` through
- * the import map instead. That only works if the shell and every plugin share one copy
- * of each — a second React makes hooks throw, and a second Chord would put two protocol
- * and identity worlds in one page. Both failures look like "the panel does not appear"
- * rather than an error.
+ * shell: it has to resolve `react`, `@earendil-works/chord`, `@earendil-works/pi-schema`
+ * and `@moonan_ai/sdk` through the import map instead. That only works if the shell and
+ * every plugin share one copy of each — a second React makes hooks throw, a second Chord
+ * would put two protocol and identity worlds in one page, and a second schema runtime
+ * would compile contracts against a different set of definitions. All of them look like
+ * "the panel does not appear" rather than an error.
  *
  * So every entry below is built in **one pass with splitting**: shared code lands in
  * `chunk-*.js` and both the shell and the plugins reach the same module instance.
@@ -35,9 +36,9 @@ const entries = {
 		'import runtime from "react/jsx-runtime";\nexport const Fragment = runtime.Fragment;\nexport const jsx = runtime.jsx;\nexport const jsxs = runtime.jsxs;\nexport default runtime;',
 	"react-dom":
 		'import ReactDOM from "react-dom";\nimport client from "react-dom/client";\nexport const createRoot = client.createRoot;\nexport const hydrateRoot = client.hydrateRoot;\nexport const createPortal = ReactDOM.createPortal;\nexport const flushSync = ReactDOM.flushSync;\nexport const version = ReactDOM.version;\nexport default ReactDOM;',
-	typebox: 'export * from "typebox";',
-	// Chord imports this deep entry itself; a plugin may want it for schema validation.
-	"typebox-value": 'export * from "typebox/value";',
+	// Chord builds and compiles its contract schemas with pi-schema; a plugin may want the
+	// same builders (or `opt`) for its own contracts, so it gets the one shared instance.
+	"pi-schema": 'export * from "@earendil-works/pi-schema";',
 	chord: 'export * from "@earendil-works/chord";',
 	"chord-context": 'export * from "@earendil-works/chord/context";',
 	"chord-delta": 'export * from "@earendil-works/chord/delta";',

@@ -4,8 +4,8 @@ import {
 	Routes,
 	defineFacet,
 	invalid,
+	type StoredDataset,
 } from "@moonan_ai/sdk";
-import { Value } from "typebox/value";
 import {
 	AI_GATEWAY_DATASET,
 	GATEWAY_CONFIG_VERSION,
@@ -54,16 +54,27 @@ export default defineFacet(
 				// Register before the config init reads; the read itself does not need the codec.
 				self.register(DataCodecs, { [AI_GATEWAY_DATASET]: gatewayCodec });
 
-				const config = self.state("config", GatewayConfigSchema, {
-					init: async (ctx) => {
-						const stored = await data.read({ namespace: AI_GATEWAY_DATASET }, ctx);
-						if (stored === undefined) return emptyConfig();
-						if (stored.version > GATEWAY_CONFIG_VERSION) {
-							throw invalid("data", `unsupported ai-gateway config version ${stored.version}`);
-						}
-						return migrateConfig(stored.value, stored.version);
+				const config = self.state(
+					"config",
+					GatewayConfigSchema,
+					{
+						init: async (ctx) => {
+							const stored = (await data.read(
+								{ namespace: AI_GATEWAY_DATASET },
+								ctx,
+							)) as StoredDataset | undefined;
+							if (stored === undefined) return emptyConfig();
+							if (stored.version > GATEWAY_CONFIG_VERSION) {
+								throw invalid("data", `unsupported ai-gateway config version ${stored.version}`);
+							}
+							return migrateConfig(stored.value, stored.version);
+						},
 					},
-				});
+					{
+						version: GATEWAY_CONFIG_VERSION,
+						migrate: (old, from) => migrateConfig(old, from),
+					},
+				);
 
 				let service: GatewayService | undefined;
 				const getService = (): GatewayService => {
@@ -80,10 +91,13 @@ export default defineFacet(
 
 				// Import or an explicit reload changes the dataset; keep the projection in step.
 				self.on("data-revision", data.revision, async (_revision, ctx) => {
-					const stored = await data.read({ namespace: AI_GATEWAY_DATASET }, ctx);
+					const stored = (await data.read(
+						{ namespace: AI_GATEWAY_DATASET },
+						ctx,
+					)) as StoredDataset | undefined;
 					if (stored === undefined || stored.version > GATEWAY_CONFIG_VERSION) return;
 					const next = migrateConfig(stored.value, stored.version);
-					if (!Value.Equal(next, config.value)) config.replace(ctx, next, { diff: true });
+					config.replace(ctx, next, { diff: true });
 				});
 
 				self.register(ModelProviders, {

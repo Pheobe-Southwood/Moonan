@@ -2,6 +2,7 @@ import { access, chmod, constants, copyFile, mkdir, open, readFile, rename, stat
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+	copyJson,
 	invalid,
 	isJsonValue,
 	type Ctx,
@@ -19,30 +20,27 @@ import {
 	type DataStoreStorageInfo,
 	type StoredDataset,
 } from "@moonan_ai/sdk";
-import { Type } from "typebox";
-import { Value } from "typebox/value";
+import { compile, literal, num, obj, opt, record, str, unknown } from "@moonan_ai/sdk";
 
 const DATA_FORMAT = 1;
 const MAX_DATA_FILE = 64 * 1024 * 1024;
 
-const DatasetRowSchema = Type.Object(
-	{
-		version: Type.Number(),
-		value: Type.Any(),
-		updatedAt: Type.String(),
-	},
-	{ additionalProperties: false },
-);
+const DatasetRowSchema = obj({
+	version: num(),
+	value: unknown(),
+	updatedAt: str(),
+});
 
-const DataDocumentSchema = Type.Object(
-	{
-		format: Type.Literal(DATA_FORMAT),
-		revision: Type.Number(),
-		updatedAt: Type.Optional(Type.String()),
-		datasets: Type.Record(Type.String(), DatasetRowSchema),
-	},
-	{ additionalProperties: false },
-);
+/** The on-disk document, validated on every read. */
+const DataDocumentSchema = obj({
+	format: literal(DATA_FORMAT),
+	revision: num(),
+	updatedAt: opt(str()),
+	datasets: record(DatasetRowSchema),
+});
+
+const documentValidator = compile(DataDocumentSchema);
+const bundleValidator = compile(DataBundleSchema);
 
 interface DatasetRow {
 	version: number;
@@ -65,8 +63,9 @@ function nowIso(): string {
 	return new Date().toISOString();
 }
 
+/** Chord's strict-JSON deep copy; the caller already knows the shape. */
 function clone<T>(value: T): T {
-	return structuredClone(value);
+	return copyJson(value) as T;
 }
 
 function checkVersion(version: number): void {
@@ -252,10 +251,14 @@ export class DataFile {
 	async importAll(
 		codecs: { table(ctx?: Ctx): ReadonlyMap<string, DatasetCodec> },
 		ctx: Ctx | undefined,
-		bundle: DataBundle,
+		// `DataBundle` with `unknown` values: a contract input types values as `unknown`, and
+		// every row is asserted to be strict JSON below before a codec sees it.
+		bundle: Omit<DataBundle, "datasets"> & {
+			readonly datasets: readonly { readonly namespace: string; readonly version: number; readonly value: unknown }[];
+		},
 	): Promise<DataImportReport> {
 		return this.serialize(async () => {
-			if (!Value.Check(DataBundleSchema, bundle)) {
+			if (!bundleValidator.check(bundle)) {
 				throw invalid("data", "import bundle does not match the moonan.data format");
 			}
 			const table = codecs.table(ctx);
@@ -272,6 +275,7 @@ export class DataFile {
 					throw invalid("data", `no codec registered for dataset "${item.namespace}"`);
 				}
 				const current = this.doc.datasets[item.namespace]?.value;
+				checkJson(item.value);
 				const value = codec.import(item.value, item.version, current);
 				checkJson(value);
 				rows.set(item.namespace, {
@@ -353,7 +357,7 @@ export class DataFile {
 		} catch (error) {
 			return { kind: "bad", error: `invalid JSON: ${String(error)}` };
 		}
-		if (!Value.Check(DataDocumentSchema, value)) return { kind: "bad", error: "data file does not match the moonan.data format" };
+		if (!documentValidator.check(value)) return { kind: "bad", error: "data file does not match the moonan.data format" };
 		return { kind: "ok", value: value as DataDocument };
 	}
 
@@ -429,7 +433,7 @@ export function createDataFacet(options: DataFacetOptions): Facet {
 						open: () => DataFile.open(options.file),
 						close: (value) => value.close(),
 					});
-					const revision = self.state("revision", Type.Number(), {
+					const revision = self.state("revision", num(), {
 						init: () => file.value.revision,
 					});
 					const storage = self.state("storage", DataStoreStorageInfoSchema, {
@@ -439,22 +443,20 @@ export function createDataFacet(options: DataFacetOptions): Facet {
 						revision,
 						storage,
 						read: (args: { namespace: string }) => file.value.read(args.namespace),
-						write: async (args: { namespace: string; version: number; value: JsonValue }, ctx) => {
+						write: async (args, ctx) => {
+							checkJson(args.value);
 							const stored = await file.value.write(args.namespace, args.version, args.value);
 							const info = await file.value.info();
 							storage.replace(ctx, info);
 							revision.replace(ctx, info.revision);
 							return stored;
 						},
-						update: async (
-							args: {
-								namespace: string;
-								version: number;
-								update: (current: StoredDataset | undefined) => StoredDataset | Promise<StoredDataset>;
-							},
-							ctx,
-						) => {
-							const stored = await file.value.update(args.namespace, args.version, args.update);
+						update: async (args, ctx) => {
+							// A local contract cannot describe a callback, so the schema types it `unknown`.
+							const update = args.update as (
+								current: StoredDataset | undefined,
+							) => StoredDataset | Promise<StoredDataset>;
+							const stored = await file.value.update(args.namespace, args.version, update);
 							const info = await file.value.info();
 							storage.replace(ctx, info);
 							revision.replace(ctx, info.revision);
@@ -473,7 +475,7 @@ export function createDataFacet(options: DataFacetOptions): Facet {
 						},
 						exportAll: (args: { includeSecrets?: boolean }, ctx) =>
 							file.value.exportAll(codecs, ctx, args.includeSecrets ?? false),
-						importAll: async (args: { bundle: DataBundle }, ctx) => {
+						importAll: async (args, ctx) => {
 							const report = await file.value.importAll(codecs, ctx, args.bundle);
 							const info = await file.value.info();
 							storage.replace(ctx, info);

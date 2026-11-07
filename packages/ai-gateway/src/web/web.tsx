@@ -1,5 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { Type, defineFacet, local, method } from "@moonan_ai/sdk";
+import { defineFacet, local, method, obj } from "@moonan_ai/sdk";
 import { Panels } from "@moonan_ai/sdk/web";
 import { AiGatewayPanel } from "./app.js";
 import { GATEWAY_CSS } from "./styles.js";
@@ -57,7 +57,7 @@ function SafePanel(props: { host: Parameters<typeof AiGatewayPanel>[0]["host"] }
 /** Registry contributions must come from a host-lifetime object. */
 const Root = local("moonan.ai-gateway.web", {
 	version: 1,
-	input: Type.Object({}),
+	input: obj({}, { open: true }),
 	members: { noop: method() },
 });
 

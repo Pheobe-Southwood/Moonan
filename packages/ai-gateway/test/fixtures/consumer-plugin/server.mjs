@@ -1,4 +1,4 @@
-import { DataStore, Routes, Type, defineFacet, local } from "@moonan_ai/sdk";
+import { DataStore, Routes, defineFacet, local, obj } from "@moonan_ai/sdk";
 import {
 	AI_GATEWAY_PROVIDER_ID,
 	ModelProviders,
@@ -16,7 +16,7 @@ import {
  */
 const Root = local("test.ai-gateway-consumer", {
 	version: 1,
-	input: Type.Object({}),
+	input: obj({}, { open: true }),
 	members: {},
 });
 

@@ -51,6 +51,39 @@ describe("layering", () => {
 		}
 	});
 
+	it("keeps the schema layer on pi-schema, never TypeBox", () => {
+		const areas = [
+			"packages/sdk/src",
+			"packages/platform/src",
+			"packages/ai-gateway/src",
+			"packages/web/src",
+			"packages/platform/test",
+			"packages/ai-gateway/test",
+			"packages/web/test",
+		];
+		for (const area of areas) {
+			for (const { file, text } of sources(area)) {
+				// This guard's own pattern would match itself.
+				if (file.endsWith("layering.test.ts")) continue;
+				expect(text, file).not.toMatch(/from "typebox|typebox\/value/);
+			}
+		}
+		for (const area of [".", "packages/sdk", "packages/platform", "packages/ai-gateway", "packages/web"]) {
+			const manifest = packageJson(area);
+			const deps = { ...manifest.dependencies, ...manifest.devDependencies, ...manifest.peerDependencies };
+			expect(deps, `${area}/package.json`).not.toHaveProperty("typebox");
+		}
+		// The browser's shared runtime maps bare specifiers; TypeBox must not be one of them.
+		for (const file of [
+			"packages/web/index.html",
+			"packages/web/scripts/build-runtime.mjs",
+			"packages/web/vite.config.ts",
+			"packages/ai-gateway/scripts/build-web.mjs",
+		]) {
+			expect(readFileSync(join(root, file), "utf8"), file).not.toMatch(/typebox/i);
+		}
+	});
+
 	it("keeps the platform out of React and out of any plugin", () => {
 		for (const { file, text } of sources("packages/platform/src")) {
 			expect(text, file).not.toMatch(/from "react/);

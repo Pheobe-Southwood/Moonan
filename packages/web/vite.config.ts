@@ -5,7 +5,7 @@ import { defineConfig } from "vite";
  * Bare specifiers the browser resolves through the import map in `index.html`.
  *
  * They stay external so the shell and every runtime-loaded plugin share one instance of
- * React, Chord, TypeBox and the SDK. The bundles in `public/runtime` are produced by
+ * React, Chord, pi-schema and the SDK. The bundles in `public/runtime` are produced by
  * `scripts/build-runtime.mjs`, which runs before this build.
  */
 const SHARED = [
@@ -17,8 +17,7 @@ const SHARED = [
 	"@earendil-works/chord/context",
 	"@earendil-works/chord/delta",
 	"@earendil-works/chord/output",
-	"typebox",
-	"typebox/value",
+	"@earendil-works/pi-schema",
 	"@moonan_ai/sdk",
 	"@moonan_ai/sdk/web",
 ];

@@ -1,6 +1,7 @@
 import {
 	Routes,
-	Type,
+	num,
+	obj,
 	defineFacet,
 	hostNamed,
 	local,
@@ -22,13 +23,13 @@ import {
  */
 const Demo = remote("test.demo", {
 	version: 1,
-	input: Type.Object({}),
+	input: obj({}, { open: true }),
 	host: hostNamed("moonan"),
 	variants: {
 		v1: {
 			state: {
 				/** Milliseconds since the epoch; the panel formats it in its own zone. */
-				at: Type.Number(),
+				at: num(),
 			},
 			methods: {
 				tick: method(),
@@ -46,13 +47,13 @@ function stamp(ms = Date.now()) {
 /** `Routes` contributions must come from an object that lives as long as the facet. */
 const Root = local("test.demo.root", {
 	version: 1,
-	input: Type.Object({}),
+	input: obj({}, { open: true }),
 	members: {},
 });
 
 export default defineFacet((api) => {
 	api.serve(Demo, (_input, _principal, self) => {
-		const at = self.state("at", Type.Number(), Date.now());
+		const at = self.state("at", num(), Date.now());
 		const tick = (ctx) => at.change(ctx, () => Date.now());
 		return { variant: "v1", at, tick };
 	});
