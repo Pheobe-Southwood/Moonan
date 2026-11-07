@@ -1,0 +1,42 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`contract fingerprints > keeps the platform contracts' fingerprints 1`] = `
+{
+  "catalog": {
+    "contract": "b083b0573a29bee7",
+    "members": [
+      "version",
+      "facets",
+      "revision",
+    ],
+    "variant": "v1",
+  },
+  "data": {
+    "contract": "0876113fe7aa33e1",
+    "members": [
+      "revision",
+      "storage",
+      "read",
+      "write",
+      "update",
+      "remove",
+      "reload",
+      "exportAll",
+      "importAll",
+    ],
+    "variant": undefined,
+  },
+}
+`;
+
+exports[`contract schema JSON > keeps every published schema's JSON 1`] = `
+{
+  "DataBundleSchema": "{"additionalProperties":false,"properties":{"createdAt":{"type":"string"},"datasets":{"items":{"additionalProperties":false,"properties":{"namespace":{"type":"string"},"value":{},"version":{"type":"number"}},"required":["namespace","version","value"],"type":"object"},"type":"array"},"format":{"const":"moonan.data","type":"string"},"formatVersion":{"const":1,"type":"number"},"revision":{"type":"number"},"skipped":{"items":{"type":"string"},"type":"array"}},"required":["format","formatVersion","createdAt","revision","datasets"],"type":"object"}",
+  "DataImportReportSchema": "{"additionalProperties":false,"properties":{"imported":{"items":{"type":"string"},"type":"array"},"revision":{"type":"number"},"skipped":{"items":{"type":"string"},"type":"array"}},"required":["imported","revision"],"type":"object"}",
+  "DataStoreStorageInfoSchema": "{"additionalProperties":false,"properties":{"backup":{"type":"string"},"datasets":{"type":"number"},"exists":{"type":"boolean"},"file":{"type":"string"},"lastSavedAt":{"type":"string"},"mode":{"type":"string"},"notice":{"type":"string"},"revision":{"type":"number"},"writable":{"type":"boolean"}},"required":["file","backup","exists","writable","revision","datasets"],"type":"object"}",
+  "FacetSetSchema": "{"properties":{"error":{"type":"string"},"name":{"type":"string"},"source":{"anyOf":[{"const":"package","type":"string"},{"const":"directory","type":"string"}]},"version":{"type":"string"},"web":{"properties":{"hash":{"type":"string"},"url":{"type":"string"}},"required":["url","hash"],"type":"object"}},"required":["name","version","source"],"type":"object"}",
+  "StoredDatasetSchema": "{"additionalProperties":false,"properties":{"value":{},"version":{"type":"number"}},"required":["value","version"],"type":"object"}",
+  "WebFacetCatalogSnapshotSchema": "{"properties":{"facets":{"items":{"properties":{"error":{"type":"string"},"name":{"type":"string"},"source":{"anyOf":[{"const":"package","type":"string"},{"const":"directory","type":"string"}]},"version":{"type":"string"},"web":{"properties":{"hash":{"type":"string"},"url":{"type":"string"}},"required":["url","hash"],"type":"object"}},"required":["name","version","source"],"type":"object"},"type":"array"},"revision":{"type":"number"},"version":{"type":"string"}},"required":["version","facets","revision"],"type":"object"}",
+  "WebFacetSchema": "{"properties":{"hash":{"type":"string"},"url":{"type":"string"}},"required":["url","hash"],"type":"object"}",
+}
+`;
