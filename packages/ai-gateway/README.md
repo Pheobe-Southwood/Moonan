@@ -132,5 +132,5 @@ pnpm --filter @moonan_ai/ai-gateway build
 pnpm --filter @moonan_ai/ai-gateway test
 ```
 
-浏览器切面是单个 ESM（`dist/web.js`），只从 shell 的 import map 取 React、Chord、TypeBox 和 SDK。
+浏览器切面是单个 ESM（`dist/web.js`），只从 shell 的 import map 取 React、Chord、pi-schema 和 SDK。
 服务端切面是 `dist/server.js`，通过包 `exports` 的 `.` 与 `./web` 被平台解析；`./model-provider` 给消费者提供类型辅助。

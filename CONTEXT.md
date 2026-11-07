@@ -25,7 +25,7 @@ _Avoid_: 模块, module, 扩展, extension, 组件
 _Avoid_: 半边, 部分, 入口, 模块
 
 **契约（Contract）**
-用 TypeBox 描述的、可以在两端各自写一份的对象说明。契约的身份是指纹（名字 + 版本 + 成员），不是模块实例。
+用 JSON Schema 描述的、可以在两端各自写一份的对象说明，构建器来自 `@earendil-works/pi-schema`。契约的身份是指纹（名字 + 版本 + 成员），不是模块实例。
 _Avoid_: 接口, interface, API, 类型定义
 
 **Web 切面目录（WebFacetCatalog）**
@@ -65,7 +65,7 @@ _Avoid_: 页面, page, 标签页, tab, 视图
 _Avoid_: 路由表, 菜单
 
 **共享运行时（Shared Runtime）**
-平台预先打好的 React、Chord、TypeBox 与 SDK 各一份 ESM。多一份 React 会让 hooks 报错；多一份 Chord 会让页面里出现第二个协议与对象身份世界（注册表按**名字**认表，同名不会因此失配，但两个宿主的对象互不可见）。
+平台预先打好的 React、Chord、pi-schema 与 SDK 各一份 ESM。多一份 React 会让 hooks 报错；多一份 Chord 会让页面里出现第二个协议与对象身份世界（注册表按**名字**认表，同名不会因此失配，但两个宿主的对象互不可见）。
 _Avoid_: vendor, 依赖包, 外部依赖
 
 **插件来源（Plugin source）**
