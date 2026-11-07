@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { appFor, cleanup, pluginDir } from "./support.js";
 
 const PLUGIN = `
-import { DataCodecs, DataStore, Routes, Type, defineFacet, local } from "@moonan_ai/sdk";
+import { DataCodecs, DataStore, Routes, defineFacet, local, obj, str } from "@moonan_ai/sdk";
 
 const Root = local("test.data-root", {
 	version: 1,
-	input: Type.Object({}),
+	input: obj({}, { open: true }),
 	members: {},
 });
 
@@ -15,7 +15,7 @@ export default defineFacet((api) => {
 		Root,
 		(_input, _principal, self) => {
 			const data = self.get(DataStore, {});
-			const value = self.state("value", Type.String(), {
+			const value = self.state("value", str(), {
 				init: async (ctx) => {
 					const stored = await data.read({ namespace: "test.data" }, ctx);
 					return stored === undefined ? "empty" : String(stored.value);

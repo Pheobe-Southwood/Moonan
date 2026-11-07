@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { WebFacetCatalog, type FacetSetEntry } from "@moonan_ai/sdk";
+import { WebFacetCatalog, type FacetSetEntry, obj, num } from "@moonan_ai/sdk";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Moonan } from "../src/index.js";
 import { silentLogger } from "../src/logger.js";
@@ -97,16 +97,15 @@ describe("the platform", () => {
 		}
 	});
 
-	it("installs every facet before activating any host object", async () => {
-		// The consumer's host object consumes a type that the *later* plugin serves. chord's
+	it("installs every facet before activating any host object", async () => { // The consumer's host object consumes a type that the *later* plugin serves. chord's
 		// `load` installs the whole batch before it activates host objects; loading one URL at
 		// a time would fail here with `unavailable/unknown_type`, decided by argument order.
 		// The consumer also declares `uses: [Shared]`, the facet-level statement of the same
 		// dependency: on a reload chord checks that the new provider still covers it.
 		const consumerDir = await pluginDir(
-			`import { Type, defineFacet, local, method } from "@moonan_ai/sdk";
-const Shared = local("test.shared", { version: 1, input: Type.Object({}), members: { ping: method() } });
-const Consumer = local("test.consumer", { version: 1, input: Type.Object({}), members: { ping: method() } });
+			`import { defineFacet, local, method, num, obj } from "@moonan_ai/sdk";
+const Shared = local("test.shared", { version: 1, input: obj({}, { open: true }), members: { ping: method() } });
+const Consumer = local("test.consumer", { version: 1, input: obj({}, { open: true }), members: { ping: method() } });
 export default defineFacet((api) => {
 	api.serve(Consumer, (_input, _principal, self) => {
 		const shared = self.get(Shared, {});
@@ -116,8 +115,8 @@ export default defineFacet((api) => {
 `,
 		);
 		const providerDir = await pluginDir(
-			`import { Type, defineFacet, local, method } from "@moonan_ai/sdk";
-const Shared = local("test.shared", { version: 1, input: Type.Object({}), members: { ping: method() } });
+			`import { defineFacet, local, method, obj, num } from "@moonan_ai/sdk";
+const Shared = local("test.shared", { version: 1, input: obj({}, { open: true }), members: { ping: method() } });
 export default defineFacet((api) => {
 	api.serve(Shared, () => ({ ping: () => "pong" }), { lifetime: "host" });
 });
@@ -140,11 +139,10 @@ export default defineFacet((api) => {
 		}
 	});
 
-	it("reloads a breaking provider and its consumer together", async () => {
-		const version = 1;
-		const consumer = (v: number) => `import { Type, defineFacet, local, method } from "@moonan_ai/sdk";
-const Shared = local("test.shared", { version: ${v}, input: Type.Object({}), members: { ping: method() } });
-const Consumer = local("test.consumer", { version: 1, input: Type.Object({}), members: { ping: method() } });
+	it("reloads a breaking provider and its consumer together", async () => { const version = 1;
+		const consumer = (v: number) => `import { defineFacet, local, method, num, obj } from "@moonan_ai/sdk";
+const Shared = local("test.shared", { version: ${v}, input: obj({}, { open: true }), members: { ping: method() } });
+const Consumer = local("test.consumer", { version: 1, input: obj({}, { open: true }), members: { ping: method() } });
 export default defineFacet((api) => {
 	api.serve(Consumer, (_input, _principal, self) => {
 		const shared = self.get(Shared, {});
@@ -152,8 +150,8 @@ export default defineFacet((api) => {
 	}, { lifetime: "host" });
 }, { uses: [Shared] });
 `;
-		const provider = (v: number) => `import { Type, defineFacet, local, method } from "@moonan_ai/sdk";
-const Shared = local("test.shared", { version: ${v}, input: Type.Object({}), members: { ping: method() } });
+		const provider = (v: number) => `import { defineFacet, local, method, obj, num } from "@moonan_ai/sdk";
+const Shared = local("test.shared", { version: ${v}, input: obj({}, { open: true }), members: { ping: method() } });
 export default defineFacet((api) => {
 	api.serve(Shared, () => ({ ping: () => "pong" }), { lifetime: "host" });
 });
@@ -201,12 +199,10 @@ export default defineFacet((api) => {
 		);
 	});
 
-	it("fails startup when a server facet throws during setup", async () => {
-		const dir = await tempDir(".broken-");
+	it("fails startup when a server facet throws during setup", async () => { const dir = await tempDir(".broken-");
 		await writeFile(
-			join(dir, "server.mjs"),
-			`import { Type, defineFacet, local, method } from "@moonan_ai/sdk";
-const Angry = local("test.angry", { version: 1, input: Type.Object({}), members: { ping: method() } });
+			join(dir, "server.mjs"), `import { defineFacet, local, method, num, obj } from "@moonan_ai/sdk";
+const Angry = local("test.angry", { version: 1, input: obj({}, { open: true }), members: { ping: method() } });
 export default defineFacet((api) => {
 	api.serve(Angry, () => ({ ping: () => "ok" }), { lifetime: "host" });
 	throw new Error("setup said no");
@@ -239,12 +235,10 @@ export default defineFacet((api) => {
 		}
 	});
 
-	it("installs the catalog facet in the same batch, so a plugin host object can consume it", async () => {
-		const dir = await tempDir(".catalog-batch-");
+	it("installs the catalog facet in the same batch, so a plugin host object can consume it", async () => { const dir = await tempDir(".catalog-batch-");
 		await writeFile(
-			join(dir, "server.mjs"),
-			`import { WebFacetCatalog, Type, defineFacet, local, method } from "@moonan_ai/sdk";
-const Probe = local("test.probe", { version: 1, input: Type.Object({}), members: { revision: method(undefined, Type.Number()) } });
+			join(dir, "server.mjs"), `import { WebFacetCatalog, defineFacet, local, method, obj, num } from "@moonan_ai/sdk";
+const Probe = local("test.probe", { version: 1, input: obj({}, { open: true }), members: { revision: method(undefined, num()) } });
 export default defineFacet((api) => {
 	api.serve(Probe, (_input, _principal, self) => {
 		const catalog = self.get(WebFacetCatalog, {});
@@ -292,8 +286,8 @@ export default defineFacet((api) => {
 		await writeFile(
 			join(dir, "server.mjs"),
 			`import { writeFileSync } from "node:fs";
-import { Routes, Type, defineFacet, local } from "@moonan_ai/sdk";
-const Root = local("test.abort", { version: 1, input: Type.Object({}), members: {} });
+import { Routes, defineFacet, local, obj, num } from "@moonan_ai/sdk";
+const Root = local("test.abort", { version: 1, input: obj({}, { open: true }), members: {} });
 const started = ${JSON.stringify(started)};
 const aborted = ${JSON.stringify(aborted)};
 export default defineFacet((api) => {

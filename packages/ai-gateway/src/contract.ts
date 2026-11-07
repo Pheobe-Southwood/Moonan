@@ -1,5 +1,4 @@
-import { hostNamed, local, method, remote } from "@moonan_ai/sdk";
-import { Type } from "typebox";
+import { hostNamed, local, method, obj, remote } from "@moonan_ai/sdk";
 import {
 	AddBuiltinProviderInputSchema,
 	AddProviderInputSchema,
@@ -19,7 +18,7 @@ import {
 	SetProviderEnabledInputSchema,
 } from "./schema.js";
 
-const EMPTY = Type.Object({});
+const EMPTY = obj({}, { open: true });
 
 /**
  * The one authority.

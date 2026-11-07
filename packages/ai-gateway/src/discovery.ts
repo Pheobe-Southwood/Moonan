@@ -1,8 +1,8 @@
+import { copyJson } from "@earendil-works/chord";
 import type { DiscoveryResult, DiscoveredModel, GatewayConfig, ProviderConfig } from "./schema.js";
 import { presetById } from "./catalog.js";
 import { resolveAuth } from "./runtime.js";
 import {
-	cloneJson,
 	displayNameFromId,
 	errorMessage,
 	isLocalEndpoint,
@@ -496,7 +496,7 @@ function catalogResult(
 		maxTokens: model.maxTokens,
 		...(model.input ? { input: [...model.input] } : {}),
 		...(model.reasoning !== undefined ? { reasoning: model.reasoning } : {}),
-		...(model.cost ? { cost: cloneJson(model.cost) } : {}),
+		...(model.cost ? { cost: copyJson(model.cost) as DiscoveredModel["cost"] } : {}),
 		alreadyConfigured: false,
 	}));
 	return {

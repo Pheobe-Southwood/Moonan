@@ -8,13 +8,11 @@ export type ConnectionStatus = "connecting" | "open" | "closed" | "error";
 export interface ConnectionValue {
 	status: ConnectionStatus;
 	host: Host<unknown> | null;
-	/** Bumped only when the host itself is replaced; references are re-acquired on that change alone. */
-	generation: number;
 	/** Set when the server refused this client's protocol version. */
 	error: string | null;
 }
 
-const INITIAL: ConnectionValue = { status: "connecting", host: null, generation: 0, error: null };
+const INITIAL: ConnectionValue = { status: "connecting", host: null, error: null };
 
 const ConnectionContext = createContext<ConnectionValue>(INITIAL);
 
@@ -44,6 +42,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
 		let mismatched = false;
 
 		const host = createHost({
+			name: "browser",
 			kind: "client",
 			self: { id: "browser" },
 			loader: browserFacetLoader(),
@@ -78,7 +77,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
 				onProtocolMismatch: () => {
 					mismatched = true;
 					if (reloadOnce("protocol mismatch")) return;
-					setValue({ status: "error", host: null, generation: 0, error: "protocol_mismatch" });
+					setValue({ status: "error", host: null, error: "protocol_mismatch" });
 					void host.close().catch(() => undefined);
 				},
 			});
@@ -101,7 +100,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
 			});
 		};
 
-		setValue({ status: "connecting", host, generation: 1, error: null });
+		setValue({ status: "connecting", host, error: null });
 		connect();
 
 		return () => {

@@ -1,4 +1,18 @@
-import { Type, type Static } from "typebox";
+import {
+	arr,
+	bool,
+	int,
+	literal,
+	nul,
+	num,
+	obj,
+	opt,
+	record,
+	str,
+	union,
+	unknown,
+	type Static,
+} from "@moonan_ai/sdk";
 
 /**
  * The data shape of the AI gateway.
@@ -9,7 +23,7 @@ import { Type, type Static } from "typebox";
  */
 
 // ---------------------------------------------------------------------------
-// Vocabularies, mirroring pi-ai 1.4.0
+// Vocabularies, mirroring pi-ai 1.5.0
 // ---------------------------------------------------------------------------
 
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -37,35 +51,35 @@ export type CacheRetention = (typeof CACHE_RETENTIONS)[number];
 export type Transport = (typeof TRANSPORTS)[number];
 export type ToolChoice = (typeof TOOL_CHOICES)[number];
 
-export const ThinkingLevelSchema = Type.Union([
-	Type.Literal("off"),
-	Type.Literal("minimal"),
-	Type.Literal("low"),
-	Type.Literal("medium"),
-	Type.Literal("high"),
-	Type.Literal("xhigh"),
-	Type.Literal("max"),
+export const ThinkingLevelSchema = union([
+	literal("off"),
+	literal("minimal"),
+	literal("low"),
+	literal("medium"),
+	literal("high"),
+	literal("xhigh"),
+	literal("max"),
 ]);
-export const InputModalitySchema = Type.Union([Type.Literal("text"), Type.Literal("image")]);
-export const CacheRetentionSchema = Type.Union([
-	Type.Literal("none"),
-	Type.Literal("short"),
-	Type.Literal("long"),
+export const InputModalitySchema = union([literal("text"), literal("image")]);
+export const CacheRetentionSchema = union([
+	literal("none"),
+	literal("short"),
+	literal("long"),
 ]);
-export const TransportSchema = Type.Union([
-	Type.Literal("auto"),
-	Type.Literal("sse"),
-	Type.Literal("websocket"),
-	Type.Literal("websocket-cached"),
+export const TransportSchema = union([
+	literal("auto"),
+	literal("sse"),
+	literal("websocket"),
+	literal("websocket-cached"),
 ]);
-export const ToolChoiceSchema = Type.Union([Type.Literal("auto"), Type.Literal("none")]);
-export const ReasoningLevelSchema = Type.Union([
-	Type.Literal("minimal"),
-	Type.Literal("low"),
-	Type.Literal("medium"),
-	Type.Literal("high"),
-	Type.Literal("xhigh"),
-	Type.Literal("max"),
+export const ToolChoiceSchema = union([literal("auto"), literal("none")]);
+export const ReasoningLevelSchema = union([
+	literal("minimal"),
+	literal("low"),
+	literal("medium"),
+	literal("high"),
+	literal("xhigh"),
+	literal("max"),
 ]);
 
 export const API_LABELS: Record<string, string> = {
@@ -86,127 +100,100 @@ export const API_LABELS: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 /** An arbitrary JSON value. Used for pi-ai's open-ended maps (`samplingParams`, `compat`, …). */
-export const JsonValueSchema = Type.Any();
+export const JsonValueSchema = unknown();
 
-const StringMapSchema = Type.Record(Type.String(), Type.String());
-const HeaderMapSchema = Type.Record(Type.String(), Type.Union([Type.String(), Type.Null()]));
-const JsonMapSchema = Type.Record(Type.String(), JsonValueSchema);
+const StringMapSchema = record(str());
+const HeaderMapSchema = record(union([str(), nul()]));
+const JsonMapSchema = record(JsonValueSchema);
 
 // ---------------------------------------------------------------------------
 // Model parameters
 // ---------------------------------------------------------------------------
 
-export const ModelCostRatesSchema = Type.Object(
-	{
-		input: Type.Number({ minimum: 0 }),
-		output: Type.Number({ minimum: 0 }),
-		cacheRead: Type.Number({ minimum: 0 }),
-		cacheWrite: Type.Number({ minimum: 0 }),
-	},
-	{ additionalProperties: false },
-);
+export const ModelCostRatesSchema = obj({
+	input: num({ minimum: 0 }),
+	output: num({ minimum: 0 }),
+	cacheRead: num({ minimum: 0 }),
+	cacheWrite: num({ minimum: 0 }),
+});
 
-export const ModelCostTierSchema = Type.Object(
-	{
-		input: Type.Number({ minimum: 0 }),
-		output: Type.Number({ minimum: 0 }),
-		cacheRead: Type.Number({ minimum: 0 }),
-		cacheWrite: Type.Number({ minimum: 0 }),
-		inputTokensAbove: Type.Number({ minimum: 0 }),
-	},
-	{ additionalProperties: false },
-);
+export const ModelCostTierSchema = obj({
+	input: num({ minimum: 0 }),
+	output: num({ minimum: 0 }),
+	cacheRead: num({ minimum: 0 }),
+	cacheWrite: num({ minimum: 0 }),
+	inputTokensAbove: num({ minimum: 0 }),
+});
 
-export const ModelCostSchema = Type.Object(
-	{
-		input: Type.Number({ minimum: 0 }),
-		output: Type.Number({ minimum: 0 }),
-		cacheRead: Type.Number({ minimum: 0 }),
-		cacheWrite: Type.Number({ minimum: 0 }),
-		tiers: Type.Optional(Type.Array(ModelCostTierSchema)),
-	},
-	{ additionalProperties: false },
-);
+export const ModelCostSchema = obj({
+	input: num({ minimum: 0 }),
+	output: num({ minimum: 0 }),
+	cacheRead: num({ minimum: 0 }),
+	cacheWrite: num({ minimum: 0 }),
+	tiers: opt(arr(ModelCostTierSchema)),
+});
 
-export const ModelImageResizeSchema = Type.Object(
-	{
-		maxWidth: Type.Optional(Type.Integer({ minimum: 1 })),
-		maxHeight: Type.Optional(Type.Integer({ minimum: 1 })),
-		maxBytes: Type.Optional(Type.Integer({ minimum: 1 })),
-		jpegQuality: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
-	},
-	{ additionalProperties: false },
-);
+export const ModelImageResizeSchema = obj({
+	maxWidth: opt(int({ minimum: 1 })),
+	maxHeight: opt(int({ minimum: 1 })),
+	maxBytes: opt(int({ minimum: 1 })),
+	jpegQuality: opt(int({ minimum: 1, maximum: 100 })),
+});
 
-export const ModelInputLimitsSchema = Type.Object(
-	{
-		maxRequestBytes: Type.Optional(Type.Integer({ minimum: 1 })),
-		images: Type.Optional(
-			Type.Object(
-				{
-					maxPerMessage: Type.Optional(Type.Integer({ minimum: 1 })),
-					maxPerRequest: Type.Optional(Type.Integer({ minimum: 1 })),
-					resize: Type.Optional(ModelImageResizeSchema),
-				},
-				{ additionalProperties: false },
-			),
-		),
-	},
-	{ additionalProperties: false },
-);
+export const ModelInputLimitsSchema = obj({
+	maxRequestBytes: opt(int({ minimum: 1 })),
+	images: opt(
+		obj({
+			maxPerMessage: opt(int({ minimum: 1 })),
+			maxPerRequest: opt(int({ minimum: 1 })),
+			resize: opt(ModelImageResizeSchema),
+		}),
+	),
+});
 
-export const ThinkingLevelMapSchema = Type.Object(
-	{
-		off: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-		minimal: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-		low: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-		medium: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-		high: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-		xhigh: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-		max: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-	},
-	{ additionalProperties: false },
-);
+export const ThinkingLevelMapSchema = obj({
+	off: opt(union([str(), nul()])),
+	minimal: opt(union([str(), nul()])),
+	low: opt(union([str(), nul()])),
+	medium: opt(union([str(), nul()])),
+	high: opt(union([str(), nul()])),
+	xhigh: opt(union([str(), nul()])),
+	max: opt(union([str(), nul()])),
+});
 
-export const PromptCacheSchema = Type.Object(
-	{
-		short: Type.Optional(Type.Number({ minimum: 0 })),
-		long: Type.Optional(Type.Number({ minimum: 0 })),
-	},
-	{ additionalProperties: false },
-);
+export const PromptCacheSchema = obj({
+	short: opt(num({ minimum: 0 })),
+	long: opt(num({ minimum: 0 })),
+});
 
-export const SamplingParamsByLevelSchema = Type.Record(Type.String(), JsonMapSchema);
+export const SamplingParamsByLevelSchema = record(JsonMapSchema);
 
 /** One chat model, exactly the fields pi-ai's `Model` carries. */
-export const ModelConfigSchema = Type.Object(
-	{
-		id: Type.String({ minLength: 1 }),
-		name: Type.String({ minLength: 1 }),
-		/** Defaults to the provider's API when omitted. */
-		api: Type.Optional(Type.String({ minLength: 1 })),
-		/** A per-model endpoint override; the provider's Base URL is used when omitted. */
-		baseUrl: Type.Optional(Type.String()),
-		/** Chat is the default model type in pi-ai; keep it explicit in the file. */
-		type: Type.Optional(Type.Literal("chat")),
-		input: Type.Array(InputModalitySchema, { minItems: 1 }),
-		inputLimits: Type.Optional(ModelInputLimitsSchema),
-		cost: ModelCostSchema,
-		contextWindow: Type.Integer({ minimum: 1 }),
-		maxTokens: Type.Integer({ minimum: 1 }),
-		reasoning: Type.Boolean(),
-		thinkingLevelMap: Type.Optional(ThinkingLevelMapSchema),
-		promptCache: Type.Optional(PromptCacheSchema),
-		samplingParams: Type.Optional(JsonMapSchema),
-		samplingParamsByThinkingLevel: Type.Optional(SamplingParamsByLevelSchema),
-		/** pi-ai's per-API compatibility overrides. Kept open-ended on purpose. */
-		compat: Type.Optional(JsonMapSchema),
-		headers: Type.Optional(StringMapSchema),
-		createdAt: Type.Optional(Type.String()),
-		updatedAt: Type.Optional(Type.String()),
-	},
-	{ additionalProperties: false },
-);
+export const ModelConfigSchema = obj({
+	id: str({ minLength: 1 }),
+	name: str({ minLength: 1 }),
+	/** Defaults to the provider's API when omitted. */
+	api: opt(str({ minLength: 1 })),
+	/** A per-model endpoint override; the provider's Base URL is used when omitted. */
+	baseUrl: opt(str()),
+	/** Chat is the default model type in pi-ai; keep it explicit in the file. */
+	type: opt(literal("chat")),
+	input: arr(InputModalitySchema, { minItems: 1 }),
+	inputLimits: opt(ModelInputLimitsSchema),
+	cost: ModelCostSchema,
+	contextWindow: int({ minimum: 1 }),
+	maxTokens: int({ minimum: 1 }),
+	reasoning: bool(),
+	thinkingLevelMap: opt(ThinkingLevelMapSchema),
+	promptCache: opt(PromptCacheSchema),
+	samplingParams: opt(JsonMapSchema),
+	samplingParamsByThinkingLevel: opt(SamplingParamsByLevelSchema),
+	/** pi-ai's per-API compatibility overrides. Kept open-ended on purpose. */
+	compat: opt(JsonMapSchema),
+	headers: opt(StringMapSchema),
+	createdAt: opt(str()),
+	updatedAt: opt(str()),
+});
 
 export type ModelConfig = Static<typeof ModelConfigSchema>;
 
@@ -214,89 +201,74 @@ export type ModelConfig = Static<typeof ModelConfigSchema>;
 // Providers and the on-disk gateway configuration
 // ---------------------------------------------------------------------------
 
-export const ProviderSourceSchema = Type.Union([Type.Literal("builtin"), Type.Literal("custom")]);
+export const ProviderSourceSchema = union([literal("builtin"), literal("custom")]);
 export type ProviderSource = Static<typeof ProviderSourceSchema>;
 
-export const AuthKindSchema = Type.Union([
-	Type.Literal("api-key"),
-	Type.Literal("api-key+oauth"),
-	Type.Literal("oauth"),
+export const AuthKindSchema = union([
+	literal("api-key"),
+	literal("api-key+oauth"),
+	literal("oauth"),
 ]);
 export type AuthKind = Static<typeof AuthKindSchema>;
 
-export const ProviderConfigSchema = Type.Object(
-	{
-		id: Type.String({ minLength: 1 }),
-		name: Type.String({ minLength: 1 }),
-		source: ProviderSourceSchema,
-		/** Set for a provider added from pi-ai's built-in catalogue. */
-		presetId: Type.Optional(Type.String()),
-		enabled: Type.Boolean(),
-		api: Type.String({ minLength: 1 }),
-		baseUrl: Type.String(),
-		/** Stored server-side only; never included in a snapshot or HTTP response. */
-		apiKey: Type.Optional(Type.String()),
-		keyUpdatedAt: Type.Optional(Type.String()),
-		headers: Type.Optional(HeaderMapSchema),
-		env: Type.Optional(StringMapSchema),
-		models: Type.Array(ModelConfigSchema),
-		createdAt: Type.Optional(Type.String()),
-		updatedAt: Type.Optional(Type.String()),
-	},
-	{ additionalProperties: false },
-);
+export const ProviderConfigSchema = obj({
+	id: str({ minLength: 1 }),
+	name: str({ minLength: 1 }),
+	source: ProviderSourceSchema,
+	/** Set for a provider added from pi-ai's built-in catalogue. */
+	presetId: opt(str()),
+	enabled: bool(),
+	api: str({ minLength: 1 }),
+	baseUrl: str(),
+	/** Stored server-side only; never included in a snapshot or HTTP response. */
+	apiKey: opt(str()),
+	keyUpdatedAt: opt(str()),
+	headers: opt(HeaderMapSchema),
+	env: opt(StringMapSchema),
+	models: arr(ModelConfigSchema),
+	createdAt: opt(str()),
+	updatedAt: opt(str()),
+});
 
 export type ProviderConfig = Static<typeof ProviderConfigSchema>;
 
-export const GatewaySettingsSchema = Type.Object(
-	{
-		discoveryTimeoutMs: Type.Integer({ minimum: 1_000, maximum: 120_000 }),
-		requestDefaults: Type.Object(
-			{
-				temperature: Type.Optional(Type.Number({ minimum: 0, maximum: 2 })),
-				maxTokens: Type.Optional(Type.Integer({ minimum: 1 })),
-				transport: Type.Optional(TransportSchema),
-				cacheRetention: Type.Optional(CacheRetentionSchema),
-				timeoutMs: Type.Optional(Type.Integer({ minimum: 1 })),
-				maxRetries: Type.Optional(Type.Integer({ minimum: 0 })),
-				maxRetryDelayMs: Type.Optional(Type.Integer({ minimum: 0 })),
-				websocketConnectTimeoutMs: Type.Optional(Type.Integer({ minimum: 1 })),
-				toolChoice: Type.Optional(ToolChoiceSchema),
-				reasoning: Type.Optional(ReasoningLevelSchema),
-				thinkingBudgets: Type.Optional(
-					Type.Object(
-						{
-							minimal: Type.Optional(Type.Integer({ minimum: 1 })),
-							low: Type.Optional(Type.Integer({ minimum: 1 })),
-							medium: Type.Optional(Type.Integer({ minimum: 1 })),
-							high: Type.Optional(Type.Integer({ minimum: 1 })),
-						},
-						{ additionalProperties: false },
-					),
-				),
-				deferred: Type.Optional(Type.Boolean()),
-				metadata: Type.Optional(JsonMapSchema),
-				samplingParams: Type.Optional(JsonMapSchema),
-			},
-			{ additionalProperties: false },
+export const GatewaySettingsSchema = obj({
+	discoveryTimeoutMs: int({ minimum: 1_000, maximum: 120_000 }),
+	requestDefaults: obj({
+		temperature: opt(num({ minimum: 0, maximum: 2 })),
+		maxTokens: opt(int({ minimum: 1 })),
+		transport: opt(TransportSchema),
+		cacheRetention: opt(CacheRetentionSchema),
+		timeoutMs: opt(int({ minimum: 1 })),
+		maxRetries: opt(int({ minimum: 0 })),
+		maxRetryDelayMs: opt(int({ minimum: 0 })),
+		websocketConnectTimeoutMs: opt(int({ minimum: 1 })),
+		toolChoice: opt(ToolChoiceSchema),
+		reasoning: opt(ReasoningLevelSchema),
+		thinkingBudgets: opt(
+			obj({
+				minimal: opt(int({ minimum: 1 })),
+				low: opt(int({ minimum: 1 })),
+				medium: opt(int({ minimum: 1 })),
+				high: opt(int({ minimum: 1 })),
+			}),
 		),
-	},
-	{ additionalProperties: false },
-);
+		deferred: opt(bool()),
+		metadata: opt(JsonMapSchema),
+		samplingParams: opt(JsonMapSchema),
+	}),
+});
 
 export type GatewaySettings = Static<typeof GatewaySettingsSchema>;
 export type RequestDefaults = GatewaySettings["requestDefaults"];
 
-export const GatewayConfigSchema = Type.Object(
-	{
-		version: Type.Literal(1),
-		providers: Type.Array(ProviderConfigSchema),
-		settings: GatewaySettingsSchema,
-		createdAt: Type.String(),
-		updatedAt: Type.String(),
-	},
-	{ additionalProperties: false },
-);
+export const GatewayConfigSchema = obj({
+	version: literal(1),
+	providers: arr(ProviderConfigSchema),
+	settings: GatewaySettingsSchema,
+	createdAt: str(),
+	updatedAt: str(),
+});
 
 export type GatewayConfig = Static<typeof GatewayConfigSchema>;
 
@@ -304,119 +276,98 @@ export type GatewayConfig = Static<typeof GatewayConfigSchema>;
 // Views and options sent to the browser
 // ---------------------------------------------------------------------------
 
-export const ProviderViewSchema = Type.Object(
-	{
-		id: Type.String(),
-		name: Type.String(),
-		source: ProviderSourceSchema,
-		presetId: Type.Optional(Type.String()),
-		enabled: Type.Boolean(),
-		api: Type.String(),
-		baseUrl: Type.String(),
-		headers: Type.Optional(HeaderMapSchema),
-		env: Type.Optional(StringMapSchema),
-		hasKey: Type.Boolean(),
-		keyHint: Type.Optional(Type.String()),
-		keyUpdatedAt: Type.Optional(Type.String()),
-		authKind: AuthKindSchema,
-		models: Type.Array(ModelConfigSchema),
-		createdAt: Type.Optional(Type.String()),
-		updatedAt: Type.Optional(Type.String()),
-	},
-	{ additionalProperties: false },
-);
+export const ProviderViewSchema = obj({
+	id: str(),
+	name: str(),
+	source: ProviderSourceSchema,
+	presetId: opt(str()),
+	enabled: bool(),
+	api: str(),
+	baseUrl: str(),
+	headers: opt(HeaderMapSchema),
+	env: opt(StringMapSchema),
+	hasKey: bool(),
+	keyHint: opt(str()),
+	keyUpdatedAt: opt(str()),
+	authKind: AuthKindSchema,
+	models: arr(ModelConfigSchema),
+	createdAt: opt(str()),
+	updatedAt: opt(str()),
+});
 
 export type ProviderView = Static<typeof ProviderViewSchema>;
 
-export const PresetSummarySchema = Type.Object(
-	{
-		id: Type.String(),
-		name: Type.String(),
-		baseUrl: Type.Optional(Type.String()),
-		authKind: AuthKindSchema,
-		modelCount: Type.Integer({ minimum: 0 }),
-		apis: Type.Array(Type.String()),
-	},
-	{ additionalProperties: false },
-);
+export const PresetSummarySchema = obj({
+	id: str(),
+	name: str(),
+	baseUrl: opt(str()),
+	authKind: AuthKindSchema,
+	modelCount: int({ minimum: 0 }),
+	apis: arr(str()),
+});
 
 export type PresetSummary = Static<typeof PresetSummarySchema>;
 
-export const CompatFieldSchema = Type.Object(
-	{
-		key: Type.String(),
-		label: Type.String(),
-		kind: Type.Union([
-			Type.Literal("boolean"),
-			Type.Literal("enum"),
-			Type.Literal("number"),
-			Type.Literal("string"),
-			Type.Literal("json"),
-		]),
-		options: Type.Optional(Type.Array(Type.String())),
-		description: Type.Optional(Type.String()),
-		default: Type.Optional(JsonValueSchema),
-	},
-	{ additionalProperties: false },
-);
+export const CompatFieldSchema = obj({
+	key: str(),
+	label: str(),
+	kind: union([
+		literal("boolean"),
+		literal("enum"),
+		literal("number"),
+		literal("string"),
+		literal("json"),
+	]),
+	options: opt(arr(str())),
+	description: opt(str()),
+	default: opt(JsonValueSchema),
+});
 
 export type CompatField = Static<typeof CompatFieldSchema>;
 
-export const ApiOptionSchema = Type.Object(
-	{
-		id: Type.String(),
-		label: Type.String(),
-		compatFields: Type.Array(CompatFieldSchema),
-	},
-	{ additionalProperties: false },
-);
+export const ApiOptionSchema = obj({
+	id: str(),
+	label: str(),
+	compatFields: arr(CompatFieldSchema),
+});
 
 export type ApiOption = Static<typeof ApiOptionSchema>;
 
-export const GatewayOptionsSchema = Type.Object(
-	{
-		apis: Type.Array(ApiOptionSchema),
-		thinkingLevels: Type.Array(Type.String()),
-		inputModalities: Type.Array(Type.String()),
-		cacheRetentions: Type.Array(Type.String()),
-		transports: Type.Array(Type.String()),
-		toolChoices: Type.Array(Type.String()),
-	},
-	{ additionalProperties: false },
-);
+export const GatewayOptionsSchema = obj({
+	apis: arr(ApiOptionSchema),
+	thinkingLevels: arr(str()),
+	inputModalities: arr(str()),
+	cacheRetentions: arr(str()),
+	transports: arr(str()),
+	toolChoices: arr(str()),
+});
 
 export type GatewayOptions = Static<typeof GatewayOptionsSchema>;
 
-export const StorageInfoSchema = Type.Object(
-	{
-		dataPath: Type.String(),
-		backupPath: Type.String(),
-		namespace: Type.String(),
-		exists: Type.Boolean(),
-		mode: Type.Optional(Type.String()),
-		writable: Type.Boolean(),
-		lastSavedAt: Type.Optional(Type.String()),
-		notice: Type.Optional(Type.String()),
-		revision: Type.Number(),
-		datasets: Type.Number(),
-	},
-	{ additionalProperties: false },
-);
+export const StorageInfoSchema = obj({
+	dataPath: str(),
+	backupPath: str(),
+	namespace: str(),
+	exists: bool(),
+	mode: opt(str()),
+	writable: bool(),
+	lastSavedAt: opt(str()),
+	notice: opt(str()),
+	revision: num(),
+	datasets: num(),
+});
 
 export type StorageInfo = Static<typeof StorageInfoSchema>;
 
-export const GatewaySnapshotSchema = Type.Object(
-	{
-		version: Type.String(),
-		generatedAt: Type.String(),
-		providers: Type.Array(ProviderViewSchema),
-		presets: Type.Array(PresetSummarySchema),
-		settings: GatewaySettingsSchema,
-		storage: StorageInfoSchema,
-		options: GatewayOptionsSchema,
-	},
-	{ additionalProperties: false },
-);
+export const GatewaySnapshotSchema = obj({
+	version: str(),
+	generatedAt: str(),
+	providers: arr(ProviderViewSchema),
+	presets: arr(PresetSummarySchema),
+	settings: GatewaySettingsSchema,
+	storage: StorageInfoSchema,
+	options: GatewayOptionsSchema,
+});
 
 export type GatewaySnapshot = Static<typeof GatewaySnapshotSchema>;
 
@@ -424,151 +375,109 @@ export type GatewaySnapshot = Static<typeof GatewaySnapshotSchema>;
 // Method inputs and discovery results
 // ---------------------------------------------------------------------------
 
-export const ProviderIdInputSchema = Type.Object({ id: Type.String({ minLength: 1 }) }, { additionalProperties: false });
+export const ProviderIdInputSchema = obj({ id: str({ minLength: 1 }) });
 
-export const AddBuiltinProviderInputSchema = Type.Object(
-	{ presetId: Type.String({ minLength: 1 }) },
-	{ additionalProperties: false },
-);
+export const AddBuiltinProviderInputSchema = obj({ presetId: str({ minLength: 1 }) });
 
-export const AddProviderInputSchema = Type.Object(
-	{
-		id: Type.String({ minLength: 1 }),
-		name: Type.Optional(Type.String()),
-		api: Type.String({ minLength: 1 }),
-		baseUrl: Type.String(),
-		apiKey: Type.Optional(Type.String()),
-		headers: Type.Optional(HeaderMapSchema),
-		env: Type.Optional(StringMapSchema),
-	},
-	{ additionalProperties: false },
-);
+export const AddProviderInputSchema = obj({
+	id: str({ minLength: 1 }),
+	name: opt(str()),
+	api: str({ minLength: 1 }),
+	baseUrl: str(),
+	apiKey: opt(str()),
+	headers: opt(HeaderMapSchema),
+	env: opt(StringMapSchema),
+});
 
-export const ProviderPatchSchema = Type.Object(
-	{
-		name: Type.Optional(Type.String({ minLength: 1 })),
-		api: Type.Optional(Type.String({ minLength: 1 })),
-		baseUrl: Type.Optional(Type.String()),
-		enabled: Type.Optional(Type.Boolean()),
-		headers: Type.Optional(HeaderMapSchema),
-		env: Type.Optional(StringMapSchema),
-		/** Empty string clears the stored key. */
-		apiKey: Type.Optional(Type.String()),
-	},
-	{ additionalProperties: false },
-);
+export const ProviderPatchSchema = obj({
+	name: opt(str({ minLength: 1 })),
+	api: opt(str({ minLength: 1 })),
+	baseUrl: opt(str()),
+	enabled: opt(bool()),
+	headers: opt(HeaderMapSchema),
+	env: opt(StringMapSchema),
+	/** Empty string clears the stored key. */
+	apiKey: opt(str()),
+});
 
-export const SaveProviderInputSchema = Type.Object(
-	{ id: Type.String({ minLength: 1 }), patch: ProviderPatchSchema },
-	{ additionalProperties: false },
-);
+export const SaveProviderInputSchema = obj({ id: str({ minLength: 1 }), patch: ProviderPatchSchema });
 
-export const SetProviderEnabledInputSchema = Type.Object(
-	{ id: Type.String({ minLength: 1 }), enabled: Type.Boolean() },
-	{ additionalProperties: false },
-);
+export const SetProviderEnabledInputSchema = obj({ id: str({ minLength: 1 }), enabled: bool() });
 
-export const SaveModelInputSchema = Type.Object(
-	{
-		providerId: Type.String({ minLength: 1 }),
-		model: ModelConfigSchema,
-		/** Present when the id was edited; the old id is removed in the same write. */
-		previousId: Type.Optional(Type.String()),
-	},
-	{ additionalProperties: false },
-);
+export const SaveModelInputSchema = obj({
+	providerId: str({ minLength: 1 }),
+	model: ModelConfigSchema,
+	/** Present when the id was edited; the old id is removed in the same write. */
+	previousId: opt(str()),
+});
 
-export const DeleteModelInputSchema = Type.Object(
-	{ providerId: Type.String({ minLength: 1 }), modelId: Type.String({ minLength: 1 }) },
-	{ additionalProperties: false },
-);
+export const DeleteModelInputSchema = obj({ providerId: str({ minLength: 1 }), modelId: str({ minLength: 1 }) });
 
-export const DiscoveredModelSchema = Type.Object(
-	{
-		id: Type.String({ minLength: 1 }),
-		name: Type.String(),
-		api: Type.Optional(Type.String()),
-		contextWindow: Type.Optional(Type.Integer({ minimum: 1 })),
-		maxTokens: Type.Optional(Type.Integer({ minimum: 1 })),
-		input: Type.Optional(Type.Array(InputModalitySchema)),
-		reasoning: Type.Optional(Type.Boolean()),
-		cost: Type.Optional(ModelCostSchema),
-		ownedBy: Type.Optional(Type.String()),
-		created: Type.Optional(Type.Number()),
-	},
-	{ additionalProperties: false },
-);
+export const DiscoveredModelSchema = obj({
+	id: str({ minLength: 1 }),
+	name: str(),
+	api: opt(str()),
+	contextWindow: opt(int({ minimum: 1 })),
+	maxTokens: opt(int({ minimum: 1 })),
+	input: opt(arr(InputModalitySchema)),
+	reasoning: opt(bool()),
+	cost: opt(ModelCostSchema),
+	ownedBy: opt(str()),
+	created: opt(num()),
+});
 
 export type DiscoveredModel = Static<typeof DiscoveredModelSchema>;
 
-export const DiscoveryResultSchema = Type.Object(
-	{
-		providerId: Type.String(),
-		endpoint: Type.String(),
-		fetchedAt: Type.String(),
-		source: Type.Union([Type.Literal("upstream"), Type.Literal("catalog")]),
-		models: Type.Array(
-			Type.Object(
-				{
-					id: Type.String(),
-					name: Type.String(),
-					api: Type.Optional(Type.String()),
-					contextWindow: Type.Optional(Type.Integer()),
-					maxTokens: Type.Optional(Type.Integer()),
-					input: Type.Optional(Type.Array(InputModalitySchema)),
-					reasoning: Type.Optional(Type.Boolean()),
-					cost: Type.Optional(ModelCostSchema),
-					ownedBy: Type.Optional(Type.String()),
-					created: Type.Optional(Type.Number()),
-					alreadyConfigured: Type.Boolean(),
-				},
-				{ additionalProperties: false },
-			),
-		),
-		warnings: Type.Array(Type.String()),
-	},
-	{ additionalProperties: false },
-);
+export const DiscoveryResultSchema = obj({
+	providerId: str(),
+	endpoint: str(),
+	fetchedAt: str(),
+	source: union([literal("upstream"), literal("catalog")]),
+	models: arr(
+		obj({
+			id: str(),
+			name: str(),
+			api: opt(str()),
+			contextWindow: opt(int()),
+			maxTokens: opt(int()),
+			input: opt(arr(InputModalitySchema)),
+			reasoning: opt(bool()),
+			cost: opt(ModelCostSchema),
+			ownedBy: opt(str()),
+			created: opt(num()),
+			alreadyConfigured: bool(),
+		}),
+	),
+	warnings: arr(str()),
+});
 
 export type DiscoveryResult = Static<typeof DiscoveryResultSchema>;
 
-export const ImportModelsInputSchema = Type.Object(
-	{
-		providerId: Type.String({ minLength: 1 }),
-		models: Type.Array(DiscoveredModelSchema),
-		mode: Type.Union([Type.Literal("skip"), Type.Literal("replace")]),
-	},
-	{ additionalProperties: false },
-);
+export const ImportModelsInputSchema = obj({
+	providerId: str({ minLength: 1 }),
+	models: arr(DiscoveredModelSchema),
+	mode: union([literal("skip"), literal("replace")]),
+});
 
-export const ImportResultSchema = Type.Object(
-	{
-		added: Type.Integer(),
-		skipped: Type.Integer(),
-		replaced: Type.Integer(),
-		total: Type.Integer(),
-	},
-	{ additionalProperties: false },
-);
+export const ImportResultSchema = obj({
+	added: int(),
+	skipped: int(),
+	replaced: int(),
+	total: int(),
+});
 
 export type ImportResult = Static<typeof ImportResultSchema>;
 
-export const SaveSettingsInputSchema = Type.Object(
-	{ settings: GatewaySettingsSchema },
-	{ additionalProperties: false },
-);
+export const SaveSettingsInputSchema = obj({ settings: GatewaySettingsSchema });
 
-export const GatewayHealthSchema = Type.Object(
-	{
-		ok: Type.Boolean(),
-		version: Type.String(),
-		dataPath: Type.String(),
-		providers: Type.Integer(),
-		enabledProviders: Type.Integer(),
-		models: Type.Integer(),
-		updatedAt: Type.String(),
-	},
-	{ additionalProperties: false },
-);
+export const GatewayHealthSchema = obj({
+	ok: bool(),
+	version: str(),
+	dataPath: str(),
+	providers: int(),
+	enabledProviders: int(),
+	models: int(),
+	updatedAt: str(),
+});
 
 export type GatewayHealth = Static<typeof GatewayHealthSchema>;

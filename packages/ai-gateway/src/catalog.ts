@@ -17,7 +17,8 @@ import {
 	type PresetSummary,
 	type ProviderConfig,
 } from "./schema.js";
-import { cloneJson, normalizeBaseUrl, nowIso } from "./util.js";
+import { copyJson } from "@earendil-works/chord";
+import { normalizeBaseUrl, nowIso } from "./util.js";
 
 export interface Preset {
 	id: string;
@@ -123,25 +124,33 @@ export function modelToConfig(model: Model<Api>, providerBaseUrl: string, at = n
 		...(baseUrl ? { baseUrl } : {}),
 		type: "chat",
 		input: [...model.input],
-		...(model.inputLimits ? { inputLimits: cloneJson(model.inputLimits) } : {}),
-		cost: cloneJson(model.cost),
+		...(model.inputLimits ? { inputLimits: copyJson(model.inputLimits) as ModelConfig["inputLimits"] } : {}),
+		cost: copyJson(model.cost) as ModelConfig["cost"],
 		contextWindow: model.contextWindow,
 		maxTokens: model.maxTokens,
 		reasoning: Boolean(model.reasoning),
-		...(model.thinkingLevelMap ? { thinkingLevelMap: cloneJson(model.thinkingLevelMap) } : {}),
-		...(model.promptCache ? { promptCache: cloneJson(model.promptCache) } : {}),
-		...(model.samplingParams ? { samplingParams: cloneJson(model.samplingParams) } : {}),
-		...(model.samplingParamsByThinkingLevel
-			? { samplingParamsByThinkingLevel: cloneJson(model.samplingParamsByThinkingLevel) }
+		...(model.thinkingLevelMap
+			? { thinkingLevelMap: copyJson(model.thinkingLevelMap) as ModelConfig["thinkingLevelMap"] }
 			: {}),
-		...(model.compat ? { compat: cloneJson(model.compat) } : {}),
+		...(model.promptCache ? { promptCache: copyJson(model.promptCache) as ModelConfig["promptCache"] } : {}),
+		...(model.samplingParams
+			? { samplingParams: copyJson(model.samplingParams) as ModelConfig["samplingParams"] }
+			: {}),
+		...(model.samplingParamsByThinkingLevel
+			? {
+				samplingParamsByThinkingLevel: copyJson(
+					model.samplingParamsByThinkingLevel,
+				) as ModelConfig["samplingParamsByThinkingLevel"],
+			}
+			: {}),
+		...(model.compat ? { compat: copyJson(model.compat) as ModelConfig["compat"] } : {}),
 		...(model.headers ? { headers: { ...model.headers } } : {}),
 		createdAt: at,
 		updatedAt: at,
 	};
 }
 
-/** Turns a TypeBox compat schema (pi-ai's own) into form metadata — no field list to drift. */
+/** Turns pi-ai's own compat JSON Schema into form metadata — no field list to drift. */
 function describeCompat(schema: unknown): CompatField[] {
 	if (typeof schema !== "object" || schema === null) return [];
 	const properties = (schema as { properties?: Record<string, unknown> }).properties;
@@ -169,7 +178,7 @@ function describeCompat(schema: unknown): CompatField[] {
 			kind,
 			...(enumValues ? { options: enumValues } : {}),
 			...(property.description ? { description: property.description } : {}),
-			...(property.default !== undefined ? { default: cloneJson(property.default) } : {}),
+			...(property.default !== undefined ? { default: copyJson(property.default) } : {}),
 		});
 	}
 	return fields;

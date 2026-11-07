@@ -1,16 +1,15 @@
 import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { hostNamed, method, remote } from "@earendil-works/chord";
-import { WebFacetCatalog } from "@moonan_ai/sdk";
-import { Type } from "typebox";
+import { WebFacetCatalog, obj, num, str } from "@moonan_ai/sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { appFor, cleanup, closeClient, connectClient, pluginDir, post, wsUrl } from "./support.js";
 
 const C1_SERVER = `
-import { ChordError, Routes, Type, defineFacet, local } from "@moonan_ai/sdk";
+import { ChordError, Routes, defineFacet, local, obj, num, str } from "@moonan_ai/sdk";
 
-const Root = local("test.flaky", { version: 1, input: Type.Object({}), members: {} });
+const Root = local("test.flaky", { version: 1, input: obj({}, { open: true }), members: {} });
 let getCalls = 0;
 let postCalls = 0;
 
@@ -42,13 +41,13 @@ export default defineFacet((api) => {
 `;
 
 const DEV_SERVER = `
-import { Routes, Type, defineFacet, local } from "@moonan_ai/sdk";
+import { Routes, defineFacet, local, obj, num, str } from "@moonan_ai/sdk";
 
-const Root = local("test.dev", { version: 1, input: Type.Object({}), members: {} });
+const Root = local("test.dev", { version: 1, input: obj({}, { open: true }), members: {} });
 
 export default defineFacet((api) => {
 	api.serve(Root, (_input, _principal, self) => {
-		const value = self.state("value", Type.Object({ n: Type.Number() }), { n: 0 });
+		const value = self.state("value", obj({ n: num() }, { open: true }), { n: 0 });
 		self.register(Routes, {
 			"GET /api/dev-write": (_request, response, ctx) => {
 				value.change(ctx, (draft) => {
@@ -64,25 +63,25 @@ export default defineFacet((api) => {
 `;
 
 const REMOVABLE_SERVER = `
-import { Routes, Type, defineFacet, hostNamed, local, method, remote } from "@moonan_ai/sdk";
+import { Routes, defineFacet, hostNamed, local, method, remote, obj, num, str } from "@moonan_ai/sdk";
 
 const Removable = remote("test.removable", {
 	version: 1,
-	input: Type.Object({}),
+	input: obj({}, { open: true }),
 	host: hostNamed("moonan"),
 	variants: {
 		v1: {
-			state: { n: Type.Number() },
+			state: { n: num() },
 			methods: { noop: method() },
 		},
 	},
 });
 
-const Root = local("test.removable.root", { version: 1, input: Type.Object({}), members: {} });
+const Root = local("test.removable.root", { version: 1, input: obj({}, { open: true }), members: {} });
 
 export default defineFacet((api) => {
 	api.serve(Removable, (_input, _principal, self) => {
-		const n = self.state("n", Type.Number(), 1);
+		const n = self.state("n", num(), 1);
 		return { variant: "v1", n, noop: () => {} };
 	});
 	api.serve(Root, (_input, _principal, self) => {
@@ -98,9 +97,9 @@ export default defineFacet((api) => {
 `;
 
 const B1_SERVER = `
-import { Type, defineFacet, local } from "@moonan_ai/sdk";
+import { defineFacet, local, obj, num, str } from "@moonan_ai/sdk";
 
-const Root = local("test.b1", { version: 1, input: Type.Object({}), members: {} });
+const Root = local("test.b1", { version: 1, input: obj({}, { open: true }), members: {} });
 
 export default defineFacet((api) => {
 	api.serve(Root, () => ({}), { lifetime: "host" });
@@ -109,11 +108,11 @@ export default defineFacet((api) => {
 
 const Removable = remote("test.removable", {
 	version: 1,
-	input: Type.Object({}),
+	input: obj({}, { open: true }),
 	host: hostNamed("moonan"),
 	variants: {
 		v1: {
-			state: { n: Type.Number() },
+			state: { n: num() },
 			methods: { noop: method() },
 		},
 	},

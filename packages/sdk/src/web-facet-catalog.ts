@@ -1,5 +1,5 @@
 import { hostNamed, remote } from "@earendil-works/chord";
-import { Type, type Static } from "typebox";
+import { arr, literal, num, obj, opt, str, union, type Static } from "./schema.js";
 
 /**
  * A browser facet: the module URL and a hash of its exact file contents.
@@ -8,12 +8,15 @@ import { Type, type Static } from "typebox";
  * path would otherwise look identical. The hash is what makes a browser reload only when
  * its web code actually changed.
  */
-export const WebFacetSchema = Type.Object({
-	/** Absolute path on this server (`/facets/<key>/web.js`). */
-	url: Type.String(),
-	/** SHA-256 of the file contents, truncated for display. */
-	hash: Type.String(),
-});
+export const WebFacetSchema = obj(
+	{
+		/** Absolute path on this server (`/facets/<key>/web.js`). */
+		url: str(),
+		/** SHA-256 of the file contents, truncated for display. */
+		hash: str(),
+	},
+	{ open: true },
+);
 export type WebFacet = Static<typeof WebFacetSchema>;
 
 /**
@@ -24,14 +27,17 @@ export type WebFacet = Static<typeof WebFacetSchema>;
  * a plugin that failed to resolve carries `error` instead — the browser still receives it,
  * so the shell can report the failure rather than show a silently missing tab.
  */
-export const FacetSetSchema = Type.Object({
-	name: Type.String(),
-	version: Type.String(),
-	/** Where the facets came from: an installed package, or a directory on disk. */
-	source: Type.Union([Type.Literal("package"), Type.Literal("directory")]),
-	web: Type.Optional(WebFacetSchema),
-	error: Type.Optional(Type.String()),
-});
+export const FacetSetSchema = obj(
+	{
+		name: str(),
+		version: str(),
+		/** Where the facets came from: an installed package, or a directory on disk. */
+		source: union([literal("package"), literal("directory")]),
+		web: opt(WebFacetSchema),
+		error: opt(str()),
+	},
+	{ open: true },
+);
 export type FacetSetEntry = Static<typeof FacetSetSchema>;
 
 /**
@@ -49,21 +55,21 @@ export type FacetSetEntry = Static<typeof FacetSetSchema>;
  */
 export const WebFacetCatalog = remote("moonan.web-facets", {
 	version: 1,
-	input: Type.Object({}),
+	input: obj({}, { open: true }),
 	host: hostNamed("moonan"),
 	variants: {
 		v1: {
 			state: {
 				/** The platform's own version, so a client can tell which build it is talking to. */
-				version: Type.String(),
-				facets: Type.Array(FacetSetSchema),
+				version: str(),
+				facets: arr(FacetSetSchema),
 				/**
 				 * chord's code version (`host.codeVersion`): 1 at startup, one higher after every
 				 * reload that committed. This is Moonan application state, not chord's removed
 				 * `Shape.codeVersion`; a browser decides whether to reload from each `web.hash`,
 				 * and never from this number as a protocol value.
 				 */
-				revision: Type.Number(),
+				revision: num(),
 			},
 		},
 	},

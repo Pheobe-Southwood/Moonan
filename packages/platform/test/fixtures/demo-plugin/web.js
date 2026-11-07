@@ -1,5 +1,5 @@
 import { Panels, useReadable, useRemote } from "@moonan_ai/sdk/web";
-import { Type, defineFacet, hostNamed, local, method, remote } from "@moonan_ai/sdk";
+import { defineFacet, hostNamed, local, method, num, obj, remote } from "@moonan_ai/sdk";
 import { createElement as h } from "react";
 
 /**
@@ -12,12 +12,12 @@ import { createElement as h } from "react";
  */
 const Demo = remote("test.demo", {
 	version: 1,
-	input: Type.Object({}),
+	input: obj({}, { open: true }),
 	host: hostNamed("moonan"),
 	variants: {
 		v1: {
 			state: {
-				at: Type.Number(),
+				at: num(),
 			},
 			methods: {
 				tick: method(),
@@ -35,7 +35,7 @@ function DemoPanel({ host }) {
 /** `Panels` registrations must come from a `lifetime: "host"` object, hence this empty one. */
 const Root = local("test.demo.web", {
 	version: 1,
-	input: Type.Object({}),
+	input: obj({}, { open: true }),
 	members: { noop: method() },
 });
 

@@ -1,7 +1,7 @@
-import { invalid, type DatasetCodec, type JsonValue } from "@moonan_ai/sdk";
-import { Value } from "typebox/value";
+import { copyJson } from "@earendil-works/chord";
+import { compile, invalid, type DatasetCodec, type JsonValue } from "@moonan_ai/sdk";
 import { GatewayConfigSchema, type GatewayConfig, type GatewaySettings } from "./schema.js";
-import { cloneJson, nowIso } from "./util.js";
+import { nowIso } from "./util.js";
 
 /** The only dataset ai-gateway owns in the platform data store. */
 export const AI_GATEWAY_DATASET = "ai-gateway/config";
@@ -35,11 +35,12 @@ export function emptyConfig(): GatewayConfig {
 	return { version: 1, providers: [], settings: defaultSettings(), createdAt: at, updatedAt: at };
 }
 
+const configValidator = compile(GatewayConfigSchema);
+
 export function assertConfig(value: unknown): asserts value is GatewayConfig {
-	if (Value.Check(GatewayConfigSchema, value)) return;
-	const first = [...Value.Errors(GatewayConfigSchema, value)][0];
-	const path = first?.instancePath || "(root)";
-	throw invalid("data", `配置校验失败：${path} ${first?.message ?? "shape mismatch"}`);
+	if (configValidator.check(value)) return;
+	const first = configValidator.errors(value)[0];
+	throw invalid("data", `配置校验失败：${first?.path || "/"} ${first?.message ?? "shape mismatch"}`);
 }
 
 export function migrateConfig(value: unknown, fromVersion: number): GatewayConfig {
@@ -49,7 +50,7 @@ export function migrateConfig(value: unknown, fromVersion: number): GatewayConfi
 	if (fromVersion > GATEWAY_CONFIG_VERSION) {
 		throw invalid("data", `ai-gateway config version ${fromVersion} is newer than this build`);
 	}
-	const clean = cloneJson(value);
+	const clean = copyJson(value);
 	assertConfig(clean);
 	return clean;
 }
@@ -60,7 +61,7 @@ export function migrateConfig(value: unknown, fromVersion: number): GatewayConfi
  * them (they also travel in the remote snapshot).
  */
 export function redactConfig(config: GatewayConfig): GatewayConfig {
-	const next = cloneJson(config);
+	const next = copyJson(config) as unknown as GatewayConfig;
 	for (const provider of next.providers) {
 		delete provider.apiKey;
 		delete provider.keyUpdatedAt;
@@ -96,7 +97,7 @@ export const gatewayCodec: DatasetCodec<GatewayConfig> = {
 	migrate: (value, fromVersion) => migrateConfig(value, fromVersion),
 	export: (value, options) => {
 		assertConfig(value);
-		const out = options.includeSecrets ? cloneJson(value) : redactConfig(value);
+		const out = options.includeSecrets ? copyJson(value) : redactConfig(value);
 		return out as unknown as JsonValue;
 	},
 	import: (value, fromVersion, current) => {

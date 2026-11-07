@@ -26,11 +26,6 @@ export function keyHint(key: string | undefined): string | undefined {
 	return `•••• ${trimmed.slice(-4)}`;
 }
 
-/** Deep clone through JSON so no undefined values or shared containers cross a boundary. */
-export function cloneJson<T>(value: T): T {
-	return JSON.parse(JSON.stringify(value)) as T;
-}
-
 export function normalizeBaseUrl(value: string): string {
 	return value.trim().replace(/\/+$/, "");
 }

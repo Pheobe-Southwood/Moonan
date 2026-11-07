@@ -1,5 +1,5 @@
 import { defineRegistry, local, method, type JsonValue } from "@earendil-works/chord";
-import { Type } from "typebox";
+import { arr, bool, literal, num, obj, opt, str, unknown } from "./schema.js";
 
 /**
  * One value in the platform's unified data store.
@@ -8,13 +8,10 @@ import { Type } from "typebox";
  * raises it when the stored shape or meaning changes and supplies a migration through its
  * {@link DatasetCodec}; the platform never interprets the value.
  */
-export const StoredDatasetSchema = Type.Object(
-	{
-		value: Type.Any(),
-		version: Type.Number(),
-	},
-	{ additionalProperties: false },
-);
+export const StoredDatasetSchema = obj({
+	value: unknown(),
+	version: num(),
+});
 
 export type StoredDataset = {
 	value: JsonValue;
@@ -70,20 +67,17 @@ export const DataCodecs = defineRegistry<DatasetCodec>("moonan.data-codecs", {
  * What the data store reports about its file. This is a state member, so a plugin can read
  * it synchronously once the store is live; the platform also exposes it over HTTP.
  */
-export const DataStoreStorageInfoSchema = Type.Object(
-	{
-		file: Type.String(),
-		backup: Type.String(),
-		exists: Type.Boolean(),
-		mode: Type.Optional(Type.String()),
-		writable: Type.Boolean(),
-		revision: Type.Number(),
-		datasets: Type.Number(),
-		lastSavedAt: Type.Optional(Type.String()),
-		notice: Type.Optional(Type.String()),
-	},
-	{ additionalProperties: false },
-);
+export const DataStoreStorageInfoSchema = obj({
+	file: str(),
+	backup: str(),
+	exists: bool(),
+	mode: opt(str()),
+	writable: bool(),
+	revision: num(),
+	datasets: num(),
+	lastSavedAt: opt(str()),
+	notice: opt(str()),
+});
 
 export type DataStoreStorageInfo = {
 	file: string;
@@ -101,26 +95,20 @@ export type DataStoreStorageInfo = {
  * The wire/JSON envelope for a complete export. The file itself has a different, richer
  * shape (it also keeps per-dataset timestamps); this is the portable subset.
  */
-export const DataBundleSchema = Type.Object(
-	{
-		format: Type.Literal("moonan.data"),
-		formatVersion: Type.Literal(1),
-		createdAt: Type.String(),
-		revision: Type.Number(),
-		datasets: Type.Array(
-			Type.Object(
-				{
-					namespace: Type.String(),
-					version: Type.Number(),
-					value: Type.Any(),
-				},
-				{ additionalProperties: false },
-			),
-		),
-		skipped: Type.Optional(Type.Array(Type.String())),
-	},
-	{ additionalProperties: false },
-);
+export const DataBundleSchema = obj({
+	format: literal("moonan.data"),
+	formatVersion: literal(1),
+	createdAt: str(),
+	revision: num(),
+	datasets: arr(
+		obj({
+			namespace: str(),
+			version: num(),
+			value: unknown(),
+		}),
+	),
+	skipped: opt(arr(str())),
+});
 
 export type DataBundle = {
 	format: "moonan.data";
@@ -131,14 +119,11 @@ export type DataBundle = {
 	skipped?: string[];
 };
 
-export const DataImportReportSchema = Type.Object(
-	{
-		imported: Type.Array(Type.String()),
-		revision: Type.Number(),
-		skipped: Type.Optional(Type.Array(Type.String())),
-	},
-	{ additionalProperties: false },
-);
+export const DataImportReportSchema = obj({
+	imported: arr(str()),
+	revision: num(),
+	skipped: opt(arr(str())),
+});
 
 export type DataImportReport = {
 	imported: string[];
@@ -157,28 +142,29 @@ export type DataImportReport = {
  * a plugin's `config` cell may initialize before its codec registration is published, so
  * the plugin validates/migrates its own first value. `write` replaces a whole dataset;
  * `update` is the read-modify-write form that runs inside the store's serial queue.
+ *
+ * `read`'s result and `update`'s callback stay `unknown()`: `read` may return `undefined`
+ * (not a JSON value) and a local contract's callback is a function, so neither can be
+ * described as JSON Schema without changing the method's meaning.
  */
 export const DataStore = local("moonan.data", {
 	version: 1,
-	input: Type.Object({}),
+	input: obj({}, { open: true }),
 	members: {
-		revision: Type.Number(),
+		revision: num(),
 		storage: DataStoreStorageInfoSchema,
-		read: method(Type.Object({ namespace: Type.String() }), Type.Any()),
+		read: method(obj({ namespace: str() }, { open: true }), unknown()),
 		write: method(
-			Type.Object({ namespace: Type.String(), version: Type.Number(), value: Type.Any() }),
+			obj({ namespace: str(), version: num(), value: unknown() }, { open: true }),
 			StoredDatasetSchema,
 		),
 		update: method(
-			Type.Object({ namespace: Type.String(), version: Type.Number(), update: Type.Any() }),
+			obj({ namespace: str(), version: num(), update: unknown() }, { open: true }),
 			StoredDatasetSchema,
 		),
-		remove: method(Type.Object({ namespace: Type.String() })),
+		remove: method(obj({ namespace: str() }, { open: true })),
 		reload: method(undefined, DataStoreStorageInfoSchema),
-		exportAll: method(
-			Type.Object({ includeSecrets: Type.Optional(Type.Boolean()) }),
-			DataBundleSchema,
-		),
-		importAll: method(Type.Object({ bundle: DataBundleSchema }), DataImportReportSchema),
+		exportAll: method(obj({ includeSecrets: opt(bool()) }, { open: true }), DataBundleSchema),
+		importAll: method(obj({ bundle: DataBundleSchema }, { open: true }), DataImportReportSchema),
 	},
 });
