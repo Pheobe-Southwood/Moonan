@@ -111,14 +111,75 @@ describe("model discovery", () => {
 	it("reports an authentication failure instead of pretending to have a list", async () => {
 		const provider = customProvider("wrong-key-12345678");
 		const config = configFor(provider);
-		await expect(discoverModels(() => config, provider, { timeoutMs: 2_000 })).rejects.toThrow(/认证失败（HTTP 401）/);
+		await expect(discoverModels(() => config, provider, { timeoutMs: 2_000 })).rejects.toMatchObject({
+			code: "invalid",
+			reason: "upstream-auth",
+		});
 	});
 
 	it("refuses a remote custom provider without a key", async () => {
 		const provider = customProvider();
 		provider.baseUrl = "https://example.invalid/v1";
 		const config = configFor(provider);
-		await expect(discoverModels(() => config, provider, { timeoutMs: 2_000 })).rejects.toThrow(/缺少 API Key/);
+		await expect(discoverModels(() => config, provider, { timeoutMs: 2_000 })).rejects.toMatchObject({
+			code: "invalid",
+			reason: "discovery",
+		});
+	});
+
+	it("reports an unreachable upstream as unavailable", async () => {
+		const provider = customProvider("sk-upstream-12345678");
+		const config = configFor(provider);
+		const failing = (async () => {
+			throw new Error("ECONNREFUSED");
+		}) as unknown as typeof fetch;
+		await expect(
+			discoverModels(() => config, provider, { timeoutMs: 2_000, fetch: failing }),
+		).rejects.toMatchObject({ code: "unavailable", reason: "upstream", retryable: false });
+	});
+
+	it("reports a custom provider's 5xx as an outage, not a user error", async () => {
+		const provider = customProvider("sk-upstream-12345678");
+		const config = configFor(provider);
+		const failing = (async () =>
+			new Response("upstream down", { status: 503, headers: { "content-type": "text/plain" } })) as unknown as typeof fetch;
+		await expect(
+			discoverModels(() => config, provider, { timeoutMs: 2_000, fetch: failing }),
+		).rejects.toMatchObject({ code: "unavailable", reason: "upstream" });
+	});
+
+	it("does not wrap a cancelled root into an upstream error", async () => {
+		const provider = customProvider("sk-upstream-12345678");
+		const config = configFor(provider);
+		const controller = new AbortController();
+		controller.abort();
+		const failing = (async () => {
+			throw new DOMException("aborted", "AbortError");
+		}) as unknown as typeof fetch;
+		await expect(
+			discoverModels(() => config, provider, { timeoutMs: 2_000, fetch: failing, signal: controller.signal }),
+		).rejects.toMatchObject({ name: "AbortError" });
+	});
+
+	it("keeps the abort identity when the root is cancelled during the Ollama fallback", async () => {
+		// A keyless local endpoint takes the /api/tags fallback, which must not swallow a
+		// cancellation that happened while it ran.
+		const provider = customProvider();
+		provider.baseUrl = "http://127.0.0.1:1234/v1";
+		const config = configFor(provider);
+		const controller = new AbortController();
+		let calls = 0;
+		const failing = (async () => {
+			calls += 1;
+			if (calls === 1) throw new Error("ECONNREFUSED");
+			// The root is cancelled while the /api/tags fallback is in flight.
+			controller.abort();
+			throw new DOMException("aborted", "AbortError");
+		}) as unknown as typeof fetch;
+		await expect(
+			discoverModels(() => config, provider, { timeoutMs: 2_000, fetch: failing, signal: controller.signal }),
+		).rejects.toMatchObject({ name: "AbortError" });
+		expect(calls).toBe(2);
 	});
 
 	it("falls back to pi-ai's catalogue for a built-in provider without credentials", async () => {

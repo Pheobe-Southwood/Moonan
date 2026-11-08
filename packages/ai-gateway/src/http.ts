@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { RouteHandler } from "@moonan_ai/sdk";
+import { invalid, isChordError, type RouteHandler } from "@moonan_ai/sdk";
 import type { GatewayService } from "./service.js";
 import { errorMessage } from "./util.js";
 
@@ -48,7 +48,12 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
 }
 
 function routeError(response: ServerResponse, status: number, error: unknown): void {
-	sendJson(response, status, { error: errorMessage(error) });
+	sendJson(response, status, {
+		error: errorMessage(error),
+		// Keep the Chord code and reason on the wire: the panel distinguishes a user-fixable
+		// configuration error from an upstream outage, and so does any other HTTP client.
+		...(isChordError(error) ? { code: error.code, ...(error.reason ? { reason: error.reason } : {}) } : {}),
+	});
 }
 
 /**
@@ -104,7 +109,14 @@ export function gatewayRoutes(getService: () => GatewayService): Record<string, 
 				return;
 			}
 			try {
-				const body = (await readJson(request)) as { providerId?: unknown } | undefined;
+				let body: { providerId?: unknown } | undefined;
+				try {
+					body = (await readJson(request)) as { providerId?: unknown } | undefined;
+				} catch (error) {
+					// A malformed or oversized body is the caller's mistake, not a gateway failure.
+					routeError(response, 400, invalid("args", errorMessage(error)));
+					return;
+				}
 				const providerId = typeof body?.providerId === "string" ? body.providerId.trim() : "";
 				if (!providerId) {
 					sendJson(response, 400, { error: "providerId is required" });
@@ -113,7 +125,8 @@ export function gatewayRoutes(getService: () => GatewayService): Record<string, 
 				const result = await getService().discover(providerId, ctx);
 				sendJson(response, 200, result);
 			} catch (error) {
-				routeError(response, 502, error);
+				// A user-fixable configuration error is a 400; a failed upstream is a gateway error.
+				routeError(response, isChordError(error) && error.code === "invalid" ? 400 : 502, error);
 			}
 		},
 		"POST /api/ai-gateway/reload": async (request, response, ctx) => {

@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs";
 import { copyJson } from "@earendil-works/chord";
+import { ChordError, invalid } from "@moonan_ai/sdk";
 import type { DiscoveryResult, DiscoveredModel, GatewayConfig, ProviderConfig } from "./schema.js";
 import { presetById } from "./catalog.js";
 import { resolveAuth } from "./runtime.js";
@@ -11,7 +13,15 @@ import {
 	sanitizeEndpoint,
 } from "./util.js";
 
-export const GATEWAY_VERSION = "0.0.5-alpha3";
+/**
+ * The package's own version. Read from `package.json` instead of a hand-copied constant:
+ * the value is published in the snapshot, the health endpoint and the discovery
+ * User-Agent, and a stale copy is the kind of drift no test would notice.
+ */
+const PACKAGE = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+	version: string;
+};
+export const GATEWAY_VERSION = PACKAGE.version;
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const MAX_ERROR_BODY = 400;
 
@@ -78,19 +88,20 @@ export async function discoverModels(
 
 	const baseUrl = normalizeBaseUrl(auth?.baseUrl ?? provider.baseUrl);
 	if (!baseUrl) {
-		throw new Error("Base URL 为空：先在「连接」里填写上游地址。");
+		throw invalid("discovery", "Base URL 为空：先在「连接」里填写上游地址。");
 	}
 	const api = provider.api;
 	const key = auth?.apiKey ?? provider.apiKey;
 	const keylessLocal = isLocalEndpoint(baseUrl);
 
 	if (!auth && !key && !keylessLocal && provider.source === "custom") {
-		throw new Error("缺少 API Key：先在「连接」里保存密钥，或把 Base URL 填成本机地址。");
+		throw invalid("discovery", "缺少 API Key：先在「连接」里保存密钥，或把 Base URL 填成本机地址。");
 	}
 
 	if (needsCatalogOnly(api) || (!auth && !key && preset && !keylessLocal)) {
 		if (!preset) {
-			throw new Error(
+			throw invalid(
+				"discovery",
 				auth || key
 					? "这个 API 不支持通用模型列表。"
 					: "没有可用凭据，而且这个提供商没有内置目录。",
@@ -135,10 +146,15 @@ export async function discoverModels(
 		});
 		bodyText = await readCapped(response);
 	} catch (error) {
+		// A cancelled root keeps its abort identity: do not wrap it into an upstream error.
+		if (options.signal?.aborted) throw error;
 		// A local OpenAI-compatible endpoint is often Ollama. Its native list lives at
 		// /api/tags and works even when /v1/models does not exist.
 		if (keylessLocal && api.startsWith("openai")) {
 			const tags = await tryOllamaTags(baseUrl, options, timeoutMs, options.signal);
+			// The root may have been cancelled while the fallback ran; keep the abort identity
+			// instead of reporting an upstream outage.
+			if (options.signal?.aborted) throw abortError(options.signal);
 			if (tags) {
 				warnings.push("已回退到 Ollama /api/tags。");
 				return {
@@ -155,7 +171,10 @@ export async function discoverModels(
 			warnings.push(`上游请求失败（${shortError(error)}），已返回 pi-ai 内置目录。`);
 			return catalogResult(provider, preset, warnings, now());
 		}
-		throw new Error(`请求上游模型列表失败：${shortError(error)}`);
+		throw new ChordError("unavailable", `请求上游模型列表失败：${shortError(error)}`, {
+			reason: "upstream",
+			cause: error,
+		});
 	}
 
 	const responseInfo = { status: response.status, ok: response.ok, headers: response.headers };
@@ -167,18 +186,28 @@ export async function discoverModels(
 			return catalogResult(provider, preset, warnings, now());
 		}
 		if (responseInfo.status === 401 || responseInfo.status === 403) {
-			throw new Error(
+			throw invalid(
+				"upstream-auth",
 				`认证失败（HTTP ${responseInfo.status}）：检查 API Key 或自定义请求头。${detail ? `\n${detail}` : ""}`,
 			);
 		}
 		if (responseInfo.status === 429) {
-			throw new Error(`上游限流（HTTP 429），稍后重试。${detail ? `\n${detail}` : ""}`);
+			throw new ChordError("unavailable", `上游限流（HTTP 429），稍后重试。${detail ? `\n${detail}` : ""}`, {
+				reason: "upstream-rate-limit",
+			});
 		}
 		if (preset && responseInfo.status >= 500) {
 			warnings.push(`上游暂时不可用（HTTP ${responseInfo.status}），已返回 pi-ai 内置目录。`);
 			return catalogResult(provider, preset, warnings, now());
 		}
-		throw new Error(`上游返回 HTTP ${responseInfo.status}。${detail ? `\n${detail}` : ""}`);
+		if (responseInfo.status >= 500) {
+			// A custom endpoint failing with 5xx is an outage, not a configuration mistake:
+			// the caller should retry, and the HTTP surface answers 502 rather than 400.
+			throw new ChordError("unavailable", `上游暂时不可用（HTTP ${responseInfo.status}）。${detail ? `\n${detail}` : ""}`, {
+				reason: "upstream",
+			});
+		}
+		throw invalid("upstream", `上游返回 HTTP ${responseInfo.status}。${detail ? `\n${detail}` : ""}`);
 	}
 
 	let parsed: unknown;
@@ -189,17 +218,23 @@ export async function discoverModels(
 			warnings.push(`上游返回的不是 JSON（${shortError(error)}），已返回 pi-ai 内置目录。`);
 			return catalogResult(provider, preset, warnings, now());
 		}
-		throw new Error("上游返回的不是 JSON；检查 Base URL 是否指向 API 根路径。");
+		throw invalid("upstream", "上游返回的不是 JSON；检查 Base URL 是否指向 API 根路径。");
 	}
 
-	const { models, skipped } = normalizeModels(api, parsed);
+	let normalized: { models: RawModel[]; skipped: number };
+	try {
+		normalized = normalizeModels(api, parsed);
+	} catch (error) {
+		throw invalid("upstream", errorMessage(error));
+	}
+	const { models, skipped } = normalized;
 	if (skipped > 0) warnings.push(`已跳过 ${skipped} 个非对话条目。`);
 	if (models.length === 0) {
 		if (preset) {
 			warnings.push("上游没有返回可用的对话模型，已返回 pi-ai 内置目录。");
 			return catalogResult(provider, preset, warnings, now());
 		}
-		throw new Error("上游没有返回可用的对话模型。");
+		throw invalid("upstream", "上游没有返回可用的对话模型。");
 	}
 
 	return {
@@ -253,6 +288,11 @@ function shortError(error: unknown): string {
 		return error.message;
 	}
 	return String(error);
+}
+
+/** The cancellation a caller should observe when its root was aborted meanwhile. */
+function abortError(signal: AbortSignal): unknown {
+	return signal.reason ?? new DOMException("aborted", "AbortError");
 }
 
 function isEnumerableFailure(error: unknown): boolean {
@@ -477,7 +517,9 @@ async function tryOllamaTags(
 			});
 		}
 		return models.length > 0 ? { endpoint, models } : undefined;
-	} catch {
+	} catch (error) {
+		// The fallback is best-effort, but a cancelled root is not an upstream failure.
+		if (parentSignal?.aborted) throw error;
 		return undefined;
 	}
 }
