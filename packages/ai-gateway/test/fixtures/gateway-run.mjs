@@ -10,6 +10,9 @@ import { start } from "../../../platform/dist/index.js";
 import { silentLogger } from "../../../platform/dist/logger.js";
 import { AiGateway } from "../../dist/contract.js";
 import { defaultSettings } from "../../dist/config.js";
+import { REDACTED } from "../../dist/secrets.js";
+
+const packageJson = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
 
 const home = await mkdtemp(join(tmpdir(), "moonan-gateway-home-"));
 const pluginsDir = await mkdtemp(join(tmpdir(), "moonan-gateway-plugins-"));
@@ -98,6 +101,9 @@ try {
 		api: "openai-completions",
 		baseUrl: upstreamUrl,
 		apiKey: "sk-upstream-12345678",
+		// Credential-like values stay server-side; `x-project-id` is ordinary configuration.
+		headers: { "x-secret-token": "tok-header-secret", "x-project-id": "proj-1" },
+		env: { OPENAI_API_KEY: "sk-env-secret", AWS_REGION: "us-east-1" },
 	});
 	await waitFor(
 		() => ref.snapshot.value,
@@ -118,6 +124,7 @@ try {
 			maxTokens: 8_192,
 			reasoning: false,
 			samplingParams: { top_p: 0.9 },
+			headers: { authorization: "Bearer sk-model-secret" },
 		},
 	});
 	await waitFor(
@@ -149,7 +156,21 @@ try {
 	assert.equal(snapshot.providers[0]?.keyHint, "•••• 5678");
 	assert.ok(!JSON.stringify(snapshot).includes("sk-upstream-12345678"));
 
+	// Credential-like headers, env values and model headers are masked in the browser view;
+	// ordinary configuration travels unchanged.
+	const atlasView = snapshot.providers[0];
+	assert.equal(atlasView.headers["x-secret-token"], REDACTED);
+	assert.equal(atlasView.headers["x-project-id"], "proj-1");
+	assert.equal(atlasView.env.OPENAI_API_KEY, REDACTED);
+	assert.equal(atlasView.env.AWS_REGION, "us-east-1");
+	const handWrittenView = atlasView.models.find((model) => model.id === "hand-written");
+	assert.equal(handWrittenView.headers.authorization, REDACTED);
+	for (const secret of ["tok-header-secret", "sk-env-secret", "sk-model-secret"]) {
+		assert.ok(!JSON.stringify(snapshot).includes(secret), `snapshot leaked ${secret}`);
+	}
+
 	const status = await (await fetch(`${app.url}/api/ai-gateway/status`)).json();
+	assert.equal(status.version, packageJson.version);
 	assert.equal(status.providers, 1);
 	assert.equal(status.models, 4);
 	assert.equal(status.storage.exists, true);
@@ -161,12 +182,22 @@ try {
 	const configText = await (await fetch(`${app.url}/api/ai-gateway/config`)).text();
 	assert.ok(!configText.includes("sk-upstream-12345678"));
 	assert.ok(configText.includes("•••• 5678"));
+	for (const secret of ["tok-header-secret", "sk-env-secret", "sk-model-secret"]) {
+		assert.ok(!configText.includes(secret), `config leaked ${secret}`);
+	}
+	assert.ok(configText.includes(REDACTED));
 
 	const exported = await (await fetch(`${app.url}/api/data/export`)).json();
 	assert.ok(exported.datasets.some((dataset) => dataset.namespace === "ai-gateway/config"));
 	assert.ok(!JSON.stringify(exported).includes("sk-upstream-12345678"));
+	for (const secret of ["tok-header-secret", "sk-env-secret", "sk-model-secret"]) {
+		assert.ok(!JSON.stringify(exported).includes(secret), `export leaked ${secret}`);
+	}
 	const withSecrets = await (await fetch(`${app.url}/api/data/export?includeSecrets=1`)).json();
 	assert.ok(JSON.stringify(withSecrets).includes("sk-upstream-12345678"));
+	for (const secret of ["tok-header-secret", "sk-env-secret", "sk-model-secret"]) {
+		assert.ok(JSON.stringify(withSecrets).includes(secret), `includeSecrets omitted ${secret}`);
+	}
 	const importResponse = await fetch(`${app.url}/api/data/import`, {
 		method: "POST",
 		body: JSON.stringify(exported),
@@ -178,8 +209,71 @@ try {
 		"redacted import preserved the key",
 	);
 
+	// The panel saves the masked view back. The server restores stored values instead of
+	// persisting the sentinel; a typed value would win, which saveModel/saveProvider share.
+	const savedProvider = await ref.saveProvider({ id: "atlas", patch: { headers: atlasView.headers, env: atlasView.env } });
+	const savedModel = await ref.saveModel({ providerId: "atlas", model: handWrittenView });
+	// Results cross the wire too: a write that restored a secret must answer with the mask.
+	assert.equal(savedProvider.headers["x-secret-token"], REDACTED);
+	assert.equal(savedProvider.env.OPENAI_API_KEY, REDACTED);
+	assert.equal(savedModel.headers.authorization, REDACTED);
+	for (const secret of ["tok-header-secret", "sk-env-secret", "sk-model-secret"]) {
+		assert.ok(!JSON.stringify(savedProvider).includes(secret), `saveProvider returned ${secret}`);
+		assert.ok(!JSON.stringify(savedModel).includes(secret), `saveModel returned ${secret}`);
+	}
+
 	const consumer = await (await fetch(`${app.url}/api/model-provider`)).json();
 	assert.ok(consumer.models.includes("hand-written"));
+
+	// The HTTP surface maps a Chord error to a status and carries its code: a bad provider
+	// id is the caller's mistake (400), not a gateway failure.
+	const badDiscover = await fetch(`${app.url}/api/ai-gateway/discover`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ providerId: "no-such-provider" }),
+	});
+	assert.equal(badDiscover.status, 400);
+	const badDiscoverBody = await badDiscover.json();
+	assert.equal(badDiscoverBody.code, "invalid");
+	assert.match(badDiscoverBody.error, /不存在/);
+
+	// A malformed body is the caller's mistake too (400), not a gateway failure (502).
+	const malformed = await fetch(`${app.url}/api/ai-gateway/discover`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: "{",
+	});
+	assert.equal(malformed.status, 400);
+	assert.equal((await malformed.json()).code, "invalid");
+
+	await ref.addProvider({ id: "bad-auth", name: "Bad Auth", api: "openai-completions", baseUrl: upstreamUrl, apiKey: "wrong-key" });
+	const badAuth = await fetch(`${app.url}/api/ai-gateway/discover`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ providerId: "bad-auth" }),
+	});
+	assert.equal(badAuth.status, 400);
+	assert.equal((await badAuth.json()).reason, "upstream-auth");
+
+	await ref.addProvider({
+		id: "unreachable",
+		name: "Unreachable",
+		api: "openai-completions",
+		baseUrl: "http://127.0.0.1:1/v1",
+		apiKey: "sk-unreachable",
+	});
+	const unreachable = await fetch(`${app.url}/api/ai-gateway/discover`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ providerId: "unreachable" }),
+	});
+	assert.equal(unreachable.status, 502);
+	const unreachableBody = await unreachable.json();
+	assert.equal(unreachableBody.code, "unavailable");
+	assert.equal(unreachableBody.reason, "upstream");
+	await ref.deleteProvider({ id: "bad-auth" });
+	await ref.deleteProvider({ id: "unreachable" });
+
 	assert.equal(consumer.model, "hand-written");
 
 	// Another plugin writes a dataset of its own. Only the store's `storage` cell changes,
@@ -197,6 +291,19 @@ try {
 	const raw = await readFile(dataFile, "utf8");
 	const stored = JSON.parse(raw);
 	assert.ok(raw.includes("sk-upstream-12345678"));
+	// The data file is the server-side authority: the masked round-trips restored the real
+	// values instead of persisting the sentinel.
+	for (const secret of ["tok-header-secret", "sk-env-secret", "sk-model-secret"]) {
+		assert.ok(raw.includes(secret), `data file lost ${secret}`);
+	}
+	assert.ok(!raw.includes(REDACTED));
+	// The stored values are the real ones, not just present somewhere in the file.
+	const rawProvider = stored.datasets["ai-gateway/config"].value.providers.find((provider) => provider.id === "atlas");
+	assert.equal(rawProvider.headers["x-secret-token"], "tok-header-secret");
+	assert.equal(rawProvider.headers["x-project-id"], "proj-1");
+	assert.equal(rawProvider.env.OPENAI_API_KEY, "sk-env-secret");
+	const rawModel = rawProvider.models.find((model) => model.id === "hand-written");
+	assert.equal(rawModel.headers.authorization, "Bearer sk-model-secret");
 	assert.equal(stored.datasets["ai-gateway/config"].version, 1);
 	assert.equal((await stat(dataFile)).mode & 0o777, 0o600);
 

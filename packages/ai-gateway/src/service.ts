@@ -33,6 +33,7 @@ import {
 import { discoverModels } from "./discovery.js";
 import type { AiGatewayRuntime, ModelInfo } from "./model-provider.js";
 import type { SerialQueue } from "./queue.js";
+import { maskSensitiveMap, restoreSensitiveMap } from "./secrets.js";
 import { buildGatewayModels } from "./runtime.js";
 import {
 	displayNameFromId,
@@ -90,6 +91,14 @@ function defaultDiscoveredModel(discovered: DiscoveredModel, provider: ProviderC
 	return validateModel(model);
 }
 
+/** The browser's copy of a model: credential-like headers are masked, everything else is kept. */
+function modelView(model: ModelConfig): ModelConfig {
+	const view = copyJson(model) as ModelConfig;
+	const headers = maskSensitiveMap(view.headers);
+	if (headers !== undefined) view.headers = headers;
+	return view;
+}
+
 function providerView(provider: ProviderConfig): ProviderView {
 	const preset = provider.presetId ? presetById(provider.presetId) : undefined;
 	return {
@@ -100,13 +109,13 @@ function providerView(provider: ProviderConfig): ProviderView {
 		enabled: provider.enabled,
 		api: provider.api,
 		baseUrl: provider.baseUrl,
-		...(provider.headers ? { headers: copyJson(provider.headers) as ProviderConfig["headers"] } : {}),
-		...(provider.env ? { env: copyJson(provider.env) as ProviderConfig["env"] } : {}),
+		...(provider.headers ? { headers: maskSensitiveMap(copyJson(provider.headers) as ProviderConfig["headers"]) } : {}),
+		...(provider.env ? { env: maskSensitiveMap(copyJson(provider.env) as ProviderConfig["env"]) } : {}),
 		hasKey: Boolean(provider.apiKey),
 		...(keyHint(provider.apiKey) ? { keyHint: keyHint(provider.apiKey) } : {}),
 		...(provider.keyUpdatedAt ? { keyUpdatedAt: provider.keyUpdatedAt } : {}),
 		authKind: preset?.summary.authKind ?? "api-key",
-		models: provider.models.map((model) => copyJson(model) as ModelConfig),
+		models: provider.models.map(modelView),
 		...(provider.createdAt ? { createdAt: provider.createdAt } : {}),
 		...(provider.updatedAt ? { updatedAt: provider.updatedAt } : {}),
 	};
@@ -256,6 +265,9 @@ export class GatewayService {
 				throw invalid("args", `提供商 "${id}" 已经存在。`);
 			}
 			const apiKey = emptyToUndefined(input.apiKey);
+			// A new provider has no stored value to restore, so a redacted sentinel is dropped.
+			const headers = restoreSensitiveMap(input.headers, undefined);
+			const env = restoreSensitiveMap(input.env, undefined);
 			const provider: ProviderConfig = {
 				id,
 				name: emptyToUndefined(input.name) ?? id,
@@ -264,11 +276,11 @@ export class GatewayService {
 				api: emptyToUndefined(input.api) ?? "openai-completions",
 				baseUrl: normalizeBaseUrl(input.baseUrl),
 				...(apiKey ? { apiKey, keyUpdatedAt: at } : {}),
-				...(input.headers && Object.keys(input.headers).length > 0
-					? { headers: copyJson(input.headers) as ProviderConfig["headers"] }
+				...(headers && Object.keys(headers).length > 0
+					? { headers: copyJson(headers) as ProviderConfig["headers"] }
 					: {}),
-				...(input.env && Object.keys(input.env).length > 0
-					? { env: copyJson(input.env) as ProviderConfig["env"] }
+				...(env && Object.keys(env).length > 0
+					? { env: copyJson(env) as ProviderConfig["env"] }
 					: {}),
 				models: [],
 				createdAt: at,
@@ -307,12 +319,15 @@ export class GatewayService {
 			if (patch.baseUrl !== undefined) provider.baseUrl = normalizeBaseUrl(patch.baseUrl);
 			if (patch.enabled !== undefined) provider.enabled = patch.enabled;
 			if (patch.headers !== undefined) {
-				if (Object.keys(patch.headers).length === 0) delete provider.headers;
-				else provider.headers = copyJson(patch.headers) as ProviderConfig["headers"];
+				// A value the panel shows as REDACTED means "keep what is stored"; a typed value wins.
+				const headers = restoreSensitiveMap(patch.headers, provider.headers);
+				if (headers === undefined || Object.keys(headers).length === 0) delete provider.headers;
+				else provider.headers = copyJson(headers) as ProviderConfig["headers"];
 			}
 			if (patch.env !== undefined) {
-				if (Object.keys(patch.env).length === 0) delete provider.env;
-				else provider.env = copyJson(patch.env) as ProviderConfig["env"];
+				const env = restoreSensitiveMap(patch.env, provider.env);
+				if (env === undefined || Object.keys(env).length === 0) delete provider.env;
+				else provider.env = copyJson(env) as ProviderConfig["env"];
 			}
 			if (patch.apiKey !== undefined) {
 				const key = patch.apiKey.trim();
@@ -373,14 +388,23 @@ export class GatewayService {
 			);
 			if (collision !== -1) throw invalid("args", `模型 "${model.id}" 已经存在。`);
 			if (existingIndex === -1) {
+				// A new model has nothing stored to restore; a redacted sentinel is dropped.
+				const headers = restoreSensitiveMap(model.headers, undefined);
+				if (headers !== undefined && Object.keys(headers).length > 0) model.headers = headers;
+				else delete model.headers;
 				provider.models.push(model);
 			} else {
 				const previous = provider.models[existingIndex]!;
 				model.createdAt = previous.createdAt ?? at;
+				const headers = restoreSensitiveMap(model.headers, previous.headers);
+				if (headers !== undefined && Object.keys(headers).length > 0) model.headers = headers;
+				else delete model.headers;
 				provider.models[existingIndex] = model;
 			}
 			provider.updatedAt = at;
-			return copyJson(model) as ModelConfig;
+			// The result crosses the wire: it must carry the masked view, never the stored
+			// secret this write just restored for persistence.
+			return modelView(model);
 		});
 	}
 

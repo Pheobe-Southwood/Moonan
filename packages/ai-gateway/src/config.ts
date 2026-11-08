@@ -1,6 +1,7 @@
 import { copyJson } from "@earendil-works/chord";
 import { compile, invalid, type DatasetCodec, type JsonValue } from "@moonan_ai/sdk";
 import { GatewayConfigSchema, type GatewayConfig, type GatewaySettings } from "./schema.js";
+import { maskSensitiveMap, restoreSensitiveMap } from "./secrets.js";
 import { nowIso } from "./util.js";
 
 /** The only dataset ai-gateway owns in the platform data store. */
@@ -56,31 +57,55 @@ export function migrateConfig(value: unknown, fromVersion: number): GatewayConfi
 }
 
 /**
- * Key-free copy for export/import. It drops `apiKey`/`keyUpdatedAt` only: `headers` and
- * `env` are ordinary provider configuration here, not credentials, so keep secrets out of
- * them (they also travel in the remote snapshot).
+ * Key-free copy for export/import. It drops `apiKey`/`keyUpdatedAt` and masks
+ * credential-like provider/model `headers` and `env` values (an `Authorization` header,
+ * `AWS_SECRET_ACCESS_KEY`, …) with {@link REDACTED}; the import restores them from the
+ * current config, exactly like the key. The exported file stays a valid config because
+ * only values change, never the schema.
  */
 export function redactConfig(config: GatewayConfig): GatewayConfig {
 	const next = copyJson(config) as unknown as GatewayConfig;
 	for (const provider of next.providers) {
 		delete provider.apiKey;
 		delete provider.keyUpdatedAt;
+		const headers = maskSensitiveMap(provider.headers);
+		if (headers !== undefined) provider.headers = headers;
+		const env = maskSensitiveMap(provider.env);
+		if (env !== undefined) provider.env = env;
+		for (const model of provider.models) {
+			const modelHeaders = maskSensitiveMap(model.headers);
+			if (modelHeaders !== undefined) model.headers = modelHeaders;
+		}
 	}
 	return next;
 }
 
 /**
- * Restore keys that a redacted export deliberately omitted. Providers are matched by id;
- * an imported provider that carries its own key wins.
+ * Restore secrets that a redacted export deliberately masked. Providers are matched by id
+ * and models by id; an imported provider or model that carries its own value wins. A masked
+ * value with nothing stored to restore is dropped rather than stored as the sentinel.
  */
 export function mergeSecretKeys(next: GatewayConfig, current: GatewayConfig | undefined): GatewayConfig {
-	if (!current) return next;
 	for (const provider of next.providers) {
-		if (provider.apiKey !== undefined) continue;
-		const existing = current.providers.find((candidate) => candidate.id === provider.id);
-		if (!existing?.apiKey) continue;
-		provider.apiKey = existing.apiKey;
-		if (existing.keyUpdatedAt !== undefined) provider.keyUpdatedAt = existing.keyUpdatedAt;
+		const existing = current?.providers.find((candidate) => candidate.id === provider.id);
+		if (provider.apiKey === undefined && existing?.apiKey !== undefined) {
+			provider.apiKey = existing.apiKey;
+			if (existing.keyUpdatedAt !== undefined) provider.keyUpdatedAt = existing.keyUpdatedAt;
+		}
+		// Also runs without a current config: then every sentinel is dropped instead of stored.
+		// An emptied map is removed rather than kept as `{}`, matching how a cleared map is stored.
+		const headers = restoreSensitiveMap(provider.headers, existing?.headers);
+		if (headers === undefined || Object.keys(headers).length === 0) delete provider.headers;
+		else provider.headers = headers;
+		const env = restoreSensitiveMap(provider.env, existing?.env);
+		if (env === undefined || Object.keys(env).length === 0) delete provider.env;
+		else provider.env = env;
+		for (const model of provider.models) {
+			const currentModel = existing?.models.find((candidate) => candidate.id === model.id);
+			const modelHeaders = restoreSensitiveMap(model.headers, currentModel?.headers);
+			if (modelHeaders === undefined || Object.keys(modelHeaders).length === 0) delete model.headers;
+			else model.headers = modelHeaders;
+		}
 	}
 	return next;
 }

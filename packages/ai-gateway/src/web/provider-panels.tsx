@@ -234,8 +234,11 @@ export function ProviderConnection({
 				</Field>
 			</Section>
 
-			<Section title="请求头与环境变量" note="可留空。">
-				<Field label="请求头" help="Provider 级请求头。同名请求头会覆盖适配器的默认值。">
+			<Section title="请求头与环境变量" note="可留空。敏感值只在服务端保存，这里显示为 moonan:redacted。">
+				<Field
+					label="请求头"
+					help="Provider 级请求头。同名请求头会覆盖适配器的默认值；Authorization / api-key / token 等敏感值显示为占位符，不改动会保留原值。"
+				>
 					<KeyValueEditor
 						value={headers}
 						onChange={setHeaders}
@@ -244,7 +247,10 @@ export function ProviderConnection({
 						addLabel="添加请求头"
 					/>
 				</Field>
-				<Field label="环境变量" help="Provider 级环境变量。适合区域、项目 ID 等非密钥配置；AWS / Vertex 也读这里。">
+				<Field
+					label="环境变量"
+					help="Provider 级环境变量。适合区域、项目 ID 等配置；AWS / Vertex 也读这里。敏感值同样显示为占位符。"
+				>
 					<KeyValueEditor
 						value={env}
 						onChange={setEnv}

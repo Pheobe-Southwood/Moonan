@@ -37,8 +37,8 @@ pnpm start        # 同上去掉 chord 的写入校验
 - 每次保存前把上一版复制到 `data.json.bak`；
 - 主文件损坏时先尝试 `.bak`；两者都不可用时保留 `data.json.corrupt-<timestamp>.json`；
 - API Key 以明文保存在统一数据文件里（面板不假装它是密钥链），快照和 HTTP 响应只含 `hasKey` 与末四位提示；
-- `headers` 与 `env` 不是密钥字段：它们会随远程快照与默认导出一起带出，只放区域、项目 ID 之类的非密钥内容；
-- `/api/data/export` 默认脱敏，`?includeSecrets=1` 才导出明文；导入脱敏包时按 provider id 保留已有密钥。
+- `headers`/`env`、以及模型级 `headers` 中名称像凭据的项（`Authorization`、`api-key`、`token`、`secret` 等）与 API Key 同等级：快照、HTTP 响应和默认导出里显示为 `moonan:redacted`，服务端数据文件里仍是明文；面板保存时未改动这些值会保留原值；
+- `/api/data/export` 默认脱敏，`?includeSecrets=1` 才导出明文；导入脱敏包时按 provider id / model id 保留已有密钥与敏感值。跨机器导入脱敏包时，这些敏感值没有可回填的当前值，会被丢弃（与 API Key 相同语义）。
 
 路径可用 `--data-file` 或环境变量覆盖：
 
