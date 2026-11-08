@@ -453,6 +453,14 @@ export function createDataFacet(options: DataFacetOptions): Facet {
 						},
 						update: async (args, ctx) => {
 							// A local contract cannot describe a callback, so the schema types it `unknown`.
+							// It therefore has to be checked here: the callback only exists in this process,
+							// which is exactly why `DataStore` must stay a `local` contract.
+							if (typeof args.update !== "function") {
+								throw invalid(
+									"args",
+									"DataStore.update takes a same-process callback; the data store is local-only.",
+								);
+							}
 							const update = args.update as (
 								current: StoredDataset | undefined,
 							) => StoredDataset | Promise<StoredDataset>;

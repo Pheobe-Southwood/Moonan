@@ -188,10 +188,10 @@ export default defineFacet((api) => {
 ```
 
 - `read` 返回 `{ value, version } | undefined`，不查 codec；插件自己校验/迁移第一个值。
-- `update` 是推荐的读改写入口：它和 `importAll` 在同一个串行队列里，不会丢更新。
+- `update` 是推荐的读改写入口：它和 `importAll` 在同一个串行队列里，不会丢更新。它的 `update` 回调只在同一进程内有效——`DataStore` 是 `local` 契约，回调没有线上表示；平台会在运行时拒绝非函数，也不要把 `DataStore` 改成 `remote` 类型。
 - `write` 只做整值替换。
 - `exportAll` 只导出有 codec 的 namespace；`importAll` 要求每个 dataset 都有 codec，任一失败不写文件。
-- `includeSecrets` 默认 `false`；codec 的 `export` 负责脱敏，`import` 负责从 `current` 合并回被省略的密钥。
+- `includeSecrets` 默认 `false`；codec 的 `export` 负责脱敏，`import` 负责从 `current` 合并回被省略/脱敏的密钥与敏感值。
 - 数据文件损坏时先试 `.bak`；再不行保留 `.corrupt-*` 并从空数据开始。
 
 不想参与统一导出/导入的缓存或二进制资产，仍可由插件自己开文件；它们不在 `/api/data/export` 里。
@@ -230,7 +230,7 @@ export default defineFacet((api) => {
 
 - 注册表值来自 host-lifetime 对象的 `self.register(ModelProviders, ...)`；表随代码版本替换。
 - `list()` 是 key-free 的模型目录；`runtime()` 是 server-only 的 `MutableModels`，含凭据，绝不能给浏览器。
-- 同一个 code version 内，`runtime()` 返回同一个 `MutableModels` 实例；不要对它 `setProvider` / `deleteProvider`，那会改到别的消费者手里的实例。
+- 在同一个配置 revision 内，`runtime()` 返回同一个 `MutableModels` 实例；配置变化（新增/删除 provider 或模型、改凭据）会重建它。不要对它 `setProvider` / `deleteProvider`，那会改到别的消费者手里的实例；持有旧 handle 的一方看到的是旧模型集合，按 `runtime().revision` 判断是否需要重新获取。
 - `runtime().models.stream/complete` 是进程内调用，不是 Chord 调用：长请求放进 `self.task` 或短根，并把 `ctx.signal` 传进 pi-ai 的 options，取消才会跟着根走。
 - 消费者不需要 `uses`（注册表不是契约）；如果还直接消费 `DataStore` 等契约，再写 `uses`。
 - ai-gateway 未安装时 `get` 返回 `undefined`，消费者自行降级。

@@ -1,10 +1,12 @@
 import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { hostNamed, method, remote } from "@earendil-works/chord";
+import { pathToFileURL } from "node:url";
+import { createHost, hostNamed, local, method, remote } from "@earendil-works/chord";
+import { nodeLoader } from "@earendil-works/chord/node";
 import { WebFacetCatalog, obj, num, str } from "@moonan_ai/sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { appFor, cleanup, closeClient, connectClient, pluginDir, post, wsUrl } from "./support.js";
+import { appFor, cleanup, closeClient, connectClient, pluginDir, post, tempDir, wsUrl } from "./support.js";
 
 const C1_SERVER = `
 import { ChordError, Routes, defineFacet, local, obj, num, str } from "@moonan_ai/sdk";
@@ -275,6 +277,55 @@ describe("official alignment: B1 failed reload", () => {
 			catalog.release();
 		} finally {
 			await closeClient(socket, client);
+		}
+	});
+});
+
+describe("official alignment: C6 client-local reload", () => {
+	const ClientLocal = local("test.client-local", {
+		version: 1,
+		input: obj({}, { open: true }),
+		members: { ping: method(undefined, str()) },
+	});
+	const clientFacet = (answer: string) => `import { defineFacet, local, method, obj, str } from "@moonan_ai/sdk";
+const Local = local("test.client-local", { version: 1, input: obj({}, { open: true }), members: { ping: method(undefined, str()) } });
+export default defineFacet((api) => {
+	api.serve(Local, () => ({ ping: () => ${JSON.stringify(answer)} }), { lifetime: "host" });
+});
+`;
+
+	it("reloads a client host's own facets without a parent link", async () => {
+		// The browser shell reloads its facet set locally (`kind: "client"`). Chord does not
+		// coordinate that through a parent, and its code version only moves on the client.
+		const dir = await tempDir(".client-");
+		const file = join(dir, "facet.mjs");
+		await writeFile(file, clientFacet("v1"));
+		const url = pathToFileURL(file).href;
+		const client = createHost({
+			kind: "client",
+			self: { id: "browser" },
+			loader: nodeLoader,
+			onError: () => undefined,
+		});
+		try {
+			await client.load([url]);
+			const ref = await client.get(ClientLocal, {});
+			try {
+				expect(await ref.ping()).toBe("v1");
+				const before = client.codeVersion;
+				await writeFile(file, clientFacet("v2"));
+				const report = await client.reload([url]);
+				expect(report.codeVersion).toBe(client.codeVersion);
+				expect(report.previous).toBe(before);
+				expect(client.codeVersion).toBe(before + 1);
+				expect(report.changed).toContain("test.client-local");
+				// The held reference resolves members against the new code.
+				expect(await ref.ping()).toBe("v2");
+			} finally {
+				ref.release();
+			}
+		} finally {
+			await client.close().catch(() => undefined);
 		}
 	});
 });

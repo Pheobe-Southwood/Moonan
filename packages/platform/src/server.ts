@@ -349,6 +349,20 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 							const view = options.host.registry(Routes);
 							const handler = view.get(`${method} ${pathname}`, ctx) ?? view.get(pathname, ctx);
 							if (!handler) return false;
+							// A browser-initiated request from another site (`<img>`, `<form>`, a
+							// third-party frame) must not drive a plugin route, including side-effectful
+							// GETs. Browsers send `Sec-Fetch-Site`; non-browser clients (curl, tests,
+							// other services) do not. An origin the operator explicitly allowed keeps
+							// the same trust it has on the built-in endpoints; a cross-site embed has
+							// no Origin header and is always refused.
+							if (request.headers["sec-fetch-site"] === "cross-site") {
+								const origin = request.headers.origin;
+								const explicitlyAllowed = origin !== undefined && sameOrigin(request, allowedOrigins);
+								if (!explicitlyAllowed) {
+									sendJson(response, 403, { error: "cross-site request refused" });
+									return true;
+								}
+							}
 							await handler(request, response, ctx);
 							return true;
 						},

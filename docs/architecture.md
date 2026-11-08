@@ -59,6 +59,7 @@ node packages/platform/bin/moonan.js
   ├── /api/data/export        → 内建：GET 导出；?includeSecrets=1 才含明文
   ├── /api/data/import        → 内建：POST 原子导入
   ├── /facets/<hash>/<file>   → 浏览器切面与其同目录资源（越界即 403）
+  ├── 插件路由                 → 浏览器跨站请求（Sec-Fetch-Site: cross-site）先被 403 拒绝
   ├── /api/*（未命中）         → JSON 404；不回落到 SPA
   ├── 其它                     → Routes 注册表："GET /path" 优先，其次 "/path"
   └── 仍未命中                → 外壳静态文件；不是文件就回 index.html（前端路由）
@@ -85,7 +86,7 @@ const handled = await host.root(
 
 绑定到一个根，意味着这次请求看到的是**一个特定代码版本**的注册表。重载期间进来的请求要么用旧版跑完，要么用新版——不会看到半新半旧的表。客户端断开时 `ctx.signal` 会 abort，插件的嵌套调用随根一起取消，而不是继续为一个没人读的响应工作。
 
-数据接口同样在 `host.root` 里调用 `DataStore`，所以 `DataCodecs.table(ctx)` 看到的是这次请求对应代码版本的 codec 表。
+`/api/data/export` 与 `/api/data/import` 同样在 `host.root` 里调用 `DataStore`，所以 `DataCodecs.table(ctx)` 看到的是这次请求对应代码版本的 codec 表；`/api/data/status` 只读 `DataStore.storage` 这个 state 成员，不经过根。
 
 ## 一次重载
 
@@ -204,6 +205,7 @@ ai-gateway/config  dataset { value, version }
 
 - `--dev`：让 chord 校验每次 cell 写入与暴露状态（`createHost({ dev: true })`）。默认关闭，与 chord 的默认一致；`pnpm dev` 会显式打开。
 - `--allow-origin <origin>`：除同源外精确放行一个浏览器 origin（可重复）。WebSocket 与内建 `POST /api/plugins/reload`、`/api/data/*` 都校验 `Origin`；无 `Origin` 的客户端（curl、测试）不受影响，`Origin: null` 与畸形值被拒绝。
+- 插件 HTTP 路由拒绝浏览器跨站请求：命中的插件路由在调用前检查 `Sec-Fetch-Site`，浏览器的 `cross-site` 请求（第三方页面里的 `<img>`、`<form>`、iframe，以及从其它站点进入的顶层导航）得到 `403`，包括有副作用的 GET。非浏览器客户端不发送该头，接口调用不受影响。这是平台级拒绝，插件无法放行；显式 `--allow-origin` 放行的 origin 例外（与其他内建端点的信任一致），插件仍可自行校验自己接受的 `Origin`/cookie。这是平台策略，不是 chord 规定。
 - `--max-calls <n>`：把 chord 的 `maxCalls` 接到每条 WebSocket 链路上；默认不设上限（chord 默认）。超过上限的调用得到 `unavailable/too_many_calls`，不可重试。
 - `--data-file <path>`：统一数据文件路径；也可用 `MOONAN_DATA_FILE`，默认 `~/.moonan/data.json`。
 - 平台没有账号鉴权：同源/白名单只是拒绝跨源浏览器，不是安全边界。绑定非回环地址时，能访问端口的人仍可直接驱动所有插件，也能导出/导入数据。

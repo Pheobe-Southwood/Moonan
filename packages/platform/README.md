@@ -34,7 +34,8 @@ moonan --plugin @moonan_ai/ai-gateway
 ## 边界
 
 - **没有账号鉴权。** 同源校验与 `--allow-origin` 只拒绝跨源浏览器，不是安全边界。绑定非回环地址时，
-  能访问端口的人就能驱动全部插件。
+  能访问端口的人就能驱动全部插件。命中的插件路由会拒绝浏览器跨站请求（`Sec-Fetch-Site: cross-site`），
+  显式 `--allow-origin` 放行的 origin 除外；非浏览器客户端不受影响。
 - **平台只落一个统一数据文件。** `moonan:data` 维护 `~/.moonan/data.json`；插件注册 `DataCodecs` 后，其 namespace 才能被统一导出/导入。
 - **单宿主、启动即定。** 一个服务端切面在 `setup` 里抛错会让整次启动失败。
 - **重载粒度是切面。** `POST /api/plugins/reload` 把全部服务端切面放进一次 `host.reload`。

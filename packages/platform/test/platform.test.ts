@@ -7,7 +7,7 @@ import type { Moonan } from "../src/index.js";
 import { silentLogger } from "../src/logger.js";
 import { createPlatform } from "../src/platform.js";
 import { resolvePluginRef } from "../src/plugins.js";
-import { appFor, cleanup, closeClient, connectClient, pluginDir, tempDataFile, tempDir } from "./support.js";
+import { appFor, cleanup, closeClient, connectClient, pluginDir, request, tempDataFile, tempDir } from "./support.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..", "..");
@@ -421,6 +421,95 @@ export default defineFacet((api) => {
 		} finally {
 			hostCatalog.release();
 			await closeClient(socket, client);
+		}
+	});
+
+	it("commits a reload before a new host object activates", async () => {
+		// A reload resolves at its commit; host objects of the types it adds start after it.
+		// Keeping that order is what lets the platform publish the committed facet set even
+		// when activation fails, instead of pretending the reload never happened.
+		const base = `import { defineFacet, local, method, obj } from "@moonan_ai/sdk";
+const Base = local("test.reload-base", { version: 1, input: obj({}, { open: true }), members: { ping: method() } });
+export default defineFacet((api) => {
+	api.serve(Base, () => ({ ping: () => "pong" }), { lifetime: "host" });
+});
+`;
+		const next = `import { defineFacet, local, method, num, obj } from "@moonan_ai/sdk";
+const Base = local("test.reload-base", { version: 1, input: obj({}, { open: true }), members: { ping: method() } });
+const Late = local("test.reload-late", { version: 1, input: obj({}, { open: true }), members: { ping: method() } });
+export default defineFacet((api) => {
+	api.serve(Base, () => ({ ping: () => "pong" }), { lifetime: "host" });
+	api.serve(Late, (_input, _principal, self) => {
+		self.state("value", num(), { init: () => { throw new Error("activation boom"); } });
+		return { ping: () => "pong" };
+	}, { lifetime: "host" });
+});
+`;
+		const dir = await pluginDir(base);
+		const app = await appFor([dir]);
+		try {
+			const before = app.revision;
+			await writeFile(join(dir, "server.mjs"), next);
+			await expect(app.reload()).rejects.toThrow(/activation boom/);
+			// The commit is final even though a host object failed to activate: the code
+			// version moved and the platform published the committed facet set.
+			expect(app.revision).toBe(before + 1);
+			const published = (await (await fetch(`${app.url}/api/plugins`)).json()) as { revision: number };
+			expect(published.revision).toBe(app.revision);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it("refuses a cross-site browser request to a plugin route", async () => {
+		const dir = await pluginDir(`import { Routes, defineFacet, local, method, obj } from "@moonan_ai/sdk";
+const Root = local("test.cross-site", { version: 1, input: obj({}, { open: true }), members: {} });
+export default defineFacet((api) => {
+	api.serve(Root, (_input, _principal, self) => {
+		self.register(Routes, {
+			"GET /api/cross-site-target": (_request, response) => {
+				response.writeHead(200, { "content-type": "text/plain" });
+				response.end("ok");
+			},
+		});
+		return {};
+	}, { lifetime: "host" });
+});
+`);
+		const app = await appFor([dir], { allowedOrigins: ["http://allowed.example"] });
+		try {
+			// Non-browser clients send no Sec-Fetch-Site and keep working.
+			const plain = await request(`${app.url}/api/cross-site-target`);
+			expect(plain.status).toBe(200);
+			expect(plain.body).toBe("ok");
+			// A same-origin browser request is a normal plugin request.
+			const sameOrigin = await request(`${app.url}/api/cross-site-target`, {
+				headers: { "sec-fetch-site": "same-origin" },
+			});
+			expect(sameOrigin.status).toBe(200);
+			// A cross-site embed has no Origin and is refused before the plugin runs.
+			const crossSite = await request(`${app.url}/api/cross-site-target`, {
+				headers: { "sec-fetch-site": "cross-site" },
+			});
+			expect(crossSite.status).toBe(403);
+			expect(JSON.parse(crossSite.body)).toMatchObject({ error: "cross-site request refused" });
+			// An explicitly allowed origin keeps the trust it has on the built-in endpoints.
+			const allowed = await request(`${app.url}/api/cross-site-target`, {
+				headers: { origin: "http://allowed.example", "sec-fetch-site": "cross-site" },
+			});
+			expect(allowed.status).toBe(200);
+			// An origin that was not allowed is still a hostile page.
+			const unlisted = await request(`${app.url}/api/cross-site-target`, {
+				headers: { origin: "http://other.example", "sec-fetch-site": "cross-site" },
+			});
+			expect(unlisted.status).toBe(403);
+			// The policy is scoped to plugin routes; built-ins keep their own checks.
+			const builtin = await request(`${app.url}/api/plugins`, {
+				headers: { "sec-fetch-site": "cross-site" },
+			});
+			expect(builtin.status).toBe(200);
+		} finally {
+			await app.close();
 		}
 	});
 });

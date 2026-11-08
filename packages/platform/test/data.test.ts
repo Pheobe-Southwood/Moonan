@@ -1,3 +1,4 @@
+import { DataStore } from "@moonan_ai/sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import { appFor, cleanup, pluginDir } from "./support.js";
 
@@ -143,5 +144,22 @@ describe("moonan:data", () => {
 		};
 		expect(status.file).toBe(app.dataFile);
 		expect(status.datasets).toBe(0);
+	});
+
+	it("refuses a non-function update callback from a local caller", async () => {
+		const dir = await pluginDir(PLUGIN);
+		const app = await appFor([dir]);
+		const store = await app.host.get(DataStore, {});
+		try {
+			// The callback has no JSON representation; it only works because DataStore is a
+			// local object. A caller that sends something else gets a Chord error, not a crash.
+			await app.host.root(async (ctx) => {
+				await expect(
+					store.update({ namespace: "x/data", version: 1, update: null }, ctx),
+				).rejects.toMatchObject({ code: "invalid", reason: "args" });
+			});
+		} finally {
+			store.release();
+		}
 	});
 });

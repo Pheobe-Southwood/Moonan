@@ -146,6 +146,10 @@ export type DataImportReport = {
  * `read`'s result and `update`'s callback stay `unknown()`: `read` may return `undefined`
  * (not a JSON value) and a local contract's callback is a function, so neither can be
  * described as JSON Schema without changing the method's meaning.
+ *
+ * The callback is the reason this contract must stay `local`: it is passed in-process and
+ * has no wire representation. The platform rejects a non-function at runtime, and no code
+ * may turn `DataStore` into a `remote` type or hand it to another host.
  */
 export const DataStore = local("moonan.data", {
 	version: 1,

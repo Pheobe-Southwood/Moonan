@@ -104,19 +104,26 @@ export async function closeClient(socket: WebSocket, client: Host<unknown>): Pro
 	socket.terminate();
 }
 
-export function post(
+export interface TestResponse {
+	status: number;
+	body: string;
+	retryAfter: string | null;
+}
+
+/** One raw HTTP request; headers are sent verbatim, which `fetch` refuses for `Sec-*`. */
+export function request(
 	url: string,
-	origin?: string,
-): Promise<{ status: number; body: string; retryAfter: string | null }> {
+	options: { method?: string; headers?: Record<string, string>; body?: string } = {},
+): Promise<TestResponse> {
 	return new Promise((resolve, reject) => {
 		const parsed = new URL(url);
-		const request = httpRequest(
+		const req = httpRequest(
 			{
 				hostname: parsed.hostname,
 				port: parsed.port,
 				path: `${parsed.pathname}${parsed.search}`,
-				method: "POST",
-				headers: origin === undefined ? {} : { origin },
+				method: options.method ?? "GET",
+				headers: options.headers ?? {},
 			},
 			(response) => {
 				let body = "";
@@ -134,9 +141,14 @@ export function post(
 				});
 			},
 		);
-		request.on("error", reject);
-		request.end();
+		req.on("error", reject);
+		if (options.body !== undefined) req.write(options.body);
+		req.end();
 	});
+}
+
+export function post(url: string, origin?: string): Promise<TestResponse> {
+	return request(url, { method: "POST", ...(origin === undefined ? {} : { headers: { origin } }) });
 }
 
 /** Closes every app this worker started, then removes every directory it made. */

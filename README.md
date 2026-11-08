@@ -171,7 +171,7 @@ export default defineFacet((api) => {
 
 ## 运行时边界 · Runtime boundaries
 
-- **没有账号鉴权。** 同源校验与 `--allow-origin` 只拒绝跨源浏览器，不是安全边界，也不保护直接访问端口的非浏览器客户端。
+- **没有账号鉴权。** 同源校验与 `--allow-origin` 只拒绝跨源浏览器，不是安全边界，也不保护直接访问端口的非浏览器客户端。命中的插件路由会拒绝浏览器跨站请求（`Sec-Fetch-Site: cross-site`，例如第三方页面的 `<img>`/`<form>`，或从其它站点进入的导航）；插件无法放行，显式 `--allow-origin` 的 origin 例外，非浏览器客户端不受影响。
 - **平台只落一个统一数据文件。** `moonan:data` 维护 `~/.moonan/data.json`；插件注册 `DataCodecs` 后，其 namespace 才能被统一导出/导入。私有缓存、二进制资产仍可由插件自己开文件。
 - **单宿主、启动即定。** 所有服务端切面共享一个代码版本；一个切面在 `setup` 里抛错会让整次启动失败——Chord 的 `install` 不是回滚事务，继续跑只会留下半个插件。
 - **重载粒度是切面，不是插件。** `POST /api/plugins/reload` 重新解析入口，然后把全部服务端切面放进**一次** `host.reload`（breaking 契约的提供方与消费方永远同批），再 `await host.ready()`。
