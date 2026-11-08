@@ -33,11 +33,11 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "pnpm run build:server && pnpm run build:web",
+    "build": "pnpm run build:server && pnpm run build:web && node scripts/check-contracts.mjs",
     "build:server": "tsc -p tsconfig.build.json",
     "build:web": "node scripts/build-web.mjs",
-    "test": "vitest run",
-    "pretest": "pnpm build"
+    "prepack": "node scripts/check-contracts.mjs",
+    "test": "pnpm build && vitest run"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "1.5.0",

@@ -17,6 +17,7 @@
     "src/catalog.ts",
     "src/runtime.ts",
     "src/discovery.ts",
+    "src/secrets.ts",
     "src/service.ts",
     "src/http.ts"
   ]

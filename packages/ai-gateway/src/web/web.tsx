@@ -4,6 +4,11 @@ import { Panels } from "@moonan_ai/sdk/web";
 import { AiGatewayPanel } from "./app.js";
 import { GATEWAY_CSS } from "./styles.js";
 
+// The server facet and this browser facet share one contract source. Exporting the
+// contract tokens lets `scripts/check-contracts.mjs` prove, after each build, that the two
+// artifacts carry the same fingerprints instead of trusting that both bundles were rebuilt.
+export { AiGateway, GatewayState } from "../contract.js";
+
 const STYLE_ID = "moonan-ai-gateway-styles";
 
 function installStyles(): void {
