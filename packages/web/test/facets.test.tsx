@@ -1,6 +1,7 @@
 import type { FacetSetEntry } from "@moonan_ai/sdk";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { facetUrl } from "../src/chord/facet-loader.js";
 import { facetSignature, useFacetBatches, type FacetBatchHost } from "../src/chord/facets.js";
 
 // The hook deliberately reports a failed batch with console.error; the tests assert the state.
@@ -42,6 +43,13 @@ function setup(initial: FacetSetEntry[]) {
 	});
 	return { ...fake, ...rendered };
 }
+
+describe("facetUrl", () => {
+	it("is the absolute module URL chord names the facet by: no query, no hash", () => {
+		expect(facetUrl("/facets/a/web.js?chord2-reload=1#x")).toBe(abs("/facets/a/web.js"));
+		expect(facetUrl("facets/a/web.js")).toBe(abs("/facets/a/web.js"));
+	});
+});
 
 describe("facetSignature", () => {
 	it("is canonical, hash-sensitive and order-insensitive", () => {
@@ -192,6 +200,34 @@ describe("useFacetBatches", () => {
 
 		await waitFor(() => expect(second.load).toHaveBeenCalledWith([abs("/facets/a/web.js")]));
 		expect(first.load).toHaveBeenCalledTimes(1);
+	});
+
+	it("serializes overlapping batches: an in-flight first install is never installed twice", async () => {
+		const a = facet("a", "/facets/a/web.js", "h1");
+		const b = facet("b", "/facets/b/web.js", "h2");
+		const fake = fakeHost();
+		let releaseLoad: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			releaseLoad = resolve;
+		});
+		fake.load.mockImplementationOnce(async () => {
+			await gate;
+		});
+		const { result, rerender } = renderHook((props: Props) => useFacetBatches(props.host, props.live, props.facets), {
+			initialProps: { host: fake.host, live: true, facets: [a] },
+		});
+		await waitFor(() => expect(fake.load).toHaveBeenCalledTimes(1));
+
+		// The catalog changes while the first install is still in flight.
+		await act(async () => {
+			rerender({ host: fake.host, live: true, facets: [b] });
+		});
+		releaseLoad();
+
+		await waitFor(() => expect(result.current.signature).toContain("h2"));
+		// The second batch waited for the first and took the `reload` path: no duplicate install.
+		expect(fake.load).toHaveBeenCalledTimes(1);
+		expect(fake.reload).toHaveBeenCalledWith([abs("/facets/b/web.js")], { remove: [abs("/facets/a/web.js")] });
 	});
 
 	it("does nothing until the catalog is live", async () => {

@@ -45,7 +45,7 @@ Plugin management
   \`moonan plugins list\` and the other subcommands edit ~/.moonan/plugins.json without
   starting the server. They are the recovery path when a plugin breaks startup:
     moonan plugins list
-    moonan plugins disable <ref>     (--force for a locked/built-in entry)
+    moonan plugins disable <ref>     (--force for a locked entry)
     moonan plugins add ./my-plugin --disabled
 
 Data

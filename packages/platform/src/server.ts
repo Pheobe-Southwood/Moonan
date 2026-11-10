@@ -34,8 +34,11 @@ export interface WebServerData {
 /**
  * The platform's plugin-management operations. They are handed to the HTTP layer directly
  * (never wrapped in a Chord remote object): changing the plugin set commits a chord reload,
- * and a reload waits for roots (gate/retire deadlines) and aborts the root that is driving
- * it, so management runs outside any root on the plain HTTP path.
+ * and a reload waits for roots at its gate/retire deadlines (default 5 s each). Past a
+ * deadline chord aborts the reload itself (`aborted/gate_deadline`, naming the blocking
+ * roots) or, at retire, the old code version's roots (`superseded`); the call that drove the
+ * reload receives that error (or `superseded` if it itself runs on the retiring version).
+ * Nothing deadlocks — but management still stays outside any root, on the plain HTTP path.
  */
 export interface WebServerAdmin {
 	setEnabled(ref: string, enabled: boolean): Promise<PluginMutationResult>;

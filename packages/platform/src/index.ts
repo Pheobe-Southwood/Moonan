@@ -11,7 +11,7 @@ import { normalizeRef, scanPluginDirectory } from "./plugins.js";
 import { startWebServer, type WebServerHandle } from "./server.js";
 import { errorMessage, type PluginEntry, type PluginState, type StartupReport } from "./types.js";
 
-export const VERSION = "0.1.0-alpha1";
+export const VERSION = "0.1.0-alpha2";
 
 export interface StartOptions {
 	port?: number;

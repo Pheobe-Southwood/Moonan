@@ -105,7 +105,7 @@ POST /api/v1/plugins/{enable,disable,install,remove}   ← 管理接口：只重
   ├── 候选条目             → 注册表意图（启用的 ref 集合）
   ├── 重新解析全部条目     → 删除/改名的入口变成 remove 的 facet；web 内容 hash 重算；停用条目也解析，用于展示错误
   ├── next / added / removed → next = 启用且未隔离且无 error 的 server URL；added = next - installed；removed = installed - next
-  ├── 手动 reload          → host.reload([...next])：重读全部已安装的服务端模块；零切面也提交 host.reload([])
+  ├── 手动 reload          → host.reload([...next])：重读全部当前期望的服务端模块；零切面也提交 host.reload([])
   ├── 管理 mutation        → host.reload([...added], { remove })；两者都空（纯 web 变化）则不提交
   ├── chord 内部           → prepare → gate → commit → retire
   ├── 提交成功             → chord 的 code version +1，平台直接读 host.codeVersion；替换已发布条目与 installed
@@ -175,13 +175,13 @@ WebFacetCatalog（remote, per principal）
   ├── 先建 link，再等 socket open（服务端的 hello 在 Connection 构造时就发出一次，link 建晚了就可能错过它——是顺序问题，不是网络问题）
   ├── 连 /ws，建 kind:"client" 宿主（整页只建一次）
   ├── host.hold(WebFacetCatalog) → 引用立刻返回，可能仍是 loading
-  ├── 一次 host.load([...web 切面 URL], { awaitHostObjects: false })
-  │     ├── 装完记下签名（安装不是回滚事务）
-  │     ├── host.ready() 等宿主对象激活
+  ├── 第一批：一次 host.load([...web 切面 URL])
+  │     ├── chord 先装完所有切面，再等它们的 host 对象激活
+  │     ├── 安装不是回滚事务：激活失败也记下这一批，页面走恢复路径
   │     └── 插件切面把自己注册进 Panels 注册表
   ├── 外壳订阅 Panels，按 order 排序渲染标签页
-  └── WebFacetCatalog.facets[].web.hash 变化 → host.reload(同批 URL, { remove })
-        ├── resolve = 已提交 → 立即记下新签名
+  └── WebFacetCatalog.facets[].web.hash 变化 → host.reload(只列变动的 URL, { remove })
+        ├── 没列出的切面继续运行；resolve = 已提交 → 立即记下新签名
         └── host.ready() 失败只报横幅，不回滚（提交已是既成事实）
 ```
 
@@ -256,7 +256,7 @@ ai-gateway/config  dataset { value, version }
 
 **插件注册表独立于统一数据。** 注册表是引擎配置：启动前就要读、不能由数据导入改变。代价是用户要备份两份文件，且 `plugins.json` 没有跨进程锁。把选择放进 `moonan:data` 会让启动变成两阶段（先建宿主才能读数据），破坏插件在激活期就能 `self.get(DataStore)` / `self.get(WebFacetCatalog)` 的保证。
 
-**管理接口是 HTTP，不是 Chord 对象。** 启停要提交 reload，reload 会等待根结束（gate/retire 各有默认 5 秒期限）；从 Chord 方法（本身就是一个根）里发起时，等待到期会 abort 驱动它的那个根，于是调用失败，而不是永远自锁。控制面留在 HTTP 处理路径，数据面（浏览器切面）继续走 `WebFacetCatalog`。
+**管理接口是 HTTP，不是 Chord 对象。** 启停要提交 reload，reload 会等待根结束（gate/retire 各有默认 5 秒期限）。超期时 Chord abort 的是**这次 reload**（`aborted/gate_deadline`，错误里列出阻塞的根），retire 超期则 abort 旧代码版本的根（`superseded`）；驱动 reload 的那次调用属于旧版本，会随之中断并以失败告终，但不会永久自锁。控制面留在 HTTP 处理路径，数据面（浏览器切面）继续走 `WebFacetCatalog`。
 
 **WebFacetCatalog 不提供旧契约的兼容适配。** 这是一次重命名后的新契约（`moonan.web-facets` v1），不写 `accepts`。旧外壳看不懂新契约，整页刷新才是诚实的补救；`accepts` 适合「新旧消费者并存于同一套外壳」，而这里外壳本身就随服务端一起部署。
 

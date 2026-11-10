@@ -209,6 +209,24 @@ describe("plugin management API", () => {
 		expect((await registryDocument(app)).plugins).toEqual([{ ref: dir, enabled: true }]);
 	});
 
+	it("adopts an already-enabled ephemeral entry when it is enabled", async () => {
+		const dir = await pluginDir(TOGGLED);
+		const app = await appFor([dir]);
+		expect((await entry(app, dir))?.ephemeral).toBe(true);
+		const revision = app.revision;
+		// Already enabled, but the management action must still persist the adoption: a
+		// toggle that did not adopt would silently vanish on the next restart.
+		const adopted = await mutation(app, "/api/v1/plugins/enable", { id: dir });
+		expect(adopted.status).toBe(200);
+		expect((JSON.parse(adopted.body) as { plugin: PluginAdminEntry }).plugin).toMatchObject({
+			enabled: true,
+			ephemeral: false,
+		});
+		expect((await registryDocument(app)).plugins).toEqual([{ ref: dir, enabled: true }]);
+		// Nothing joined or left the server facet set, so there is no chord commit.
+		expect(app.revision).toBe(revision);
+	});
+
 	it("limits management to loopback unless explicitly allowed", async () => {
 		const denied = await appFor([], { hostname: "0.0.0.0" });
 		const deniedGet = await fetch(`${denied.url}/api/v1/plugins`);

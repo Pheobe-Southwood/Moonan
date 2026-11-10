@@ -2,9 +2,12 @@
  * The platform's plugin-management HTTP surface (`/api/v1/plugins`).
  *
  * This is deliberately **not** a Chord contract: changing which plugins exist must run
- * outside a Chord root (a reload waits for roots to finish, so calling it from inside a
- * root risks a deadlock). The platform owns the endpoints; the browser panel and the CLI
- * are clients of the same JSON shape.
+ * outside a Chord root. A reload waits for roots at its gate/retire deadlines (default 5 s
+ * each); past one, chord aborts the reload itself (`aborted/gate_deadline`) or the old code
+ * version's roots (`superseded`), so a call made from inside a root fails with the reload's
+ * error. That is not a deadlock, but the control plane still belongs off the object graph:
+ * the platform owns the endpoints; the browser panel and the CLI are clients of the same
+ * JSON shape.
  *
  * `ref` is the address of a plugin (a package name or an absolute directory), not a
  * runtime id: facets are still identified by module URL. It is only the stable key of the

@@ -283,12 +283,14 @@ export default defineFacet((api) => {
 响应：成功 `{ ok, changed, reloadBrowser, revision, plugin? }`；失败 `{ error, code, reason?, chordCode?,
 committed?, plugin? }`，状态码 `400/403/404/409/500`。`changed` 表示插件列表/启用状态/解析结果变了，
 `reloadBrowser` 表示启用中的浏览器切面集合（`url#hash`）变了。对 `/reload`，`changed` 只是把 Chord 的
-`ReloadReport` 归纳成布尔：是否有被触碰的类型——没有服务端切面的空批次是 `false`，有切面被重新列出时是
-`true`（哪怕代码没变）。**`revision` 才是「一次提交已发生」的信号**（每次提交 +1，空批次也算）。
+`ReloadReport` 归纳成布尔：是否有类型被重新 serve（`report.changed` 是 Chord 的类型名）——没有服务端切面的
+空批次是 `false`；重新列出切面会换掉它们的 service 身份，所以只要切面提供类型就是 `true`（哪怕代码没变）。
+**`revision` 才是「一次提交已发生」的信号**（每次提交 +1，空批次也算）。
 
 **控制面走 HTTP，不走 Chord 远程对象。** 启停要提交一次 `host.reload`，而 reload 会等待根结束：gate/retire
-各有默认 5 秒期限，从 Chord 方法（本身就是一个根）里发起时，等待到期会 abort 驱动这个 reload 的那个根，
-于是调用以失败告终，而不是永远自锁。所以管理动作留在 HTTP 处理路径、`host.root` 之外直接调用；
+各有默认 5 秒期限。超期时 Chord abort 的是**这次 reload**（`aborted/gate_deadline`，错误里列出阻塞的根），
+retire 超期则 abort 旧代码版本的根（`superseded`）；驱动它的调用会收到这次 reload 的错误（若它自己正跑在
+要退休的版本上，则是 `superseded`），不会永久自锁。所以管理动作留在 HTTP 处理路径、`host.root` 之外直接调用；
 `/api/plugins/reload` 和 `/api/v1/plugins/reload` 都是这样。
 
 ### 启停语义
@@ -384,6 +386,6 @@ curl -X POST http://127.0.0.1:21315/api/v1/plugins/reload
 
 Chord 的 `nodeLoader` 每次 import 都会得到一份新的模块副本，且不会 evict 旧副本（上游已知限制）。手动
 reload 会重读全部启用的服务端切面，所以频繁手动 reload 仍会让进程内存增长，长期运行的会话可以定期重启；
-管理动作的增量 reload 只 import 新增/变更的切面，不再把这份开销乘以插件数量。
+管理动作的增量 reload 只 import 新增的切面（停用/移除不 import），不再把这份开销乘以插件数量。
 
 启动时如果某个服务端切面 `setup` 抛错，平台会关闭宿主并让这次启动失败——Chord 的 `install` 不是回滚事务，继续运行会留下半个插件。随后 `start` 会记录错误，并以「只隔离全部非锁定条目」再启动一次；仍失败才真正退出。被隔离的插件在 `GET /api/v1/plugins` 里是 `startupSkipped`，配置没有被改写：修好后可以在「插件」页重新启用，或重启进程再试，或用 `--safe-mode` 进恢复壳。

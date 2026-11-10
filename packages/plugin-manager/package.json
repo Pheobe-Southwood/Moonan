@@ -1,6 +1,6 @@
 {
   "name": "@moonan_ai/plugin-manager",
-  "version": "0.1.0-alpha1",
+  "version": "0.1.0-alpha2",
   "description": "Moonan's official plugin manager: list, enable, disable, add and remove plugins from the 插件 tab.",
   "type": "module",
   "license": "MIT",

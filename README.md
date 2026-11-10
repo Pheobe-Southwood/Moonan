@@ -225,7 +225,7 @@ pnpm dev        # build 后以 --dev 启动，官方插件（模型 + 插件）�
 
 ## 状态 · Status
 
-`0.1.0-alpha1`：契约 schema 从 TypeBox 换到 `@earendil-works/pi-schema`（Chord 1.5.0 的官方写法），`sdk` 不再导出 `Type`，改用 `obj`、`str`、`num`、`literal`、`record` 等构建器；契约 JSON 与指纹不变，旧页面只会整页刷新一次。平台建立在 Chord 之上，不含预设能力契约或功能语义；持久化分为统一数据文件与插件注册表两份。插件由切面组成；启停只重载新增/移除的切面，手动 reload 才重读全部服务端切面。
+`0.1.0-alpha2`：契约 schema 从 TypeBox 换到 `@earendil-works/pi-schema`（Chord 1.5.0 的官方写法），`sdk` 不再导出 `Type`，改用 `obj`、`str`、`num`、`literal`、`record` 等构建器；契约 JSON 与指纹不变，旧页面只会整页刷新一次。平台建立在 Chord 之上，不含预设能力契约或功能语义；持久化分为统一数据文件与插件注册表两份。插件由切面组成；启停只重载新增/移除的切面，手动 reload 才重读全部服务端切面。
 
 `0.0.5-alpha3`：平台建立在 Chord 之上，不含预设能力契约或功能语义；唯一的持久化是 `moonan:data` 统一数据文件。插件由切面组成；平台一次装载/重载全部服务端切面，启动失败即关闭宿主。
 
