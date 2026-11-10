@@ -29,6 +29,17 @@ export {
 	type StoredDataset,
 } from "./data.js";
 export { Routes, type RouteHandler } from "./routes.js";
+export {
+	PLUGIN_ADMIN_API,
+	PLUGIN_ADMIN_PATHS,
+	type PluginAdminEntry,
+	type PluginAdminError,
+	type PluginAdminMutation,
+	type PluginAdminPaths,
+	type PluginAdminSnapshot,
+	type PluginAdminStartup,
+	type PluginAdminWebFacet,
+} from "./plugin-admin.js";
 
 /** Chord primitives, re-exported so a plugin needs two dependencies instead of three. */
 export {

@@ -17,13 +17,14 @@ Options
   --lan            Bind 0.0.0.0 (LAN + tailnet) instead of the Tailscale IPv4
   --port <n>       Port to listen on (default 21315)
   --dev            Validate every cell write (chord dev mode)
+  --allow-management  Enable the plugin-management API on this non-loopback bind
   -h, --help       Show this help
 
 Run this through \`pnpm start:tailnet\` / \`pnpm start:lan\`, which build first.
 `);
 }
 
-const options = { lan: false, port: "21315", dev: false, help: false };
+const options = { lan: false, port: "21315", dev: false, allowManagement: false, help: false };
 const argv = process.argv.slice(2);
 for (let index = 0; index < argv.length; index += 1) {
 	const flag = argv[index];
@@ -45,6 +46,9 @@ for (let index = 0; index < argv.length; index += 1) {
 		}
 		case "--dev":
 			options.dev = true;
+			break;
+		case "--allow-management":
+			options.allowManagement = true;
 			break;
 		case "-h":
 		case "--help":
@@ -117,6 +121,9 @@ console.log("Moonan is binding outside loopback. There is no account authenticat
 console.log(`  bind: ${hostname}:${options.port}`);
 for (const url of [...new Set(urls)]) console.log(`  open: ${url}`);
 console.log("  keep this on your tailnet / trusted LAN; do not port-forward it to the internet");
+if (!options.allowManagement) {
+	console.log("  plugin management is off on this bind; add --allow-management to enable it");
+}
 console.log("");
 
 const platform = join(root, "packages", "platform", "bin", "moonan.js");
@@ -127,8 +134,7 @@ const args = [
 	"--port",
 	options.port,
 	...(options.dev ? ["--dev"] : []),
-	"--plugin",
-	"@moonan_ai/ai-gateway",
+	...(options.allowManagement ? ["--allow-management"] : []),
 ];
 
 const child = spawn(process.execPath, args, { cwd: root, stdio: "inherit" });

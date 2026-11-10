@@ -14,38 +14,45 @@ node packages/platform/bin/moonan.js
   │     └── 插件 B 的服务端切面
   │
   ├── ~/.moonan/data.json             ← 统一数据文件（可由 --data-file 改）
+  ├── ~/.moonan/plugins.json          ← 插件注册表：哪些 ref 启用（引擎配置，不参与导出）
   └── HTTP + WebSocket 服务（一个端口）
 ```
 
-**只有一个进程，一个端口。** 没有独立的 UI 服务、没有反向代理、没有数据库进程。平台唯一的落盘点是统一数据文件；插件仍可为缓存或二进制资产开自己的文件，但那些文件不属于统一导出。
+**只有一个进程，一个端口。** 没有独立的 UI 服务、没有反向代理、没有数据库进程。平台有两类落盘：统一数据文件（插件数据，可导出/导入）与插件注册表（引擎配置，决定启动时加载谁）。插件仍可为缓存或二进制资产开自己的文件，但那些文件不属于统一导出。两种文件都走 `data.ts` 的临时文件 + fsync + rename 原子写。
 
 ## 一次装载
 
 启动顺序是刻意的，顺序错了浏览器会拿到过期的目录：
 
 ```text
-1. 收集插件引用
-     --plugin <包名|目录>  ＋  plugins-dir 下的每个含切面入口的子目录
-2. 逐个解析成切面模块 URL
+1. 读插件注册表（plugins.json；损坏 → .bak → 隔离 .corrupt-* + 警告）
+2. 合并条目
+     注册表意图 ＋ 缺失的官方默认（builtin/locked 来自 moonan.officialPlugins）
+     ＋ --plugin（ephemeral）＋ --plugins-dir 扫描（ephemeral）
+     --safe-mode → 只保留 locked 官方条目，忽略注册表
+3. 逐个解析成切面模块 URL（含停用条目，用于展示错误/版本）
      目录 → server.mjs / server.js 与 web.js / web.mjs（各自可选）
      包   → exports["."] 与 exports["./web"]（各自可选）
      失败 → 记在记录的 error 上，不抛出
-3. 建宿主
-4. 一次 host.load([data 切面, web-facets 切面, ...全部服务端切面 URL])：
+4. 建宿主
+5. 一次 host.load([data 切面, web-facets 切面, ...启用的服务端切面 URL])：
      先装完所有切面，再统一激活宿主对象
      data 切面提供 host-lifetime 的 DataStore
      web-facets 切面同时提供 WebFacetCatalogStore 与远程 WebFacetCatalog
-     成功 → 服务端切面 serverInstalled = true
-     失败 → 关闭宿主，启动失败（不继续跑半装状态）
-5. host.get(DataStore, {})：平台持有引用，供 HTTP 数据接口使用
-6. host.get(WebFacetCatalogStore, {})：平台持有引用，用于后续发布
-7. host.get(WebFacetCatalog, {}) 激活一次后立即 release；失败则启动失败
-8. 开端口
+     失败 → 关闭宿主
+6. 失败且存在非锁定条目 → 记录错误，用「只隔离全部非锁定条目」重试一次
+     （注册表不改动；成功则 startup.degraded=true，被隔离条目 startupSkipped=true）
+     仍失败 → 抛出原始错误
+7. host.get(DataStore, {}) / host.get(WebFacetCatalogStore, {})：平台持有引用
+8. host.get(WebFacetCatalog, {}) 激活一次后立即 release；失败则启动失败
+9. 开端口；GET /api/v1/plugins 发布完整快照
 ```
 
 `moonan:data`、`moonan:web-facets` 与插件切面在**同一个** `host.load` 批次里：Chord 会先装完所有切面，再激活宿主对象，所以插件的 host-lifetime 对象可以在工厂里 `self.get(DataStore, {})` / `self.get(WebFacetCatalog, {})`，不会因为“晚装一步”而得到 `unknown_type`。
 
-第 4 步失败时**不**逐个 `host.reload` 去归因。Chord 的 `install` 不是回滚事务：一个 `setup` 在 `api.serve` 之后抛错，服务已经留在宿主里；继续运行会让平台看起来“其他插件正常”，实际上一个失败的插件仍在提供类型。Chord 的规矩是放弃启动时关闭宿主，平台照做。
+第 5 步失败时**不**逐个 `host.reload` 去归因。Chord 的 `install` 不是回滚事务：一个 `setup` 在 `api.serve` 之后抛错，服务已经留在宿主里；继续运行会让平台看起来“其他插件正常”，实际上一个失败的插件仍在提供类型。Chord 的规矩是放弃启动时关闭宿主，平台照做。
+
+第 6 步是恢复策略，不是“假装没坏”：失败事实写进日志和 `/api/v1/plugins.startup`，被隔离的条目仍然 `enabled: true`（配置意图没变），只是 `startupSkipped`。直接重新启动会再试一次；用户可以在「插件」页逐个启用（启用是事务性的，失败不破坏现状），或 `moonan plugins disable <ref>` 改注册表，或 `--safe-mode` 进恢复壳。
 
 ## 一次请求
 
@@ -53,8 +60,8 @@ node packages/platform/bin/moonan.js
 浏览器 / curl
   │
   ├── /ws                     → WebSocket 升级 → chord 协议（对象调用走这里）
-  ├── /api/plugins            → 内建：插件列表的 HTTP 视图
-  ├── /api/plugins/reload     → 内建：POST 触发全量重载
+  ├── /api/plugins            → 内建：插件列表的 HTTP 视图（只读，不受管理开关限制）
+  ├── /api/plugins/reload     → 内建：POST 重新解析并重载当前全部服务端切面（管理策略同 /api/v1）
   ├── /api/data/status        → 内建：DataStore.storage
   ├── /api/data/export        → 内建：GET 导出；?includeSecrets=1 才含明文
   ├── /api/data/import        → 内建：POST 原子导入
@@ -88,28 +95,39 @@ const handled = await host.root(
 
 `/api/data/export` 与 `/api/data/import` 同样在 `host.root` 里调用 `DataStore`，所以 `DataCodecs.table(ctx)` 看到的是这次请求对应代码版本的 codec 表；`/api/data/status` 只读 `DataStore.storage` 这个 state 成员，不经过根。
 
-## 一次重载
+## 一次重载 / 一次插件启停
 
 ```text
-POST /api/plugins/reload        ← 无 body；没有“按插件 ID”这回事
+POST /api/plugins/reload 或 /api/v1/plugins/reload   ← 手动：重载当前全部服务端切面
+POST /api/v1/plugins/{enable,disable,install,remove}   ← 管理接口：只重载变动的切面
   │
-  ├── 重新解析 refs       → 删除/改名的入口变成 remove 的 facet；web 内容 hash 重算
-  ├── 全部服务端切面     → host.reload([...serverFacetUrls], { remove })；仅纯 web 变化（无服务端切面、无待移除切面）才跳过
-  ├── chord 内部         → prepare → gate → commit → retire
-  ├── 提交成功           → chord 的 code version +1，平台直接读 host.codeVersion
-  ├── 应用新解析结果     → 原地更新 name / version / server / web / error
-  ├── 等待新宿主对象     → host.ready()；激活失败在这里 reject（提交已经生效）
-  ├── 发布快照           → catalogStore.update({ version, facets, revision })
-  └── 响应 { ok, reloadBrowser, revision, report? }
+  ├── 串行队列             → 同一进程内一次只跑一个 mutation
+  ├── 候选条目             → 注册表意图（启用的 ref 集合）
+  ├── 重新解析全部条目     → 删除/改名的入口变成 remove 的 facet；web 内容 hash 重算；停用条目也解析，用于展示错误
+  ├── next / added / removed → next = 启用且未隔离且无 error 的 server URL；added = next - installed；removed = installed - next
+  ├── 手动 reload          → host.reload([...next])：重读全部已安装的服务端模块；零切面也提交 host.reload([])
+  ├── 管理 mutation        → host.reload([...added], { remove })；两者都空（纯 web 变化）则不提交
+  ├── chord 内部           → prepare → gate → commit → retire
+  ├── 提交成功             → chord 的 code version +1，平台直接读 host.codeVersion；替换已发布条目与 installed
+  ├── 等待宿主对象         → host.ready()；激活失败在这里 reject（提交已经生效，仍发布/持久化）
+  ├── 发布快照             → catalogStore.update({ version, facets: 启用的, revision })
+  └── 管理 mutation 成功   → 写回 plugins.json（原子替换）
 ```
+
+`/api/v1/plugins/reload` 与管理 mutation 走同一条 `sync`：管理动作只是先把候选条目改成“目标意图”，
+再进入同一事务。区别只在批次内容——管理 mutation 只把 added（以及 removed）交给 chord，未列出的已安装
+切面继续运行；手动 reload 把当前全部服务端切面重新列一遍，因为只有重新 import 才能发现磁盘上的模块被
+改过，breaking contract 的 provider 与 consumer 因此总在同一批里。零服务端切面的手动 reload 仍提交
+`host.reload([])`：code version +1，作为「这次 reload 确实执行了」的信号。停用条目不会出现在 catalog 里，
+也不会被 `/facets/*` 服务。
 
 `revision` 取自 **chord 的 code version**（`host.codeVersion`）：启动时是 1，每次提交 +1。它是 Moonan 的应用状态，不是 chord 被移除的 `Shape.codeVersion`，也不能当协议字段用。
 
-`reloadBrowser` 说的是「浏览器切面集合或其内容变了」，不是「服务端 code version 变了」。它比较 reload 前后的 `webSignature`（每个 web facet 的 `url#hash`）：
+`reloadBrowser` 说的是「启用中的浏览器切面集合或其内容变了」，不是「服务端 code version 变了」。它比较 reload 前后启用条目的 `webSignature`（每个 web facet 的 `url#hash`；停用/隔离条目不参与）：
 
 - 只 reload 服务端切面：hash 不变 → `false`，浏览器不重载；
 - 改了 web.js / 增删 web 切面：hash 变 → `true`；
-- 纯前端插件没有服务端切面：`host.reload` 跳过，但仍发布新 hash，所以也能通过同一个 POST 更新。
+- 纯前端插件没有服务端切面：管理启停不触发 chord 提交（`host.reload` 跳过），但仍发布新 hash；手动 `/reload` 例外——它提交空批次让 `revision` +1（「提交已发生」的信号，不是「切面变了」）。
 
 `moonan:data` 与 `moonan:web-facets` 不在插件 reload 批次里：它们的契约/实现保持，插件 reload 只替换插件切面以及 `DataCodecs`、`ModelProviders` 等注册表；`ModelProviders` 由 ai-gateway 自己定义，平台不参与。平台 facet 改代码需要重启进程。
 
@@ -201,19 +219,44 @@ ai-gateway/config  dataset { value, version }
 - `includeSecrets` 默认 `false`。ai-gateway 的 codec 默认删掉 `apiKey`/`keyUpdatedAt`，导入时再按 provider id 从当前数据里补回；显式 `?includeSecrets=1` 才导出明文。
 - 文件损坏时先试 `.bak`；再不行把主文件保留为 `.corrupt-<timestamp>.json`，从空数据开始；`notice` 会显示在 ai-gateway 的存储信息里。
 
+## 插件注册表
+
+```text
+~/.moonan/plugins.json
+  { format: 1, plugins: [{ ref, enabled }] }
+        │ 启动前读取
+        ▼
+条目合并（+ 官方默认 + --plugin/scan）→ 解析 → host.load
+        ▲
+        │ 管理 mutation 成功后原子写回
+插件管理面板 / CLI
+```
+
+- **为什么不放进统一数据文件**：启动顺序（建宿主之前就要知道加载谁）与安全边界（导入数据不能改变加载哪些插件）。代价是“备份”分两处：`data.json` 管插件数据，`plugins.json` 管插件选择；导出/导入只覆盖前者。
+- `builtin`/`locked` 是派生值，不落盘；官方插件清单在平台 `package.json`。
+- 文件损坏 → `.bak` → `.corrupt-*` + 官方默认；恢复提示通过 `/api/v1/plugins.warning` 显示在管理页。
+- 两个 Moonan 实例共享同一文件时没有跨进程锁，按原子写“最后写入者胜”；这是单进程本地工具的已知边界。
+
 ## 运行时开关与安全边界
 
 - `--dev`：让 chord 校验每次 cell 写入与暴露状态（`createHost({ dev: true })`）。默认关闭，与 chord 的默认一致；`pnpm dev` 会显式打开。
-- `--allow-origin <origin>`：除同源外精确放行一个浏览器 origin（可重复）。WebSocket 与内建 `POST /api/plugins/reload`、`/api/data/*` 都校验 `Origin`；无 `Origin` 的客户端（curl、测试）不受影响，`Origin: null` 与畸形值被拒绝。
+- `--allow-origin <origin>`：除同源外精确放行一个浏览器 origin（可重复）。WebSocket 与内建 `POST /api/plugins/reload`、`/api/data/*` 都校验 `Origin`；`/api/plugins/reload` 与 `/api/v1/plugins*` 还先受管理开关限制。无 `Origin` 的客户端（curl、测试）不受影响，`Origin: null` 与畸形值被拒绝。
 - 插件 HTTP 路由拒绝浏览器跨站请求：命中的插件路由在调用前检查 `Sec-Fetch-Site`，浏览器的 `cross-site` 请求（第三方页面里的 `<img>`、`<form>`、iframe，以及从其它站点进入的顶层导航）得到 `403`，包括有副作用的 GET。非浏览器客户端不发送该头，接口调用不受影响。这是平台级拒绝，插件无法放行；显式 `--allow-origin` 放行的 origin 例外（与其他内建端点的信任一致），插件仍可自行校验自己接受的 `Origin`/cookie。这是平台策略，不是 chord 规定。
 - `--max-calls <n>`：把 chord 的 `maxCalls` 接到每条 WebSocket 链路上；默认不设上限（chord 默认）。超过上限的调用得到 `unavailable/too_many_calls`，不可重试。
 - `--data-file <path>`：统一数据文件路径；也可用 `MOONAN_DATA_FILE`，默认 `~/.moonan/data.json`。
+- `--plugins-file <path>`：插件注册表路径；也可用 `MOONAN_PLUGINS_FILE`，默认 `~/.moonan/plugins.json`。
+- `--allow-management`：非回环绑定时默认关闭 `/api/v1/plugins*`（403 `management_disabled`）；显式开启后仍校验同源/跨站。管理接口能改变进程加载的代码，等价于本机代码执行入口。
+- 启动降级与 `--safe-mode`：见「一次装载」。
 - 平台没有账号鉴权：同源/白名单只是拒绝跨源浏览器，不是安全边界。绑定非回环地址时，能访问端口的人仍可直接驱动所有插件，也能导出/导入数据。
 - 插件路由的可重试错误：`upgrade_conflict`/`superseded` 在幂等方法上自动以新根重试一次；非幂等请求得到 `503` + `Retry-After`，由客户端决定是否重试。这是 HTTP 策略，不是 chord 规定；GET/HEAD 处理函数应按 HTTP 语义保持无副作用。
 
 ## 设计取舍
 
-**单宿主，启动失败即退出。** 所有服务端切面都装在同一个 chord 宿主里，共享一个代码版本。Chord 的 `install` 不是回滚事务：一个切面在 `api.serve` 之后抛错，它的服务已经留在宿主里。所以启动阶段只有两种诚实的结果——全部成功，或关闭宿主退出；按插件隔离进程是另一个量级的改动（要连带 cluster reload、relay 授权、跨宿主契约），不在当前范围内。
+**单宿主，启动失败先降级再退出。** 所有服务端切面都装在同一个 chord 宿主里，共享一个代码版本。Chord 的 `install` 不是回滚事务：一个切面在 `api.serve` 之后抛错，它的服务已经留在宿主里。所以启动阶段有两种诚实的结果——全部成功，或关闭宿主后以「只加载锁定官方插件」再试一次；仍失败才退出。隔离粒度的上限是“隔离所有非锁定条目”，不是进程级隔离（那要连带 cluster reload、relay 授权、跨宿主契约）。
+
+**插件注册表独立于统一数据。** 注册表是引擎配置：启动前就要读、不能由数据导入改变。代价是用户要备份两份文件，且 `plugins.json` 没有跨进程锁。把选择放进 `moonan:data` 会让启动变成两阶段（先建宿主才能读数据），破坏插件在激活期就能 `self.get(DataStore)` / `self.get(WebFacetCatalog)` 的保证。
+
+**管理接口是 HTTP，不是 Chord 对象。** 启停要提交 reload，reload 会等待根结束（gate/retire 各有默认 5 秒期限）；从 Chord 方法（本身就是一个根）里发起时，等待到期会 abort 驱动它的那个根，于是调用失败，而不是永远自锁。控制面留在 HTTP 处理路径，数据面（浏览器切面）继续走 `WebFacetCatalog`。
 
 **WebFacetCatalog 不提供旧契约的兼容适配。** 这是一次重命名后的新契约（`moonan.web-facets` v1），不写 `accepts`。旧外壳看不懂新契约，整页刷新才是诚实的补救；`accepts` 适合「新旧消费者并存于同一套外壳」，而这里外壳本身就随服务端一起部署。
 

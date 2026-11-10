@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 /** The packages that go to npm. `web` is not one of them: its `dist` ships inside the platform. */
-const PUBLISHED = ["packages/sdk", "packages/platform", "packages/ai-gateway"] as const;
+const PUBLISHED = ["packages/sdk", "packages/platform", "packages/ai-gateway", "packages/plugin-manager"] as const;
 const PRIVATE = ["packages/web"] as const;
 
 interface PackageJson {
@@ -18,6 +18,8 @@ interface PackageJson {
 	dependencies?: Record<string, string>;
 	devDependencies?: Record<string, string>;
 	peerDependencies?: Record<string, string>;
+	optionalDependencies?: Record<string, string>;
+	moonan?: { officialPlugins?: { ref?: string; locked?: boolean }[] };
 }
 
 function packageJson(area: string): PackageJson {
@@ -65,6 +67,28 @@ describe("packaging", () => {
 		for (const area of [...PUBLISHED, ...PRIVATE]) {
 			expect(packageJson(area).version, `${area} version`).toBe(version);
 		}
+	});
+
+	it("declares every official plugin as an optional dependency", () => {
+		const platform = packageJson("packages/platform");
+		const manifest = platform.moonan?.officialPlugins ?? [];
+		const optional = platform.optionalDependencies ?? {};
+		expect(manifest.length, "moonan.officialPlugins").toBeGreaterThan(0);
+		for (const item of manifest) {
+			expect(typeof item.ref, "official ref").toBe("string");
+			// `pnpm publish` rewrites `workspace:*` to the exact version; anything else would
+			// either pin a stale version or make the platform installable without its plugins.
+			expect(optional[item.ref!], `${item.ref} optionalDependency`).toBe("workspace:*");
+		}
+		// No silent extra: an optionalDependency the manifest does not list would be installed
+		// but never seeded, which is the confusing half of a forgotten entry.
+		for (const name of Object.keys(optional)) {
+			expect(manifest.some((item) => item.ref === name), `${name} in moonan.officialPlugins`).toBe(true);
+		}
+		// The plugin manager must be locked: the page that manages plugins cannot be turned off
+		// from that page.
+		const manager = manifest.find((item) => item.locked === true);
+		expect(manager, "a locked official plugin").toBeDefined();
 	});
 
 	it("never depends at runtime on a package that is not published", () => {

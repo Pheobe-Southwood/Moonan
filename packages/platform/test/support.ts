@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHost, webSocketLink, type Host } from "@earendil-works/chord";
 import WebSocket from "ws";
-import { start, type Moonan } from "../src/index.js";
+import { start, type Moonan, type OfficialPluginRef } from "../src/index.js";
 import { silentLogger } from "../src/logger.js";
 
 /**
@@ -21,6 +21,11 @@ const dirs: string[] = [];
 
 export interface AppOptions {
 	readonly dataFile?: string;
+	readonly pluginsFile?: string;
+	readonly hostname?: string;
+	readonly official?: boolean | readonly OfficialPluginRef[];
+	readonly safeMode?: boolean;
+	readonly allowManagement?: boolean;
 	readonly dev?: boolean;
 	readonly allowedOrigins?: readonly string[];
 	readonly maxCalls?: number;
@@ -40,6 +45,13 @@ export async function tempDataFile(): Promise<string> {
 	return join(dir, "data.json");
 }
 
+/** A fresh temporary plugin registry; removed by `cleanup()`. */
+export async function tempPluginsFile(): Promise<string> {
+	const dir = await mkdtemp(join(tmpdir(), "moonan-plugins-file-"));
+	dirs.push(dir);
+	return join(dir, "plugins.json");
+}
+
 /** A directory plugin whose server facet is `source`. */
 export async function pluginDir(source: string): Promise<string> {
 	const dir = await tempDir(".plugin-");
@@ -52,12 +64,17 @@ export async function appFor(plugins: readonly string[], options: AppOptions = {
 	const pluginsDir = await mkdtemp(join(tmpdir(), "moonan-plugins-"));
 	dirs.push(pluginsDir);
 	const dataFile = options.dataFile ?? (await tempDataFile());
+	const pluginsFile = options.pluginsFile ?? (await tempPluginsFile());
 	const app = await start({
 		port: 0,
 		hostname: "127.0.0.1",
 		plugins: [...plugins],
 		pluginsDir,
 		dataFile,
+		pluginsFile,
+		// Tests must never read the developer's real registry, and the official plugins would
+		// add a second, unrelated facet batch to every harness app.
+		official: false,
 		logger: silentLogger,
 		...options,
 	});

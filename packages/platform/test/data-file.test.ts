@@ -92,7 +92,7 @@ describe("DataFile", () => {
 		expect(recovered.read("test/value")).toBeUndefined();
 		expect((await recovered.info()).notice).toMatch(/corrupt/);
 		const entries = await readdir(dir);
-		expect(entries.some((entry) => entry.startsWith("data.json.corrupt-"))).toBe(true);
+		expect(entries.some((entry) => entry.startsWith("data.corrupt-"))).toBe(true);
 	});
 
 	it("serializes update and export", async () => {

@@ -74,6 +74,18 @@ import { DataCodecs, DataStore } from "@moonan_ai/sdk";
 - `DataStore` 是平台唯一的统一数据文件（local、host-lifetime）；`read` 返回 `{ value, version }`，`update` 是串行读改写，`exportAll`/`importAll` 由平台 HTTP 表面调用。
 - `DataCodecs` 是插件贡献的导出/导入 codec 注册表；没有 codec 的 namespace 不会进入统一导出。
 
+## 插件管理 API 类型
+
+平台把 `/api/v1/plugins` 的 JSON 形状放在根入口，供「插件」页与 CLI 共用：
+
+```ts
+import type { PluginAdminEntry, PluginAdminSnapshot, PluginAdminMutation } from "@moonan_ai/sdk";
+import { PLUGIN_ADMIN_API } from "@moonan_ai/sdk";
+```
+
+`PluginAdminSnapshot` 里的 `id` 是插件的 `ref`（包名或目录），不是运行时身份；运行时身份仍是切面
+模块 URL。
+
 ## 功能注册表
 
 功能专属的注册表不属于 SDK。例如模型能力由 ai-gateway 自己定义并导出：

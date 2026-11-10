@@ -1,4 +1,4 @@
-import { local, method, type Facet, type Ref } from "@earendil-works/chord";
+import { defineFacet, local, method, type Facet, type Ref } from "@earendil-works/chord";
 import {
 	FacetSetSchema,
 	WebFacetCatalog,
@@ -9,6 +9,7 @@ import {
 	type FacetSetEntry,
 	type Static,
 } from "@moonan_ai/sdk";
+import type { Principal } from "./types.js";
 
 /** What every `WebFacetCatalog` instance exposes, from one host-lifetime store. */
 export const WebFacetCatalogSnapshotSchema = obj(
@@ -46,10 +47,10 @@ export interface WebFacetCatalogFacetOptions {
 }
 
 /**
- * The platform facet. It serves the store and the remote view in one `setup`, so both are
- * installed in the same `host.load` batch as the plugin facets.
+ * The platform facet. It serves the store and the remote view in one `defineFacet` setup, so
+ * both are installed in the same `host.load` batch as the plugin facets.
  */
-export function createWebFacetCatalogFacet(options: WebFacetCatalogFacetOptions): Facet {
+export function createWebFacetCatalogFacet(options: WebFacetCatalogFacetOptions): Facet<Principal> {
 	const initial: WebFacetCatalogSnapshot = {
 		version: options.version,
 		facets: options.facets,
@@ -58,7 +59,7 @@ export function createWebFacetCatalogFacet(options: WebFacetCatalogFacetOptions)
 
 	return {
 		name: "moonan:web-facets",
-		setup(api) {
+		...defineFacet<Principal>((api) => {
 			api.serve(
 				WebFacetCatalogStore,
 				(_input, _principal, self) => {
@@ -85,7 +86,7 @@ export function createWebFacetCatalogFacet(options: WebFacetCatalogFacetOptions)
 					revision: store.revision,
 				};
 			});
-		},
+		}),
 	};
 }
 

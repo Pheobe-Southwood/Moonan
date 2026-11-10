@@ -53,8 +53,9 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
-          # `sdk` first: the other two depend on it, and pnpm rewrites `workspace:*` to this
-          # exact version, so it has to exist before they are installed by anyone.
+          # `sdk` first, then the official plugins, then the platform: pnpm rewrites
+          # `workspace:*` to this exact version, and the platform's optionalDependencies point
+          # at the plugin versions published just before it.
           publish() {
             local dir="$1" name="$2"
             if npm view "${name}@${version}" version >/dev/null 2>&1; then
@@ -64,8 +65,9 @@ jobs:
             ( cd "${dir}" && pnpm publish --tag alpha --access public --no-git-checks --provenance )
           }
           publish packages/sdk @moonan_ai/sdk
-          publish packages/platform @moonan_ai/moonan
           publish packages/ai-gateway @moonan_ai/ai-gateway
+          publish packages/plugin-manager @moonan_ai/plugin-manager
+          publish packages/platform @moonan_ai/moonan
 
       - name: Point latest at this version
         env:
@@ -79,7 +81,7 @@ jobs:
           # becomes visible once its review finishes (observed: one to three minutes). Poll
           # instead of failing on that transient 404, and say what to do if it never appears.
           set -euo pipefail
-          for name in @moonan_ai/sdk @moonan_ai/moonan @moonan_ai/ai-gateway; do
+          for name in @moonan_ai/sdk @moonan_ai/ai-gateway @moonan_ai/plugin-manager @moonan_ai/moonan; do
             for attempt in $(seq 1 40); do
               if npm view "${name}@${version}" version >/dev/null 2>&1; then
                 npm dist-tag add "${name}@${version}" latest

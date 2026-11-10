@@ -1,0 +1,66 @@
+{
+  "name": "@moonan_ai/plugin-manager",
+  "version": "0.1.0-alpha1",
+  "description": "Moonan's official plugin manager: list, enable, disable, add and remove plugins from the 插件 tab.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pheobe-Southwood/Moonan.git",
+    "directory": "packages/plugin-manager"
+  },
+  "exports": {
+    "./web": {
+      "types": "./src/web/web.tsx",
+      "default": "./dist/web.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "node scripts/build-web.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@moonan_ai/sdk": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": ">=19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "esbuild": "0.28.2",
+    "happy-dom": "^21.0.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "vitest": "^5.0.5"
+  },
+  "keywords": [
+    "moonan",
+    "plugin",
+    "manager",
+    "chord"
+  ],
+  "homepage": "https://github.com/Pheobe-Southwood/Moonan#readme",
+  "bugs": {
+    "url": "https://github.com/Pheobe-Southwood/Moonan/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

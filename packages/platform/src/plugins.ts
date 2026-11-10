@@ -181,6 +181,20 @@ function fromPackage(specifier: string, ref: string, baseDir: string): PluginFac
 }
 
 /**
+ * The stable key the plugin registry stores. A path-like ref becomes an absolute path so the
+ * file does not depend on the directory the plugin was added from; a package name stays as
+ * written. Resolution (`resolvePluginRef`) uses the same directory-first rule.
+ */
+export function normalizeRef(ref: string, baseDir = process.cwd()): string {
+	const trimmed = ref.trim();
+	if (trimmed.length === 0) return trimmed;
+	const asPath = isAbsolute(trimmed) ? trimmed : resolve(baseDir, trimmed);
+	if (isDirectory(asPath)) return asPath;
+	if (trimmed.startsWith(".") || isAbsolute(trimmed)) return asPath;
+	return trimmed;
+}
+
+/**
  * Turns what the user asked for into facet URLs.
  *
  * Two shapes, one path: a directory with a facet entry file, or an installed package whose

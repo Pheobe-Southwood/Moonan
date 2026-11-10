@@ -17,6 +17,7 @@ const packageJson = JSON.parse(await readFile(new URL("../../package.json", impo
 const home = await mkdtemp(join(tmpdir(), "moonan-gateway-home-"));
 const pluginsDir = await mkdtemp(join(tmpdir(), "moonan-gateway-plugins-"));
 const dataFile = join(home, "data.json");
+const pluginsFile = join(home, "plugins.json");
 const consumerDir = fileURLToPath(new URL("./consumer-plugin", import.meta.url));
 
 const upstream = createServer((request, response) => {
@@ -90,6 +91,8 @@ try {
 		plugins: ["@moonan_ai/ai-gateway", consumerDir],
 		pluginsDir,
 		dataFile,
+		pluginsFile,
+		official: false,
 		logger: silentLogger,
 	});
 	client = await connect(app);
@@ -335,6 +338,8 @@ try {
 		plugins: ["@moonan_ai/ai-gateway", consumerDir],
 		pluginsDir,
 		dataFile,
+		pluginsFile,
+		official: false,
 		logger: silentLogger,
 	});
 	client = await connect(app);

@@ -4,15 +4,18 @@ Moonan 的内置「模型」插件。它把 pi-ai 的提供商和模型配置搬
 写在服务端——浏览器只拿快照，不写任何浏览器存储。
 
 ```bash
-# 装好平台再加载这个插件（两者要在同一棵树里）
-npm i -g @moonan_ai/moonan @moonan_ai/ai-gateway
-moonan --plugin @moonan_ai/ai-gateway
+# 平台已经通过 optionalDependencies 带上这个插件：直接启动即可
+npm i -g @moonan_ai/moonan
+moonan
 
 # 或者从仓库根目录
 pnpm install
-pnpm dev          # 只加载模型面板
+pnpm dev          # 模型 + 插件两个面板
 pnpm start        # 同上去掉 chord 的写入校验
 ```
+
+只想临时加载某个版本时仍可以 `moonan --plugin @moonan_ai/ai-gateway`；「插件」页也能停用/重新
+启用它。
 
 打开 <http://127.0.0.1:21315/#/ai-gateway>，通过「添加提供商」接入第一路上游。
 
@@ -35,7 +38,7 @@ pnpm start        # 同上去掉 chord 的写入校验
 
 - 平台目录 `0700`，文件 `0600`；写入采用临时文件 + fsync + rename 的原子替换；
 - 每次保存前把上一版复制到 `data.json.bak`；
-- 主文件损坏时先尝试 `.bak`；两者都不可用时保留 `data.json.corrupt-<timestamp>.json`；
+- 主文件损坏时先尝试 `.bak`；两者都不可用时保留 `data.corrupt-<timestamp>.json`；
 - API Key 以明文保存在统一数据文件里（面板不假装它是密钥链），快照和 HTTP 响应只含 `hasKey` 与末四位提示；
 - `headers`/`env`、以及模型级 `headers` 中名称像凭据的项（`Authorization`、`api-key`、`token`、`secret` 等）与 API Key 同等级：快照、HTTP 响应和默认导出里显示为 `moonan:redacted`，服务端数据文件里仍是明文；面板保存时未改动这些值会保留原值；
 - `/api/data/export` 默认脱敏，`?includeSecrets=1` 才导出明文；导入脱敏包时按 provider id / model id 保留已有密钥与敏感值。跨机器导入脱敏包时，这些敏感值没有可回填的当前值，会被丢弃（与 API Key 相同语义）。

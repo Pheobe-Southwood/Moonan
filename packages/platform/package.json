@@ -1,6 +1,6 @@
 {
   "name": "@moonan_ai/moonan",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha1",
   "description": "Moonan platform: builds a Chord host, resolves plugin facets, and serves them over a single port.",
   "type": "module",
   "license": "MIT",
@@ -38,6 +38,21 @@
     "@earendil-works/chord": "1.5.0",
     "@moonan_ai/sdk": "workspace:*",
     "ws": "^8.22.0"
+  },
+  "optionalDependencies": {
+    "@moonan_ai/ai-gateway": "workspace:*",
+    "@moonan_ai/plugin-manager": "workspace:*"
+  },
+  "moonan": {
+    "officialPlugins": [
+      {
+        "ref": "@moonan_ai/plugin-manager",
+        "locked": true
+      },
+      {
+        "ref": "@moonan_ai/ai-gateway"
+      }
+    ]
   },
   "devDependencies": {
     "@moonan_ai/web": "workspace:*",

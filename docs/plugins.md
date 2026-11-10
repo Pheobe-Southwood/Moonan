@@ -20,7 +20,7 @@ my-plugin/
 | 目录 | `--plugin ./my-plugin`，或放进 `--plugins-dir` 的任一子目录 | `server.mjs` / `server.js` 与 `web.js` / `web.mjs`，各自可选 |
 | 包 | `--plugin my-plugin` | 包自己的 `exports`：`"."` 是服务端切面，`"./web"` 是浏览器切面，各自可选 |
 
-平台对两者做同一件事：拿到切面模块 URL，交给 Chord。区别只在 URL 从哪来。一个包可以只导出 `"./web"`，一个目录可以只有 `web.js`——平台照样启动，只是没有服务端切面。纯前端插件不参与服务端 commit，但平台会重算它的 web hash；改完 `web.js` 后 `POST /api/plugins/reload` 就能让浏览器换上新模块。
+平台对两者做同一件事：拿到切面模块 URL，交给 Chord。区别只在 URL 从哪来。一个包可以只导出 `"./web"`，一个目录可以只有 `web.js`——平台照样启动，只是没有服务端切面。纯前端插件的启停不触发 chord 提交，但平台会重算它的 web hash；改完 `web.js` 后 `POST /api/plugins/reload`（需管理接口开启）就能让浏览器换上新模块——手动 reload 即使没有服务端切面也会提交一个空批次，revision 照常 +1。
 
 ### 依赖从哪来
 
@@ -192,7 +192,7 @@ export default defineFacet((api) => {
 - `write` 只做整值替换。
 - `exportAll` 只导出有 codec 的 namespace；`importAll` 要求每个 dataset 都有 codec，任一失败不写文件。
 - `includeSecrets` 默认 `false`；codec 的 `export` 负责脱敏，`import` 负责从 `current` 合并回被省略/脱敏的密钥与敏感值。
-- 数据文件损坏时先试 `.bak`；再不行保留 `.corrupt-*` 并从空数据开始。
+- 数据文件损坏时先试 `.bak`；再不行保留 `data.corrupt-<timestamp>.json` 并从空数据开始。
 
 不想参与统一导出/导入的缓存或二进制资产，仍可由插件自己开文件；它们不在 `/api/data/export` 里。
 
@@ -235,32 +235,155 @@ export default defineFacet((api) => {
 - 消费者不需要 `uses`（注册表不是契约）；如果还直接消费 `DataStore` 等契约，再写 `uses`。
 - ai-gateway 未安装时 `get` 返回 `undefined`，消费者自行降级。
 
+## 插件管理（启用 / 停用 / 安装 / 移除）
+
+平台把「装哪些插件」放在 `~/.moonan/plugins.json`（`--plugins-file` / `MOONAN_PLUGINS_FILE` 可改），
+与统一数据文件分开：平台必须在建 Chord 宿主之前就知道加载谁，而 `moonan:data` 是宿主里的一个切面；
+另外，数据导入不应该能改变下次启动加载哪些插件。
+
+```json
+{
+  "format": 1,
+  "updatedAt": "2026-11-10T00:00:00.000Z",
+  "plugins": [
+    { "ref": "@moonan_ai/ai-gateway", "enabled": true },
+    { "ref": "/Users/me/plugins/my-plugin", "enabled": false }
+  ]
+}
+```
+
+- `ref` 是分发地址：包名，或目录的绝对路径（添加时规范化）。
+- `builtin`/`locked` 不落盘：来自平台 `package.json` 的 `moonan.officialPlugins`。官方插件同时出现在
+  `optionalDependencies` 里，所以装平台时自动带上。
+- 首启时官方默认自动合并进来；`--plugin` 与 `--plugins-dir` 扫描到的条目是 **ephemeral**（只对本次进程
+  有效）。在管理页里对 ephemeral 条目做启用/停用/添加，会把它「收养」成注册表条目；对已经启用的
+  ephemeral 条目再点一次「启用」同样会收养并落盘。
+- 文件损坏时先试 `.bak`；再不行保留 `plugins.corrupt-<timestamp>.json` 并从官方默认开始。权限 `0600`，目录 `0700`。
+
+### HTTP 接口
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| GET | `/api/v1/plugins` | 快照：条目（含停用）、`enabled`/`server`/`loaded`/`startupSkipped`、`error`、版本、revision、路径、降级启动信息 |
+| POST | `/api/v1/plugins/enable` | `{ "id": "<ref>" }` |
+| POST | `/api/v1/plugins/disable` | `{ "id": "<ref>" }` |
+| POST | `/api/v1/plugins/install` | `{ "ref": "<包名或目录>", "enable": true }`（`enable` 可省，默认 true） |
+| POST | `/api/v1/plugins/remove` | `{ "id": "<ref>" }` |
+| POST | `/api/v1/plugins/reload` | 重新解析并重载**当前全部**服务端切面（零服务端切面时仍提交空批次） |
+| GET | `/api/plugins` | 兼容的只读诊断：解析结果 + 启停/ephemeral/skipped 标记。**不受管理开关限制**——管理接口关闭时「插件」页用它降级展示 |
+| POST | `/api/plugins/reload` | 兼容旧拼写；与 `/api/v1/plugins/reload` 完全同一套管理策略 |
+
+`id` 就是 `ref`。`install` **不下载**：它只解析并登记已安装的包/目录；包不存在时返回 `resolve_failed`，
+附带 `plugin.error`。把 `enable` 设为 `true` 时会顺带执行一次启用事务；启用失败时条目保留为停用。
+
+`loaded` 的准确含义：**这个插件提供的东西在本进程里全部就位**——有服务端切面的，切面已安装；纯 web 插件
+没有服务端工作可等，已发布到浏览器即算 loaded。`server` 表示插件是否有服务端切面，UI 用它区分「未加载」
+（有服务端切面但没装上）与「已发布（浏览器按需加载）」（纯 web）。
+
+响应：成功 `{ ok, changed, reloadBrowser, revision, plugin? }`；失败 `{ error, code, reason?, chordCode?,
+committed?, plugin? }`，状态码 `400/403/404/409/500`。`changed` 表示插件列表/启用状态/解析结果变了，
+`reloadBrowser` 表示启用中的浏览器切面集合（`url#hash`）变了。对 `/reload`，`changed` 只是把 Chord 的
+`ReloadReport` 归纳成布尔：是否有被触碰的类型——没有服务端切面的空批次是 `false`，有切面被重新列出时是
+`true`（哪怕代码没变）。**`revision` 才是「一次提交已发生」的信号**（每次提交 +1，空批次也算）。
+
+**控制面走 HTTP，不走 Chord 远程对象。** 启停要提交一次 `host.reload`，而 reload 会等待根结束：gate/retire
+各有默认 5 秒期限，从 Chord 方法（本身就是一个根）里发起时，等待到期会 abort 驱动这个 reload 的那个根，
+于是调用以失败告终，而不是永远自锁。所以管理动作留在 HTTP 处理路径、`host.root` 之外直接调用；
+`/api/plugins/reload` 和 `/api/v1/plugins/reload` 都是这样。
+
+### 启停语义
+
+Chord 的 reload 接收「这次要（重新）加载的切面」和「这次要移除的切面」，**没列出的已安装切面继续运行**。
+平台据此做增量提交：管理动作只重载它真正改动的部分。
+
+- **启用/添加**：只把**新增**的服务端切面 URL 放进 `host.reload([...新增])`——Chord 加载新模块并安装切面；
+  其他切面不重跑 `setup`、不丢对象/状态。
+- **停用/移除**：`host.reload([], { remove: [...] })`。被移除类型的引用变 `gone`，`report.removed` 给出
+  类型名。移除 provider 不会让 prepare 失败（Chord 对已移除 service 跳过 `uses` 检查），消费方的引用
+  随之下线；消费方自己负责降级（例如 ai-gateway 未启用时 `ModelProviders.get(...)` 返回 `undefined`）。
+- **同一次操作既新增又移除**：两者一起传进同一个 `host.reload(added, { remove })`，仍是一个批次。
+- **只有 web 切面变化**（例如启停一个纯前端插件）：不产生 chord 提交；更新 `WebFacetCatalog`，浏览器按
+  `url#hash` 换切面。手动 `/reload` 是例外：即使没有服务端切面它也提交一个空批次，revision 照常推进。
+- **事务性**：先重新解析全部条目、算出 next/added/removed，再 `host.reload`；提交成功后才会替换已发布的
+  插件列表并写 registry。reload 被拒绝时旧切面继续服务，列表不变。提交成功但 `host.ready()` 失败时，
+  提交仍是既成事实：平台会发布已提交的列表并持久化，同时把这次请求报成失败（`committed: true`）。
+- 同一个进程内所有 mutation 串行执行（Chord 自身也拒绝并发 reload）。
+- `nodeLoader` 每次 import 模块且不 evict 旧副本（上游已知限制）。增量 reload 只在新增切面时 import，
+  停用甚至不 import；内存增长不再按「每次启停 × 插件数量」放大。手动 reload 仍会重读全部启用的
+  服务端切面。
+
+### CLI
+
+```bash
+moonan plugins list [--json]
+moonan plugins add <ref> [--disabled] [--plugins-file <path>]
+moonan plugins enable <ref> | disable <ref>
+moonan plugins remove <ref>
+```
+
+子命令不启动服务器，直接读写注册表，是启动失败时的恢复通道。内置插件不能 `remove`（它每次启动都会
+被官方默认重新合并，停用才是正确操作）；锁定条目 `disable` 需要 `--force`。
+
+### 安全与恢复
+
+- 管理接口默认只在回环绑定可用；非回环绑定时返回 403 `management_disabled`，除非 `--allow-management`。
+  它同样校验 `Origin` 与 `Sec-Fetch-Site`。没有账号鉴权：能改插件列表 = 能让进程加载任意代码。
+- 启动失败时的降级：平台先记录错误，再以「只隔离全部非锁定条目」重试一次（registry 不改动），让「插件」页
+  能打开并逐个启用定位；`--safe-mode` 直接只加载锁定的官方插件。若降级启动也失败，原始错误照常抛出。
+- 移除不会删除 npm 包或目录；需要彻底卸载请自己 `npm uninstall` / 删目录。
+
 ## 检查平台解析到了什么
 
 ```bash
 curl http://127.0.0.1:21315/api/plugins
 ```
 
-返回里每项带 `name`、`version`、`source`、`web`（浏览器切面 `{ url, hash }`）和 `error`（如果有）；`serverInstalled` 只留在平台内部记录里。解析失败的插件不会消失——它停在这个列表里，理由写在一起，页面上会显示一条横幅。
+返回里每项带 `name`、`version`、`source`、`web`（浏览器切面 `{ url, hash }`）和 `error`（如果有），
+现在还附带 `enabled`/`builtin`/`locked`/`ephemeral`/`startupSkipped`；`serverInstalled` 只留在平台内部
+记录里。解析失败的插件不会消失——它停在这个列表里，理由写在一起，页面上会显示一条横幅。
+
+要管理插件（含停用条目与路径）用稳定接口：
+
+```bash
+curl http://127.0.0.1:21315/api/v1/plugins
+```
+
+`/api/plugins` 仍是只读诊断接口（`experimental: true`），且**不受管理开关限制**：管理接口关闭时「插件」页
+就是靠它降级成一个只读列表。
 
 ## 热重载
 
 ```bash
 curl -X POST http://127.0.0.1:21315/api/plugins/reload
+# 等价的稳定接口（管理页用）：
+curl -X POST http://127.0.0.1:21315/api/v1/plugins/reload
 ```
 
-没有 body，也没有插件 ID：平台先重新解析所有已知 ref（删除/改名的入口因此变成 `remove` 的切面，web 文件的内容 hash 也重算）。需要 chord 提交时（有服务端切面，或需要移除切面），把**全部服务端切面**放进同一个 `host.reload` 批次，然后 `await host.ready()`；纯 web 变化只更新 Web 切面目录，不产生 chord 提交。这样：
+两个路径都是管理接口：默认只在回环绑定可用，非回环且没开 `--allow-management` 时返回 403
+`management_disabled`；它们同样校验 `Origin` 与 `Sec-Fetch-Site`。
+
+没有 body，也没有插件 ID：平台先重新解析所有已知 ref（删除/改名的入口因此变成 `remove` 的切面，web 文件
+的内容 hash 也重算）。**手动 reload 是唯一会重读已安装模块的路径**：把**当前全部服务端切面**放进同一个
+`host.reload` 批次（重新 import 磁盘上的模块），然后 `await host.ready()`。因此：
 
 - breaking contract 的 provider 与 consumer 永远在同一批里，不会被拆开；
+- 零服务端切面时仍提交一个空批次：revision 照常 +1，这是「reload 确实运行过」的可观测信号；
+- 纯 web 变化只更新 Web 切面目录，不产生 chord 提交；
 - 新宿主对象激活失败会变成一次失败请求，而不是「reload 成功但对象没起来」；提交本身已经生效，所以目录仍会发布已提交的切面集合；
 - 旧代码在旧根跑完后退休，这是 Chord 自己的事务语义；
 - web facet 的内容 hash 变化时，响应里的 `reloadBrowser` 为 true；只改服务端时它是 false；
 - 删除或改名一个服务端入口会在下一次 reload 真正下线：chord 的 `remove` 让被移除类型的引用变 `gone`，`report.removed` 给出类型名；
 - reload 被拒绝（prepare 失败）时不发布目录，旧切面继续服务；下一次 reload 会重试；
-- 新增插件目录、或修复一次解析错误，仍需要重启进程；已知 ref 的重新解析只覆盖启动时解析过的那些。
+- 平台自身的 facet 代码或 `--plugins-dir` 扫描结果需要重启进程；插件的安装/启用/停用已经可以通过管理接口在运行时完成。
+
+响应里的 `report` 是 Chord 的 `ReloadReport`：`report.changed`/`report.removed` 是 **Chord 类型名**
+（契约类型，例如 `moonan.clock`），`report.prepared`/`report.gated` 是对象地址——它们都不是插件名，
+也不是切面 URL。要对应回插件，用切面 URL（模块身份）或 `/api/v1/plugins` 的条目。
 
 开发时加 `--dev`（`pnpm dev` 已经带上）：chord 会校验每次 cell 写入与暴露状态，把 schema 漂移提前暴露成一条 `invalid`，而不是等到远端消费者。
 
-Chord 的 `nodeLoader` 每次 reload 都会 import 一份新的模块副本，且不会 evict 旧副本（上游已知限制）。频繁 reload 会让进程内存增长；长期运行的会话可以定期重启进程。
+Chord 的 `nodeLoader` 每次 import 都会得到一份新的模块副本，且不会 evict 旧副本（上游已知限制）。手动
+reload 会重读全部启用的服务端切面，所以频繁手动 reload 仍会让进程内存增长，长期运行的会话可以定期重启；
+管理动作的增量 reload 只 import 新增/变更的切面，不再把这份开销乘以插件数量。
 
-启动时如果某个服务端切面 `setup` 抛错，平台会关闭宿主并让启动失败。这是刻意的：Chord 的 `install` 不是回滚事务，继续运行会留下半个插件。修好文件后重启进程，而不是在同一个宿主里“恢复”。
+启动时如果某个服务端切面 `setup` 抛错，平台会关闭宿主并让这次启动失败——Chord 的 `install` 不是回滚事务，继续运行会留下半个插件。随后 `start` 会记录错误，并以「只隔离全部非锁定条目」再启动一次；仍失败才真正退出。被隔离的插件在 `GET /api/v1/plugins` 里是 `startupSkipped`，配置没有被改写：修好后可以在「插件」页重新启用，或重启进程再试，或用 `--safe-mode` 进恢复壳。

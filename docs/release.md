@@ -1,7 +1,7 @@
 # 发布
 
-三个包上 npm：`@moonan_ai/sdk`、`@moonan_ai/moonan`、`@moonan_ai/ai-gateway`。
-`@moonan_ai/web` **不发**（见文末）。
+四个包上 npm：`@moonan_ai/sdk`、`@moonan_ai/moonan`、`@moonan_ai/ai-gateway`、
+`@moonan_ai/plugin-manager`。`@moonan_ai/web` **不发**（见文末）。
 
 ## 版本真源
 
@@ -12,15 +12,18 @@
 |---|---|
 | `packages/platform/src/index.ts` 的 `VERSION` | 运行时版本 |
 | 根 `package.json` 的 `version` | 工作区版本 |
-| `packages/{sdk,platform,ai-gateway,web}/package.json` 的 `version` | 发布出的版本 |
+| `packages/{sdk,platform,ai-gateway,plugin-manager,web}/package.json` 的 `version` | 发布出的版本 |
 | git 标签 `v<version>` | 触发发布工作流 |
 
 改版本时一起改，然后 `pnpm test`。
 
 ## 发布顺序
 
-`sdk` → `moonan` → `ai-gateway`。顺序不能颠倒：pnpm 发布时会把 `@moonan_ai/sdk: workspace:*`
-改写成**真实版本号**，`sdk` 不在注册表里时，后两个包装得上、用的人装不上。
+`sdk` → `ai-gateway` → `plugin-manager` → `moonan`。顺序不能颠倒：pnpm 发布时会把 `workspace:*`
+改写成**真实版本号**，`sdk` 不在注册表里时其它包装得上、用的人装不上；`moonan` 的
+`optionalDependencies` 指向两个官方插件的这一版，所以平台最后发。
+
+平台与官方插件的版本必须一致（`packaging.test.ts` 盯着 `VERSION` 与所有 `package.json`）。
 
 ## 手动发一次
 
@@ -29,13 +32,15 @@ pnpm install
 pnpm typecheck && pnpm build && pnpm test     # dist/ 是构建产物，gitignore 的；不 build 就发个空包
 pnpm -r --filter "./packages/*" exec npm pack --dry-run   # 看 tarball 里到底有什么
 
-cd packages/sdk        && pnpm publish --tag alpha --access public --no-git-checks
-cd ../platform         && pnpm publish --tag alpha --access public --no-git-checks
-cd ../ai-gateway       && pnpm publish --tag alpha --access public --no-git-checks
+cd packages/sdk           && pnpm publish --tag alpha --access public --no-git-checks
+cd ../ai-gateway          && pnpm publish --tag alpha --access public --no-git-checks
+cd ../plugin-manager      && pnpm publish --tag alpha --access public --no-git-checks
+cd ../platform            && pnpm publish --tag alpha --access public --no-git-checks
 
 npm dist-tag add @moonan_ai/sdk@<version> latest
-npm dist-tag add @moonan_ai/moonan@<version> latest
 npm dist-tag add @moonan_ai/ai-gateway@<version> latest
+npm dist-tag add @moonan_ai/plugin-manager@<version> latest
+npm dist-tag add @moonan_ai/moonan@<version> latest
 ```
 
 必须用 `pnpm publish`（不是 `npm publish`）：只有它会把 `workspace:*` 换成真实版本、并且不把工作区

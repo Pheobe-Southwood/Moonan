@@ -9,21 +9,6 @@ import { GATEWAY_CSS } from "./styles.js";
 // artifacts carry the same fingerprints instead of trusting that both bundles were rebuilt.
 export { AiGateway, GatewayState } from "../contract.js";
 
-const STYLE_ID = "moonan-ai-gateway-styles";
-
-function installStyles(): void {
-	if (typeof document === "undefined") return;
-	const existing = document.getElementById(STYLE_ID);
-	if (existing) {
-		existing.textContent = GATEWAY_CSS;
-		return;
-	}
-	const style = document.createElement("style");
-	style.id = STYLE_ID;
-	style.textContent = GATEWAY_CSS;
-	document.head.appendChild(style);
-}
-
 class GatewayBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
 	override state = { error: null as Error | null };
 
@@ -52,10 +37,16 @@ class GatewayBoundary extends Component<{ children: ReactNode }, { error: Error 
 }
 
 function SafePanel(props: { host: Parameters<typeof AiGatewayPanel>[0]["host"] }) {
+	// The stylesheet is rendered by the panel, not injected in the facet's `setup`: facet
+	// setup runs during a reload's prepare, where side effects are not allowed to outlive a
+	// candidate that might be rolled back.
 	return (
-		<GatewayBoundary>
-			<AiGatewayPanel host={props.host} />
-		</GatewayBoundary>
+		<>
+			<style>{GATEWAY_CSS}</style>
+			<GatewayBoundary>
+				<AiGatewayPanel host={props.host} />
+			</GatewayBoundary>
+		</>
 	);
 }
 
@@ -67,7 +58,6 @@ const Root = local("moonan.ai-gateway.web", {
 });
 
 export default defineFacet((api) => {
-	installStyles();
 	api.serve(
 		Root,
 		(_input, _principal, self) => {

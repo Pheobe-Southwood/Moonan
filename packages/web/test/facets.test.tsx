@@ -1,7 +1,7 @@
 import type { FacetSetEntry } from "@moonan_ai/sdk";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useFacetBatches, type FacetBatchHost } from "../src/chord/facets.js";
+import { facetSignature, useFacetBatches, type FacetBatchHost } from "../src/chord/facets.js";
 
 // The hook deliberately reports a failed batch with console.error; the tests assert the state.
 const originalError = console.error;
@@ -22,6 +22,11 @@ function facet(name: string, url: string, hash: string): FacetSetEntry {
 	return { name, version: "1", source: "directory", web: { url, hash } };
 }
 
+/** What the browser host actually loads: the catalog URL canonicalized against the page. */
+function abs(url: string): string {
+	return new URL(url, location.href).href;
+}
+
 function fakeHost() {
 	const load = vi.fn(async (_urls: readonly string[], _options?: { awaitHostObjects?: boolean }) => undefined);
 	const reload = vi.fn(async (_urls: readonly string[], _options?: { remove?: readonly string[] }) => ({}));
@@ -38,16 +43,83 @@ function setup(initial: FacetSetEntry[]) {
 	return { ...fake, ...rendered };
 }
 
-describe("useFacetBatches", () => {
-	it("installs once, defers host-object readiness, and records the signature", async () => {
+describe("facetSignature", () => {
+	it("is canonical, hash-sensitive and order-insensitive", () => {
 		const a = facet("a", "/facets/a/web.js", "h1");
-		const { load, ready, result } = setup([a]);
+		const b = facet("b", "/facets/b/web.js", "h1");
+		expect(facetSignature([])).toBe("none");
+		expect(facetSignature([a, b])).toBe(facetSignature([b, a]));
+		expect(facetSignature([a])).not.toBe(facetSignature([facet("a", "/facets/a/web.js", "h2")]));
+		expect(facetSignature([a])).toContain(`${abs("/facets/a/web.js")}#h1`);
+	});
+});
 
-		await waitFor(() => expect(result.current.signature).toBe("/facets/a/web.js#h1"));
-		expect(load).toHaveBeenCalledWith(["/facets/a/web.js"], { awaitHostObjects: false });
-		expect(ready).toHaveBeenCalledTimes(1);
+describe("useFacetBatches", () => {
+	it("installs the first batch with one awaitable host.load and records the signature", async () => {
+		const a = facet("a", "/facets/a/web.js", "h1");
+		const { load, reload, ready, result } = setup([a]);
+
+		await waitFor(() => expect(result.current.signature).toContain("h1"));
+		// chord's documented startup: install and await the facets' host objects in one call.
+		expect(load).toHaveBeenCalledWith([abs("/facets/a/web.js")]);
+		expect(load).toHaveBeenCalledTimes(1);
+		expect(reload).not.toHaveBeenCalled();
+		expect(ready).not.toHaveBeenCalled();
 		expect(result.current.failures).toEqual([]);
 		expect(result.current.batchFailure).toBeNull();
+	});
+
+	it("reloads only the facet whose content hash changed", async () => {
+		const a1 = facet("a", "/facets/a/web.js", "h1");
+		const b = facet("b", "/facets/b/web.js", "h1");
+		const a2 = facet("a", "/facets/a/web.js", "h2");
+		const fake = fakeHost();
+		const { result, rerender } = renderHook((props: Props) => useFacetBatches(props.host, props.live, props.facets), {
+			initialProps: { host: fake.host, live: true, facets: [a1, b] },
+		});
+		await waitFor(() => expect(result.current.signature).toContain("h1"));
+
+		await act(async () => {
+			rerender({ host: fake.host, live: true, facets: [a2, b] });
+		});
+
+		await waitFor(() => expect(result.current.signature).toContain("h2"));
+		// `reload` lists only the changed facet; b keeps running with its objects and cells.
+		expect(fake.reload).toHaveBeenCalledWith([abs("/facets/a/web.js")], {});
+		expect(fake.ready).toHaveBeenCalledTimes(1);
+	});
+
+	it("passes removed facet names to chord as `remove` and lists nothing to reload", async () => {
+		const a = facet("a", "/facets/a/web.js", "h1");
+		const b = facet("b", "/facets/b/web.js", "h1");
+		const fake = fakeHost();
+		const { result, rerender } = renderHook((props: Props) => useFacetBatches(props.host, props.live, props.facets), {
+			initialProps: { host: fake.host, live: true, facets: [a, b] },
+		});
+		await waitFor(() => expect(result.current.signature).toContain("b"));
+
+		await act(async () => {
+			rerender({ host: fake.host, live: true, facets: [a] });
+		});
+
+		// Only a removal: chord still commits, with an empty facet list plus `remove`.
+		expect(fake.reload).toHaveBeenCalledWith([], { remove: [abs("/facets/b/web.js")] });
+	});
+
+	it("adds a new facet with reload(added) and leaves the installed ones alone", async () => {
+		const a = facet("a", "/facets/a/web.js", "h1");
+		const b = facet("b", "/facets/b/web.js", "h1");
+		const fake = fakeHost();
+		const { result, rerender } = renderHook((props: Props) => useFacetBatches(props.host, props.live, props.facets), {
+			initialProps: { host: fake.host, live: true, facets: [a] },
+		});
+		await waitFor(() => expect(result.current.signature).toContain("a"));
+
+		await act(async () => {
+			rerender({ host: fake.host, live: true, facets: [a, b] });
+		});
+
+		expect(fake.reload).toHaveBeenCalledWith([abs("/facets/b/web.js")], {});
 	});
 
 	it("advances the signature at the commit even when activation fails", async () => {
@@ -57,9 +129,8 @@ describe("useFacetBatches", () => {
 		const { result, rerender } = renderHook((props: Props) => useFacetBatches(props.host, props.live, props.facets), {
 			initialProps: { host: fake.host, live: true, facets: [a] },
 		});
-		await waitFor(() => expect(result.current.signature).toBe("/facets/a/web.js#h1"));
+		await waitFor(() => expect(result.current.signature).toContain("h1"));
 
-		fake.reload.mockResolvedValueOnce({});
 		fake.ready.mockRejectedValueOnce(new Error("activation failed"));
 		await act(async () => {
 			rerender({ host: fake.host, live: true, facets: [b] });
@@ -67,17 +138,17 @@ describe("useFacetBatches", () => {
 
 		await waitFor(() => expect(result.current.failures.length).toBe(1));
 		// The commit is final; `ready()` failing does not undo it.
-		expect(result.current.signature).toBe("/facets/a/web.js#h2");
+		expect(result.current.signature).toContain("h2");
 	});
 
-	it("keeps the old signature when the reload is refused before the commit, and retries on the next publish", async () => {
+	it("keeps the old signature when the reload is refused before the commit", async () => {
 		const h1 = facet("a", "/facets/a/web.js", "h1");
 		const h2 = facet("a", "/facets/a/web.js", "h2");
 		const fake = fakeHost();
 		const { result, rerender } = renderHook((props: Props) => useFacetBatches(props.host, props.live, props.facets), {
 			initialProps: { host: fake.host, live: true, facets: [h1] },
 		});
-		await waitFor(() => expect(result.current.signature).toBe("/facets/a/web.js#h1"));
+		await waitFor(() => expect(result.current.signature).toContain("h1"));
 
 		fake.reload.mockRejectedValueOnce(new Error("contract refused"));
 		await act(async () => {
@@ -85,41 +156,24 @@ describe("useFacetBatches", () => {
 		});
 		await waitFor(() => expect(result.current.failures.length).toBe(1));
 		// chord's prepare is transactional: nothing committed, so the old facets (and ledger) stay.
-		expect(result.current.signature).toBe("/facets/a/web.js#h1");
+		expect(result.current.signature).toContain("h1");
 
-		fake.reload.mockResolvedValueOnce({});
 		await act(async () => {
 			rerender({ host: fake.host, live: true, facets: [facet("a", "/facets/a/web.js", "h2")] });
 		});
-		await waitFor(() => expect(result.current.signature).toBe("/facets/a/web.js#h2"));
+		await waitFor(() => expect(result.current.signature).toContain("h2"));
 	});
 
-	it("passes removed facet URLs to chord", async () => {
-		const a = facet("a", "/facets/a/web.js", "h1");
-		const b = facet("b", "/facets/b/web.js", "h1");
+	it("records the installed batch and reports a first install failure", async () => {
 		const fake = fakeHost();
-		const { result, rerender } = renderHook((props: Props) => useFacetBatches(props.host, props.live, props.facets), {
-			initialProps: { host: fake.host, live: true, facets: [a, b] },
-		});
-		await waitFor(() => expect(result.current.signature).toContain("/facets/a/web.js#h1"));
-
-		fake.reload.mockResolvedValueOnce({});
-		await act(async () => {
-			rerender({ host: fake.host, live: true, facets: [a] });
-		});
-
-		expect(fake.reload).toHaveBeenCalledWith(["/facets/a/web.js"], { remove: ["/facets/b/web.js"] });
-	});
-
-	it("reports a first install failure and leaves the shell without a signature", async () => {
-		const fake = fakeHost();
-		fake.load.mockRejectedValueOnce(new Error("import failed"));
+		fake.load.mockRejectedValueOnce(new Error("activation failed"));
 		const { result } = renderHook((props: Props) => useFacetBatches(props.host, props.live, props.facets), {
 			initialProps: { host: fake.host, live: true, facets: [facet("a", "/facets/a/web.js", "h1")] },
 		});
 
-		await waitFor(() => expect(result.current.batchFailure).toBe("import failed"));
-		expect(result.current.signature).toBe("");
+		await waitFor(() => expect(result.current.batchFailure).toBe("activation failed"));
+		// `install` is not rolled back, so the facets are there and must not be installed twice.
+		expect(result.current.signature).toContain("h1");
 	});
 
 	it("installs into a replaced host instead of trusting the old ledger", async () => {
@@ -129,14 +183,14 @@ describe("useFacetBatches", () => {
 		const { result, rerender } = renderHook((props: Props) => useFacetBatches(props.host, props.live, props.facets), {
 			initialProps: { host: first.host, live: true, facets: [a] },
 		});
-		await waitFor(() => expect(result.current.signature).toBe("/facets/a/web.js#h1"));
+		await waitFor(() => expect(result.current.signature).toContain("h1"));
 
 		await act(async () => {
 			// Same catalog, new host: the new host has no facets installed yet.
 			rerender({ host: second.host, live: true, facets: [facet("a", "/facets/a/web.js", "h1")] });
 		});
 
-		await waitFor(() => expect(second.load).toHaveBeenCalledWith(["/facets/a/web.js"], { awaitHostObjects: false }));
+		await waitFor(() => expect(second.load).toHaveBeenCalledWith([abs("/facets/a/web.js")]));
 		expect(first.load).toHaveBeenCalledTimes(1);
 	});
 

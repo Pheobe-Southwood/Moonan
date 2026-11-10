@@ -1,8 +1,9 @@
 import { access, chmod, constants, copyFile, mkdir, open, readFile, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, extname, join } from "node:path";
 import {
 	copyJson,
+	defineFacet,
 	invalid,
 	isJsonValue,
 	type Ctx,
@@ -21,6 +22,7 @@ import {
 	type StoredDataset,
 } from "@moonan_ai/sdk";
 import { compile, literal, num, obj, opt, record, str, unknown } from "@moonan_ai/sdk";
+import type { Principal } from "./types.js";
 
 const DATA_FORMAT = 1;
 const MAX_DATA_FILE = 64 * 1024 * 1024;
@@ -329,7 +331,7 @@ export class DataFile {
 			this.notice = `主数据文件无法读取（${main.error}），已从备份恢复。下次保存会重新写入主文件。`;
 			return;
 		}
-		const quarantine = `${this.path}.corrupt-${Date.now()}.json`;
+		const quarantine = quarantinePath(this.path);
 		try {
 			await rename(this.path, quarantine);
 			this.notice = `主数据文件无法读取（${main.error}）。已保留为 ${quarantine}，从空数据开始。`;
@@ -364,41 +366,80 @@ export class DataFile {
 	private async persist(next: DataDocument): Promise<void> {
 		next.updatedAt = nowIso();
 		next.revision = this.doc.revision + 1;
-		await mkdir(this.directory, { recursive: true, mode: 0o700 });
-		await chmod(this.directory, 0o700).catch(() => undefined);
-		const temporary = join(
-			this.directory,
-			`.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`,
-		);
-		const payload = `${JSON.stringify(next, null, 2)}\n`;
-		const handle = await open(temporary, "w", 0o600);
-		try {
-			await handle.writeFile(payload, "utf8");
-			await handle.sync();
-		} finally {
-			await handle.close();
-		}
-		await chmod(temporary, 0o600).catch(() => undefined);
-		if (this.mainHealthy) {
-			await copyFile(this.path, this.backup).catch(() => undefined);
-			await chmod(this.backup, 0o600).catch(() => undefined);
-		}
-		await rename(temporary, this.path);
-		await chmod(this.path, 0o600).catch(() => undefined);
-		try {
-			const directoryHandle = await open(this.directory, "r");
-			try {
-				await directoryHandle.sync();
-			} finally {
-				await directoryHandle.close();
-			}
-		} catch {
-			/* best effort on platforms that cannot open a directory */
-		}
+		await writeJsonFileAtomic(this.path, next, { backup: this.mainHealthy });
 		this.doc = next;
 		this.mainHealthy = true;
 		this.notice = undefined;
 	}
+}
+
+/**
+ * Writes a JSON document atomically: a private temporary file, `fsync`, an optional copy of
+ * the previous document to `${file}.bak`, then `rename` over the target.
+ *
+ * Exported for the engine configuration files the platform keeps outside `moonan:data`
+ * (the plugin registry), so every file write in the platform still goes through this module.
+ */
+export async function writeJsonFileAtomic(
+	file: string,
+	value: unknown,
+	options: { backup?: boolean } = {},
+): Promise<void> {
+	const directory = dirname(file);
+	await mkdir(directory, { recursive: true, mode: 0o700 });
+	await chmod(directory, 0o700).catch(() => undefined);
+	const temporary = join(
+		directory,
+		`.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`,
+	);
+	const payload = `${JSON.stringify(value, null, 2)}\n`;
+	const handle = await open(temporary, "w", 0o600);
+	try {
+		await handle.writeFile(payload, "utf8");
+		await handle.sync();
+	} finally {
+		await handle.close();
+	}
+	await chmod(temporary, 0o600).catch(() => undefined);
+	if (options.backup) {
+		await copyFile(file, `${file}.bak`).catch(() => undefined);
+		await chmod(`${file}.bak`, 0o600).catch(() => undefined);
+	}
+	await rename(temporary, file);
+	await chmod(file, 0o600).catch(() => undefined);
+	try {
+		const directoryHandle = await open(directory, "r");
+		try {
+			await directoryHandle.sync();
+		} finally {
+			await directoryHandle.close();
+		}
+	} catch {
+		/* best effort on platforms that cannot open a directory */
+	}
+}
+
+/**
+ * Moves a broken file aside instead of deleting it. The plugin registry uses this so a bad
+ * edit is still on disk for the user (and the `.bak` recovery stays possible). The suffix
+ * replaces the file's own position but keeps its extension, so the original name stays
+ * recognizable and only one naming scheme exists for every platform config file.
+ */
+export async function quarantineFile(file: string): Promise<string | undefined> {
+	const target = quarantinePath(file);
+	try {
+		await rename(file, target);
+		return target;
+	} catch {
+		return undefined;
+	}
+}
+
+/** The name `quarantineFile` moves a broken file to (`data.json` -> `data.corrupt-<ts>.json`). */
+export function quarantinePath(file: string, at: number = Date.now()): string {
+	const extension = extname(file);
+	const stem = extension.length > 0 ? file.slice(0, -extension.length) : file;
+	return `${stem}.corrupt-${at}${extension}`;
 }
 
 export function defaultDataFile(env: NodeJS.ProcessEnv = process.env): string {
@@ -420,10 +461,10 @@ export interface DataFacetOptions {
  * host-lifetime objects. The platform never imports a plugin and never interprets a
  * dataset.
  */
-export function createDataFacet(options: DataFacetOptions): Facet {
+export function createDataFacet(options: DataFacetOptions): Facet<Principal> {
 	return {
 		name: "moonan:data",
-		setup(api) {
+		...defineFacet<Principal>((api) => {
 			const codecs = api.registry(DataCodecs);
 			api.serve(
 				DataStore,
@@ -494,6 +535,6 @@ export function createDataFacet(options: DataFacetOptions): Facet {
 				},
 				{ lifetime: "host" },
 			);
-		},
+		}),
 	};
 }

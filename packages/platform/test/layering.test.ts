@@ -16,7 +16,7 @@ function sources(area: string, pattern = /\.(ts|tsx|mjs|js)$/): { file: string; 
 		});
 }
 
-function packageJson(area: string): { name?: string; dependencies?: Record<string, string>; devDependencies?: Record<string, string>; peerDependencies?: Record<string, string> } {
+function packageJson(area: string): { name?: string; dependencies?: Record<string, string>; devDependencies?: Record<string, string>; peerDependencies?: Record<string, string>; optionalDependencies?: Record<string, string> } {
 	return JSON.parse(readFileSync(join(root, area, "package.json"), "utf8"));
 }
 
@@ -44,7 +44,15 @@ describe("layering", () => {
 
 	it("keeps AI packages out of the platform and the SDK", () => {
 		for (const area of ["packages/platform", "packages/sdk", "packages/web", "."]) {
-			const deps = { ...packageJson(area).dependencies, ...packageJson(area).devDependencies, ...packageJson(area).peerDependencies };
+			const manifest = packageJson(area);
+			const deps = {
+				...manifest.dependencies,
+				...manifest.devDependencies,
+				...manifest.peerDependencies,
+				// Official plugins are installed through optionalDependencies; the platform must
+				// still not *depend* on their code, and this keeps the check honest about them.
+				...manifest.optionalDependencies,
+			};
 			for (const name of Object.keys(deps)) {
 				expect(name, `${area}/package.json`).not.toMatch(/pi-(ai|agent-core|mcp|durable)|openai|anthropic/);
 			}
@@ -56,6 +64,7 @@ describe("layering", () => {
 			"packages/sdk/src",
 			"packages/platform/src",
 			"packages/ai-gateway/src",
+			"packages/plugin-manager/src",
 			"packages/web/src",
 			"packages/platform/test",
 			"packages/ai-gateway/test",
@@ -68,9 +77,14 @@ describe("layering", () => {
 				expect(text, file).not.toMatch(/from "typebox|typebox\/value/);
 			}
 		}
-		for (const area of [".", "packages/sdk", "packages/platform", "packages/ai-gateway", "packages/web"]) {
+		for (const area of [".", "packages/sdk", "packages/platform", "packages/ai-gateway", "packages/plugin-manager", "packages/web"]) {
 			const manifest = packageJson(area);
-			const deps = { ...manifest.dependencies, ...manifest.devDependencies, ...manifest.peerDependencies };
+			const deps = {
+				...manifest.dependencies,
+				...manifest.devDependencies,
+				...manifest.peerDependencies,
+				...manifest.optionalDependencies,
+			};
 			expect(deps, `${area}/package.json`).not.toHaveProperty("typebox");
 		}
 		// The browser's shared runtime maps bare specifiers; TypeBox must not be one of them.

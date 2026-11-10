@@ -9,7 +9,7 @@
 _Avoid_: 平台, platform
 
 **平台（Platform）**
-Moonan 的应用层：拥有进程、端口、插件发现、切面装载、Web 切面目录、统一数据与浏览器外壳。它不含功能语义：不知道对话、模型或面板是什么。
+Moonan 的应用层：拥有进程、端口、插件发现、插件注册表、切面装载、Web 切面目录、统一数据与浏览器外壳。它不含功能语义：不知道对话、模型或面板是什么。
 _Avoid_: 基座, substrate, 内核, kernel, 核心, core, 运行时, runtime, 宿主
 
 **宿主（Host）**
@@ -35,6 +35,14 @@ _Avoid_: 清单, manifest, 插件列表, 配置, config
 **数据存储（DataStore）**
 平台唯一的统一数据文件，local、host-lifetime。插件按 namespace 读写 JSON 数据集；`DataStore` 负责原子写入、备份、导出/导入和 revision。它不知道任何插件的 schema。
 _Avoid_: 数据库, database, 配置文件, config file
+
+**插件注册表（Plugin Registry）**
+引擎配置 `~/.moonan/plugins.json`：一组 `{ ref, enabled }`，决定进程启动时加载谁。它**不是** Chord 的 Registry（后者是插件贡献的键值表）；这里“注册表”只是文件名沿用。官方默认由平台 `package.json` 的 `moonan.officialPlugins` 给出，`builtin`/`locked` 是派生值，不落盘。
+_Avoid_: Chord 注册表, Registry（不加限定语时）
+
+**插件地址（ref）**
+一个插件的分发地址：npm 包名，或目录的绝对路径。它是注册表与管理接口的键，不是运行时身份；运行时身份仍是切面模块 URL。`--plugin` 与目录扫描产生 ephemeral 条目，不写入注册表。
+_Avoid_: 插件 ID, plugin id
 
 **数据集（Dataset）**
 `DataStore` 中一个命名 JSON 值：`{ value, version }`。namespace 是稳定字符串（建议 `包名/数据集`），version 属于数据本身，不属于 Chord 契约。

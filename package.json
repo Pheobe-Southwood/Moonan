@@ -1,6 +1,6 @@
 {
   "name": "moonan-workspace",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha1",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.7.0",
@@ -11,8 +11,8 @@
     "typecheck": "pnpm -r --parallel typecheck",
     "build": "pnpm -r build",
     "test": "pnpm -r --if-present test",
-    "dev": "pnpm build && node packages/platform/bin/moonan.js --dev --plugin @moonan_ai/ai-gateway",
-    "start": "pnpm build && node packages/platform/bin/moonan.js --plugin @moonan_ai/ai-gateway",
+    "dev": "pnpm build && node packages/platform/bin/moonan.js --dev",
+    "start": "pnpm build && node packages/platform/bin/moonan.js",
     "start:tailnet": "pnpm build && node scripts/tailnet-start.mjs",
     "start:lan": "pnpm build && node scripts/tailnet-start.mjs --lan",
     "dev:tailnet": "pnpm build && node scripts/tailnet-start.mjs --dev",
@@ -24,6 +24,7 @@
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "vitest": "^5.0.5",
-    "@moonan_ai/ai-gateway": "workspace:*"
+    "@moonan_ai/ai-gateway": "workspace:*",
+    "@moonan_ai/plugin-manager": "workspace:*"
   }
 }

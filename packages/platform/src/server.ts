@@ -3,15 +3,44 @@ import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, resolve, sep } from "node:path";
 import { acceptWebSockets, isChordError, type Host, type ReloadReport } from "@earendil-works/chord";
-import { Routes, type DataBundle, type DataImportReport, type DataStoreStorageInfo } from "@moonan_ai/sdk";
+import {
+	PLUGIN_ADMIN_API,
+	Routes,
+	type DataBundle,
+	type DataImportReport,
+	type DataStoreStorageInfo,
+	type PluginAdminSnapshot,
+} from "@moonan_ai/sdk";
 import { WebSocketServer } from "ws";
 import type { Logger } from "./logger.js";
-import { describe, errorMessage, type PluginFacets, type Principal, webSignature } from "./types.js";
+import type { PluginMutationResult } from "./platform.js";
+import {
+	adminEntry,
+	describe,
+	errorMessage,
+	PluginOperationError,
+	webSignature,
+	type PluginState,
+	type Principal,
+	type StartupReport,
+} from "./types.js";
 
 export interface WebServerData {
 	status(): Promise<DataStoreStorageInfo>;
 	export(options: { includeSecrets: boolean }): Promise<DataBundle>;
 	import(bundle: unknown): Promise<DataImportReport>;
+}
+
+/**
+ * The platform's plugin-management operations. They are handed to the HTTP layer directly
+ * (never wrapped in a Chord remote object): changing the plugin set commits a chord reload,
+ * and a reload waits for roots (gate/retire deadlines) and aborts the root that is driving
+ * it, so management runs outside any root on the plain HTTP path.
+ */
+export interface WebServerAdmin {
+	setEnabled(ref: string, enabled: boolean): Promise<PluginMutationResult>;
+	add(ref: string, options?: { enabled?: boolean }): Promise<PluginMutationResult>;
+	remove(ref: string): Promise<PluginMutationResult>;
 }
 
 export interface WebServerOptions {
@@ -21,10 +50,22 @@ export interface WebServerOptions {
 	version: string;
 	/** Absent when the shell has not been built: the API and the WebSocket still work. */
 	webDist?: string;
-	plugins: () => PluginFacets[];
+	plugins: () => PluginState[];
 	/** chord's code version: what a browser and an external tool compare to know a commit landed. */
 	revision: () => number;
 	reload: () => Promise<ReloadReport | undefined>;
+	/** Plugin management, served on `/api/v1/plugins*`. */
+	admin: WebServerAdmin;
+	/** Loopback only unless the operator passed `--allow-management`. */
+	managementEnabled: boolean;
+	pluginsFile: string;
+	pluginsDir: string;
+	dataFile: string;
+	cwd: string;
+	/** A recovery notice from the plugin registry file, read per request (a save clears it). */
+	registryWarning?: () => string | undefined;
+	/** Set when the degraded startup fallback left entries out of this process. */
+	startup?: StartupReport;
 	/** The platform's unified data surface. */
 	data: WebServerData;
 	/**
@@ -179,9 +220,11 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 	});
 
 	const plugins = options.plugins;
+	/** Disabled and startup-skipped plugins are not served and not published to the browser. */
+	const activePlugins = (): PluginState[] => plugins().filter((plugin) => plugin.enabled && !plugin.startupSkipped);
 
 	const serveFacetAsset = async (pathname: string, response: ServerResponse): Promise<boolean> => {
-		const facet = plugins().find((candidate) => candidate.web && pathname.startsWith(candidate.web.base));
+		const facet = activePlugins().find((candidate) => candidate.web && pathname.startsWith(candidate.web.base));
 		if (!facet?.web) {
 			sendJson(response, 404, { error: "facet not found" });
 			return true;
@@ -209,6 +252,154 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 		if (target && (await sendFile(response, target, candidate.startsWith("assets/")))) return true;
 		// A client-side route that is not a file: hand it the shell.
 		return sendFile(response, join(root, "index.html"), false);
+	};
+
+	/** The plugin-management snapshot. Built per request so it always shows a landed commit. */
+	const snapshot = (): PluginAdminSnapshot => {
+		const warning = options.registryWarning?.();
+		return {
+			api: PLUGIN_ADMIN_API,
+			version: options.version,
+			revision: options.revision(),
+			management: options.managementEnabled,
+			...(warning === undefined ? {} : { warning }),
+			...(options.startup ? { startup: options.startup } : {}),
+			paths: {
+				cwd: options.cwd,
+				pluginsFile: options.pluginsFile,
+				dataFile: options.dataFile,
+				pluginsDir: options.pluginsDir,
+			},
+			plugins: plugins().map(adminEntry),
+		};
+	};
+
+	/**
+	 * The management endpoints change the running process, so they are refused when they are
+	 * disabled (non-loopback bind), cross-origin, or embedded cross-site. This is Moonan
+	 * policy: there is no account authentication to fall back on.
+	 */
+	const guardManagement = (request: IncomingMessage, response: ServerResponse): boolean => {
+		if (!options.managementEnabled) {
+			sendJson(response, 403, {
+				error:
+					"plugin management is disabled: it is limited to a loopback bind unless --allow-management is set",
+				code: "management_disabled",
+			});
+			return true;
+		}
+		if (!sameOrigin(request, allowedOrigins)) {
+			sendJson(response, 403, { error: "forbidden" });
+			return true;
+		}
+		if (request.headers["sec-fetch-site"] === "cross-site") {
+			sendJson(response, 403, { error: "cross-site request refused", code: "forbidden" });
+			return true;
+		}
+		return false;
+	};
+
+	const readAdminBody = async (request: IncomingMessage): Promise<Record<string, unknown>> => {
+		let body: unknown;
+		try {
+			body = await readJsonBody(request);
+		} catch (error) {
+			throw new PluginOperationError("invalid_body", errorMessage(error), 400);
+		}
+		if (typeof body !== "object" || body === null || Array.isArray(body)) {
+			throw new PluginOperationError("invalid_body", "request body must be a JSON object", 400);
+		}
+		return body as Record<string, unknown>;
+	};
+
+	const stringField = (body: Record<string, unknown>, key: string): string => {
+		const value = body[key];
+		if (typeof value !== "string" || value.trim().length === 0) {
+			throw new PluginOperationError("invalid_body", `"${key}" must be a non-empty string`, 400);
+		}
+		return value;
+	};
+
+	const sendMutation = (response: ServerResponse, result: PluginMutationResult): void => {
+		sendJson(response, 200, {
+			ok: true,
+			changed: result.changed,
+			reloadBrowser: result.reloadBrowser,
+			revision: options.revision(),
+			...(result.plugin ? { plugin: adminEntry(result.plugin) } : {}),
+		});
+	};
+
+	const sendOperationError = (response: ServerResponse, error: unknown): void => {
+		if (error instanceof PluginOperationError) {
+			sendJson(response, error.status, {
+				error: error.message,
+				code: error.code,
+				...(error.details.chordCode ? { chordCode: error.details.chordCode } : {}),
+				...(error.details.reason ? { reason: error.details.reason } : {}),
+				...(error.details.committed ? { committed: true } : {}),
+				...(error.details.plugin ? { plugin: error.details.plugin } : {}),
+			});
+			return;
+		}
+		if (isChordError(error)) {
+			sendJson(response, 400, {
+				error: error.message,
+				code: error.code,
+				...(error.reason ? { reason: error.reason } : {}),
+			});
+			return;
+		}
+		options.logger.error("plugin operation failed", error);
+		sendJson(response, 500, { error: errorMessage(error) });
+	};
+
+	const runAdmin = async (
+		request: IncomingMessage,
+		response: ServerResponse,
+		action: (body: Record<string, unknown>) => Promise<PluginMutationResult>,
+	): Promise<void> => {
+		if (guardManagement(request, response)) return;
+		try {
+			const body = await readAdminBody(request);
+			sendMutation(response, await action(body));
+		} catch (error) {
+			sendOperationError(response, error);
+		}
+	};
+
+	const runReload = async (response: ServerResponse): Promise<void> => {
+		const beforeWeb = webSignature(activePlugins());
+		try {
+			const report = await options.reload();
+			// `reloadBrowser` means "the browser facet set or its code changed", not "the
+			// server committed". A web file's content hash is the signal; a server-only
+			// change leaves it untouched. A browser that is not a cluster participant
+			// learns this through `WebFacetCatalog` and swaps its own facets with `host.reload`.
+			const afterWeb = webSignature(activePlugins());
+			sendJson(response, 200, {
+				ok: true,
+				// A manual reload always commits (the code version advances) but need not change
+				// any facet code. Chord reports the types a batch touched by name; a re-listing
+				// of every current facet makes all of its types report as changed.
+				changed: report !== undefined && (report.changed.length > 0 || report.removed.length > 0),
+				reloadBrowser: afterWeb !== beforeWeb,
+				revision: options.revision(),
+				...(report ? { report } : {}),
+			});
+		} catch (error) {
+			if (error instanceof PluginOperationError) {
+				sendOperationError(response, error);
+				return;
+			}
+			options.logger.error("facet reload failed", error);
+			sendJson(response, 400, {
+				error: errorMessage(error),
+				...(isChordError(error)
+					? { code: error.code, ...(error.reason ? { reason: error.reason } : {}) }
+					: {}),
+			});
+		}
 	};
 
 	const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
@@ -279,13 +470,22 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 		}
 
 		if (pathname === "/api/plugins") {
+			// Deliberately ungated: the read-only diagnostic, and the plugin-manager's fallback
+			// when management is disabled (packages/plugin-manager/src/web/app.tsx).
 			sendJson(response, 200, {
 				version: options.version,
 				revision: options.revision(),
 				// Runtime-loaded browser facets are Moonan's own extension: chord ships no
 				// browser loader, so the shape of this response is not a stable protocol yet.
 				experimental: true,
-				plugins: plugins().map(describe),
+				plugins: plugins().map((plugin) => ({
+					...describe(plugin),
+					enabled: plugin.enabled,
+					builtin: plugin.builtin,
+					locked: plugin.locked,
+					ephemeral: plugin.ephemeral,
+					startupSkipped: plugin.startupSkipped,
+				})),
 			});
 			return;
 		}
@@ -295,35 +495,69 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 				sendJson(response, 405, { error: "method not allowed" });
 				return;
 			}
-			// State-changing built-in endpoint: refuse a cross-origin page. The plugin routes
-			// below decide their own policy; this one is the platform's own surface.
-			if (!sameOrigin(request, allowedOrigins)) {
-				sendJson(response, 403, { error: "forbidden" });
+			// The legacy spelling of the management reload: same policy as
+			// `/api/v1/plugins/reload`, so a non-loopback bind without `--allow-management`
+			// cannot drive a reload through this path.
+			if (guardManagement(request, response)) return;
+			await runReload(response);
+			return;
+		}
+
+		if (pathname === "/api/v1/plugins") {
+			if (method !== "GET") {
+				sendJson(response, 405, { error: "method not allowed" });
 				return;
 			}
-			const beforeWeb = webSignature(plugins());
-			try {
-				const report = await options.reload();
-				// `reloadBrowser` means "the browser facet set or its code changed", not "the
-				// server committed". A web file's content hash is the signal; a server-only
-				// change leaves it untouched. A browser that is not a cluster participant
-				// learns this through `WebFacetCatalog` and swaps its own facets with `host.reload`.
-				const afterWeb = webSignature(plugins());
-				sendJson(response, 200, {
-					ok: true,
-					reloadBrowser: afterWeb !== beforeWeb,
-					revision: options.revision(),
-					...(report ? { report } : {}),
-				});
-			} catch (error) {
-				options.logger.error("facet reload failed", error);
-				sendJson(response, 400, {
-					error: errorMessage(error),
-					...(isChordError(error)
-						? { code: error.code, ...(error.reason ? { reason: error.reason } : {}) }
-						: {}),
-				});
+			if (guardManagement(request, response)) return;
+			sendJson(response, 200, snapshot());
+			return;
+		}
+
+		if (pathname === "/api/v1/plugins/reload") {
+			if (method !== "POST") {
+				sendJson(response, 405, { error: "method not allowed" });
+				return;
 			}
+			if (guardManagement(request, response)) return;
+			await runReload(response);
+			return;
+		}
+
+		if (pathname === "/api/v1/plugins/enable") {
+			if (method !== "POST") {
+				sendJson(response, 405, { error: "method not allowed" });
+				return;
+			}
+			await runAdmin(request, response, (body) => options.admin.setEnabled(stringField(body, "id"), true));
+			return;
+		}
+
+		if (pathname === "/api/v1/plugins/disable") {
+			if (method !== "POST") {
+				sendJson(response, 405, { error: "method not allowed" });
+				return;
+			}
+			await runAdmin(request, response, (body) => options.admin.setEnabled(stringField(body, "id"), false));
+			return;
+		}
+
+		if (pathname === "/api/v1/plugins/install") {
+			if (method !== "POST") {
+				sendJson(response, 405, { error: "method not allowed" });
+				return;
+			}
+			await runAdmin(request, response, (body) =>
+				options.admin.add(stringField(body, "ref"), { enabled: body.enable !== false }),
+			);
+			return;
+		}
+
+		if (pathname === "/api/v1/plugins/remove") {
+			if (method !== "POST") {
+				sendJson(response, 405, { error: "method not allowed" });
+				return;
+			}
+			await runAdmin(request, response, (body) => options.admin.remove(stringField(body, "id")));
 			return;
 		}
 
