@@ -28,7 +28,9 @@ const consumerDir = fileURLToPath(new URL("./consumer-plugin", import.meta.url))
  */
 async function openDb(path, options) {
 	const { DatabaseSync } = await import("node:sqlite");
-	return new DatabaseSync(path, options);
+	// Node's constructor rejects an explicit `undefined` second argument, so a plain open
+	// has to pass an empty options object rather than the `undefined` default.
+	return new DatabaseSync(path, options ?? {});
 }
 
 const upstream = createServer((request, response) => {
