@@ -25,7 +25,7 @@ Options
   -H, --hostname <host>    Address to bind                    (default 127.0.0.1)
       --plugins-dir <dir>  Scan for plugin directories        (default ~/.moonan/plugins)
       --plugins-file <path> Plugin registry file              (default ~/.moonan/plugins.json)
-      --data-file <path>   Unified plugin data file           (default ~/.moonan/data.json)
+      --data-db <path>     Unified plugin data database       (default ~/.moonan/data.db)
   -P, --plugin <ref>       Add a plugin for this process only (repeatable)
       --no-official        Do not load the built-in official plugins
       --safe-mode          Load only the locked official plugins (recovery shell)
@@ -49,9 +49,10 @@ Plugin management
     moonan plugins add ./my-plugin --disabled
 
 Data
-  The platform keeps exportable plugin data in one JSON file. A plugin registers a data
-  codec to make its namespace part of export/import; private caches may still use their own
-  files. The platform itself contains no feature semantics.
+  The platform keeps exportable plugin data in one embedded SQLite database (WAL, one
+  transaction per mutation). A plugin registers a data codec to make its namespace part of
+  export/import; private caches may still use their own files. The platform itself contains
+  no feature semantics. Export/import is a portable JSON bundle, not the database file.
 
   The plugin registry (\`plugins.json\`) is engine configuration, not plugin data: it is not
   part of /api/data/export, so importing a bundle can never change which plugins load.
@@ -68,7 +69,7 @@ interface Args {
 	hostname?: string;
 	pluginsDir?: string;
 	pluginsFile?: string;
-	dataFile?: string;
+	dataDb?: string;
 	plugins: string[];
 	official: boolean;
 	safeMode: boolean;
@@ -129,10 +130,10 @@ function parse(argv: readonly string[]): Args {
 				args.pluginsFile = next.value;
 				break;
 			}
-			case "--data-file": {
+			case "--data-db": {
 				const next = valueOf(argv, index, flag);
 				index = next.index;
-				args.dataFile = next.value;
+				args.dataDb = next.value;
 				break;
 			}
 			case "-P":
@@ -363,7 +364,7 @@ async function main(): Promise<void> {
 			...(args.hostname !== undefined ? { hostname: args.hostname } : {}),
 			...(args.pluginsDir !== undefined ? { pluginsDir: args.pluginsDir } : {}),
 			...(args.pluginsFile !== undefined ? { pluginsFile: args.pluginsFile } : {}),
-			...(args.dataFile !== undefined ? { dataFile: args.dataFile } : {}),
+			...(args.dataDb !== undefined ? { dataDb: args.dataDb } : {}),
 			...(args.webDist !== undefined ? { webDist: args.webDist } : {}),
 			...(args.dev ? { dev: true } : {}),
 			...(args.allowedOrigins.length > 0 ? { allowedOrigins: args.allowedOrigins } : {}),
@@ -386,7 +387,7 @@ async function main(): Promise<void> {
 	logger.info(`Moonan ${VERSION} listening on ${moonan.url}`);
 	logger.info(`plugin registry: ${moonan.pluginsFile}`);
 	logger.info(`plugins directory: ${args.pluginsDir ?? defaultPluginsDir()} (read-only scan)`);
-	logger.info(`unified data file: ${moonan.dataFile}`);
+	logger.info(`unified data database: ${moonan.dataDb}`);
 	if (args.dev) logger.info("dev mode: every cell write is validated against its schema");
 	if (args.safeMode) logger.warn("safe mode: only the locked official plugins are enabled");
 	if (args.maxCalls !== undefined) logger.info(`websocket call limit: ${args.maxCalls} concurrent calls per link`);

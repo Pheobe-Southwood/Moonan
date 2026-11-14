@@ -65,7 +65,7 @@ describe("plugin management API", () => {
 		expect(body.api).toBe(1);
 		expect(body.management).toBe(true);
 		expect(body.paths.pluginsFile).toBe(pluginsFile);
-		expect(body.paths.dataFile).toBe(app.dataFile);
+		expect(body.paths.dataDb).toBe(app.dataDb);
 		expect(body.plugins).toEqual([]);
 	});
 

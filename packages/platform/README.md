@@ -1,8 +1,8 @@
 # @moonan_ai/moonan
 
 Moonan 平台：建一个 Chord 宿主、开一个端口、把插件目录/包解析成切面模块 URL、把 HTTP 交给插件的
-`Routes` 注册表、发布 `WebFacetCatalog` 告诉浏览器该加载哪些切面，并维护统一的 `moonan:data` 文件
-与一份插件注册表（「装哪些插件」）。它不含任何功能语义——面板、模型、对话都是插件。
+`Routes` 注册表、发布 `WebFacetCatalog` 告诉浏览器该加载哪些切面，并维护统一的 `moonan:data` 数据存储
+（内嵌 SQLite 数据库 `~/.moonan/data.db`）与一份插件注册表（「装哪些插件」）。它不含任何功能语义——面板、模型、对话都是插件。
 
 ```bash
 npx @moonan_ai/moonan
@@ -26,7 +26,7 @@ moonan
 | `-H, --hostname <addr>` | 绑定地址（默认 `127.0.0.1`） |
 | `--plugins-dir <dir>` | 启动时扫描插件目录（默认 `~/.moonan/plugins`） |
 | `--plugins-file <path>` | 插件注册表（默认 `~/.moonan/plugins.json`） |
-| `--data-file <path>` | 统一数据文件（默认 `~/.moonan/data.json`） |
+| `--data-db <path>` | 统一数据库路径（SQLite，默认 `~/.moonan/data.db`） |
 | `-P, --plugin <ref>` | 只对本次进程追加一个插件：包名或目录，可重复 |
 | `--no-official` | 不加载内置官方插件 |
 | `--safe-mode` | 只加载锁定的官方插件（恢复用） |
@@ -57,8 +57,12 @@ moonan plugins remove <ref>
   显式 `--allow-origin` 放行的 origin 除外；非浏览器客户端不受影响。
 - **插件管理接口默认只在本机可用。** 非回环绑定时返回 403，除非 `--allow-management`；管理接口能改变
   进程加载的代码，必须显式开启。
-- **两类持久化。** 可导出的插件数据在 `~/.moonan/data.json`；插件选择在 `~/.moonan/plugins.json`，
-  不参与数据导出/导入（导入一个数据文件不能改变启动时加载谁）。
+- **两类持久化。** 可导出的插件数据在内嵌 SQLite 数据库 `~/.moonan/data.db`（`--data-db` /
+  `MOONAN_DATA_DB` 可改；WAL + 事务，文件 `0600`、目录 `0700`，损坏时隔离为
+  `data.corrupt-<ts>.db` 并从空库开始，没有 `.bak`）；插件选择在引擎配置 `~/.moonan/plugins.json`
+  （仍是 JSON），不参与数据导出/导入（导入一份数据 bundle 不能改变启动时加载谁）。
+- **导出/导入是可移植 JSON。** `/api/data/export` 与 `/api/data/import` 仍用 `moonan.data` v1
+  bundle，和数据库引擎无关；`?includeSecrets=1` 才导出明文密钥。
 - **单宿主，启动失败会降级。** 一个切面在 `setup` 里抛错时，平台先整体启动失败，再自动用「只加载
   锁定插件」重试一次（注册表不改动）；`--safe-mode` 直接走这条路径。
 - **重载粒度是切面。** 启停只把新增/移除的切面放进一次 `host.reload`（未列出的切面继续运行），然后

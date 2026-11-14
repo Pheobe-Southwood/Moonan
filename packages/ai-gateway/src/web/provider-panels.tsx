@@ -22,7 +22,7 @@ import {
 	Toggle,
 } from "./controls.js";
 import { RefreshIcon, SearchIcon } from "./icons.js";
-import { authLabel, formatCostPair, formatTokens, isHttpUrl } from "./format.js";
+import { authLabel, formatBytes, formatCostPair, formatTokens, isHttpUrl } from "./format.js";
 
 export type GatewayRef = Ref<typeof AiGateway>;
 export type ToastTone = "success" | "error" | "info";
@@ -107,7 +107,7 @@ export function ProviderConnection({
 				},
 			});
 			setKey("");
-			onToast("success", "连接已保存", "写入服务端配置文件。");
+			onToast("success", "连接已保存", "写入服务端统一数据库。");
 		} catch (cause) {
 			const message = cause instanceof Error ? cause.message : String(cause);
 			setError(message);
@@ -186,7 +186,7 @@ export function ProviderConnection({
 				</Field>
 			</Section>
 
-			<Section title="密钥" note="服务端明文保存，文件权限 0600。">
+			<Section title="密钥" note="服务端明文保存，数据库权限 0600。">
 				<div className="gw-inline" style={{ marginBottom: 12 }}>
 					{provider.hasKey ? (
 						<>
@@ -212,7 +212,7 @@ export function ProviderConnection({
 					help={
 						provider.hasKey
 							? "留空表示保持现有密钥；填写后会立刻替换服务端保存的值。"
-							: "密钥只写入服务端配置文件，浏览器不会收到已保存的明文。"
+							: "密钥只写入服务端统一数据库，浏览器不会收到已保存的明文。"
 					}
 					hint={<code>apiKey</code>}
 				>
@@ -362,7 +362,7 @@ export function ProviderAdvanced({
 		setError(undefined);
 		try {
 			await gateway.reloadFromDisk();
-			onToast("success", "已从统一数据文件重新加载", "内存状态已替换为统一数据文件的内容。");
+			onToast("success", "已从统一数据库重新加载", "内存状态已替换为统一数据库的内容。");
 		} catch (cause) {
 			const message = cause instanceof Error ? cause.message : String(cause);
 			setError(message);
@@ -505,12 +505,12 @@ export function ProviderAdvanced({
 				</Button>
 			</div>
 
-			<Section title="统一数据文件" note="这里的值不经过浏览器存储；平台把可导出数据放在同一个文件里。">
+			<Section title="统一数据库" note="这里的值不经过浏览器存储；平台把可导出数据放在同一个 SQLite 数据库里。">
 				<div className="gw-notice" data-tone="info" style={{ display: "grid", gap: 4 }}>
 					<div>
-						<span className="gw-hint">配置文件</span>
+						<span className="gw-hint">数据库</span>
 						<div style={{ fontFamily: "var(--gw-mono)", fontSize: 10.5, overflowWrap: "anywhere" }}>
-							{snapshot.storage.dataPath}
+							{snapshot.storage.database}
 						</div>
 					</div>
 					<div>
@@ -520,20 +520,32 @@ export function ProviderAdvanced({
 						</div>
 					</div>
 					<div>
-						<span className="gw-hint">备份</span>
+						<span className="gw-hint">结构版本</span>
 						<div style={{ fontFamily: "var(--gw-mono)", fontSize: 10.5, overflowWrap: "anywhere" }}>
-							{snapshot.storage.backupPath}
+							{snapshot.storage.schemaVersion}
+						</div>
+					</div>
+					<div>
+						<span className="gw-hint">日志模式</span>
+						<div style={{ fontFamily: "var(--gw-mono)", fontSize: 10.5, overflowWrap: "anywhere" }}>
+							{snapshot.storage.journalMode ?? "—"}
+						</div>
+					</div>
+					<div>
+						<span className="gw-hint">大小</span>
+						<div style={{ fontFamily: "var(--gw-mono)", fontSize: 10.5, overflowWrap: "anywhere" }}>
+							{formatBytes(snapshot.storage.sizeBytes)}
 						</div>
 					</div>
 					<div className="gw-hint">
-						{snapshot.storage.exists ? "文件已存在" : "文件尚未创建"} · 权限 {snapshot.storage.mode ?? "—"} ·
+						{snapshot.storage.exists ? "数据库已创建" : "数据库尚未创建"} · 权限 {snapshot.storage.mode ?? "—"} ·
 						{snapshot.storage.writable ? " 可写" : " 目录不可写"} · 最近保存 {snapshot.storage.lastSavedAt ?? "—"}
 					</div>
 					{snapshot.storage.notice ? <div className="gw-error">{snapshot.storage.notice}</div> : null}
 				</div>
 				<div className="gw-inline" style={{ marginTop: 12 }}>
 					<Button variant="ghost" onClick={() => void reload()} disabled={reloading}>
-						<RefreshIcon size={12} /> {reloading ? "重新加载中…" : "从统一数据文件重新加载"}
+						<RefreshIcon size={12} /> {reloading ? "重新加载中…" : "从统一数据库重新加载"}
 					</Button>
 				</div>
 			</Section>

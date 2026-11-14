@@ -111,7 +111,7 @@ export function presetToProviderConfig(preset: Preset): ProviderConfig {
 
 /**
  * Copies the chat `Model` fields into the persisted form. Optional fields stay absent
- * instead of becoming `undefined`, so the JSON file stays clean and small.
+ * instead of becoming `undefined`, so the stored JSON stays clean and small.
  */
 export function modelToConfig(model: Model<Api>, providerBaseUrl: string, at = nowIso()): ModelConfig {
 	const baseUrl = model.baseUrl && normalizeBaseUrl(model.baseUrl) !== normalizeBaseUrl(providerBaseUrl)

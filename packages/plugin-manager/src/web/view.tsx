@@ -245,8 +245,8 @@ export function PluginsPanelView(props: PluginsPanelViewProps) {
 						<dl>
 							<dt>插件注册表</dt>
 							<dd>{snapshot.paths.pluginsFile}</dd>
-							<dt>统一数据</dt>
-							<dd>{snapshot.paths.dataFile}</dd>
+							<dt>统一数据库</dt>
+							<dd>{snapshot.paths.dataDb}</dd>
 							<dt>扫描目录</dt>
 							<dd>{snapshot.paths.pluginsDir}</dd>
 							<dt>解析基准</dt>

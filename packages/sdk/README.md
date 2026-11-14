@@ -71,7 +71,7 @@ export default defineFacet((api) => {
 import { DataCodecs, DataStore } from "@moonan_ai/sdk";
 ```
 
-- `DataStore` 是平台唯一的统一数据文件（local、host-lifetime）；`read` 返回 `{ value, version }`，`update` 是串行读改写，`exportAll`/`importAll` 由平台 HTTP 表面调用。
+- `DataStore` 是平台唯一的统一数据存储（local、host-lifetime，落盘为一个内嵌 SQLite 数据库）；`read` 是异步的，返回 `{ value, version }`；`update` 是事务化的串行读改写；`exportAll`/`importAll` 由平台 HTTP 表面调用。
 - `DataCodecs` 是插件贡献的导出/导入 codec 注册表；没有 codec 的 namespace 不会进入统一导出。
 
 ## 插件管理 API 类型

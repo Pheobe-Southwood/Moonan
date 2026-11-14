@@ -13,12 +13,12 @@ node packages/platform/bin/moonan.js
   │     ├── 插件 A 的服务端切面
   │     └── 插件 B 的服务端切面
   │
-  ├── ~/.moonan/data.json             ← 统一数据文件（可由 --data-file 改）
-  ├── ~/.moonan/plugins.json          ← 插件注册表：哪些 ref 启用（引擎配置，不参与导出）
+  ├── ~/.moonan/data.db               ← 统一数据库：内嵌 SQLite（可由 --data-db 改；WAL）
+  ├── ~/.moonan/plugins.json          ← 插件注册表：哪些 ref 启用（引擎配置，仍是 JSON，不参与导出）
   └── HTTP + WebSocket 服务（一个端口）
 ```
 
-**只有一个进程，一个端口。** 没有独立的 UI 服务、没有反向代理、没有数据库进程。平台有两类落盘：统一数据文件（插件数据，可导出/导入）与插件注册表（引擎配置，决定启动时加载谁）。插件仍可为缓存或二进制资产开自己的文件，但那些文件不属于统一导出。两种文件都走 `data.ts` 的临时文件 + fsync + rename 原子写。
+**只有一个进程，一个端口。** 没有独立的 UI 服务、没有反向代理、没有独立的数据库进程——统一数据是内嵌的 SQLite 数据库（Node 内置的 `node:sqlite`，经 Chord 1.5.0 的 SQLite 层打开），跟着平台进程一起开关。平台有两类落盘：统一数据库（插件数据，可导出/导入）与插件注册表（引擎配置，决定启动时加载谁）。插件仍可为缓存或二进制资产开自己的文件，但那些文件不属于统一导出。插件注册表走 `json-file.ts` 的临时文件 + fsync + rename 原子写；统一数据库走 SQLite 的事务与 WAL。
 
 ## 一次装载
 
@@ -62,7 +62,7 @@ node packages/platform/bin/moonan.js
   ├── /ws                     → WebSocket 升级 → chord 协议（对象调用走这里）
   ├── /api/plugins            → 内建：插件列表的 HTTP 视图（只读，不受管理开关限制）
   ├── /api/plugins/reload     → 内建：POST 重新解析并重载当前全部服务端切面（管理策略同 /api/v1）
-  ├── /api/data/status        → 内建：DataStore.storage
+  ├── /api/data/status        → 内建：DataStore 的存储信息（数据库路径、revision、dataset 数量、schemaVersion…）
   ├── /api/data/export        → 内建：GET 导出；?includeSecrets=1 才含明文
   ├── /api/data/import        → 内建：POST 原子导入
   ├── /facets/<hash>/<file>   → 浏览器切面与其同目录资源（越界即 403）
@@ -202,7 +202,7 @@ ai-gateway 服务端切面
   │ self.get(DataStore, {}) + uses: [DataStore]
   ▼
 DataStore（local, lifetime: "host"）
-  resource: DataFile（~/.moonan/data.json）
+  resource: DataStoreDatabase（~/.moonan/data.db，内嵌 SQLite）
   storage cell / revision cell
   read / update / write / remove / reload / exportAll / importAll
   │ DataCodecs.table(ctx)
@@ -212,12 +212,17 @@ ai-gateway/config  dataset { value, version }
 ```
 
 - `DataStore` 是权威；插件自己的 Chord cell 是投影，初始化时读 `read`，导入/外部 reload 后通过 `data.revision` listener 重新加载。
-- `read` 返回 `{ value, version }`，不查 codec：插件可能在 codec 注册发布前就执行 `config` 的 `init`，所以由插件自己校验/迁移第一个值。
-- `update` 在 `DataFile` 的串行队列里完成读改写；`importAll` 也走同一个队列，所以导入和插件写不会交错。
+- `read` 返回 `{ value, version }`，不查 codec：插件可能在 codec 注册发布前就执行 `config` 的 `init`，所以由插件自己校验/迁移第一个值。`read` 是异步的（原来是同步的），facet 的调用处本来就 `await` 每个方法。
+- `update` 在 `DataStoreDatabase` 的串行队列里完成读改写，读与写都在一个 SQLite 事务里；`importAll` 也走同一个队列，所以导入和插件写不会交错。
 - `write` 是整值替换；`update` 才是推荐的读改写入口。
-- `exportAll` 只导出有 codec 的 dataset；没有 codec 的 namespace 放进 `skipped`。`importAll` 要求每个 dataset 都有 codec，任一失败都不写文件。
+- `exportAll` 只导出有 codec 的 dataset；没有 codec 的 namespace 放进 `skipped`。`importAll` 要求每个 dataset 都有 codec，任一失败都不写入数据库。
 - `includeSecrets` 默认 `false`。ai-gateway 的 codec 默认删掉 `apiKey`/`keyUpdatedAt`，导入时再按 provider id 从当前数据里补回；显式 `?includeSecrets=1` 才导出明文。
-- 文件损坏时先试 `.bak`；再不行把主文件保留为 `.corrupt-<timestamp>.json`，从空数据开始；`notice` 会显示在 ai-gateway 的存储信息里。
+- 数据库打开时用 WAL + `synchronous=NORMAL`，busy timeout 5 秒；每次变更（`write`/`update`/`remove`/`importAll`）是一个事务，失败回滚且 revision/dataset 数量不变。`moonan_data_schema` 记录迁移版本（`applySqliteMigrations`），`moonan_data_meta` 单行存格式标识、store revision、dataset 数量与最近保存时间，`moonan_data_datasets` 每行一个 dataset（`namespace` 主键、`version`、JSON `value`、`updated_at`）。
+- `PRAGMA application_id` 标成 Moonan（`0x4D4F4F4E`）：`application_id` 非零且不是 Moonan、或已有表却没有 `moonan_data_schema` 的外来 SQLite 文件会被拒绝，不会在别人的库里建表；schema 版本比当前支持的新时也拒绝打开。
+- `DataStore.storage` 报告 `DataStoreStorageInfo`：`database`、`exists`、`mode`、`writable`、`revision`、`datasets`、`schemaVersion`、`journalMode`、`sizeBytes`、`lastSavedAt`、`notice`；`/api/data/status` 返回同一个对象。
+- 导出/导入仍是可移植 JSON bundle（`format: "moonan.data"`、`formatVersion: 1`），原子且与存储引擎无关；`DataCodec` 的 `migrate`/`export`/`import` 接口与 `includeSecrets` 语义都不变。
+- 数据库文件权限 `0600`、目录 `0700`（`:memory:` 例外）。库损坏时把 `data.db` 重命名为 `data.corrupt-<ts>.db`（`-wal`/`-shm` 一起改），从空库开始；`notice` 会显示在 ai-gateway 的存储信息里。不再有 `.bak` 或 JSON 文件恢复，也不迁移旧版 JSON 数据。
+- Node 22 加载 `node:sqlite` 时会打印 `ExperimentalWarning`，平台在动态 import Chord 的 SQLite 层前装一个只过滤这条警告的监听器，CLI 与测试的 stderr 保持干净。
 
 ## 插件注册表
 
@@ -232,7 +237,7 @@ ai-gateway/config  dataset { value, version }
 插件管理面板 / CLI
 ```
 
-- **为什么不放进统一数据文件**：启动顺序（建宿主之前就要知道加载谁）与安全边界（导入数据不能改变加载哪些插件）。代价是“备份”分两处：`data.json` 管插件数据，`plugins.json` 管插件选择；导出/导入只覆盖前者。
+- **为什么不放进统一数据库**：注册表是引擎配置，必须是 JSON、在启动前就能读（建宿主之前就要知道加载谁），而且导入数据不能改变加载哪些插件。代价是“备份”分两处：`data.db` 管插件数据，`plugins.json` 管插件选择；导出/导入只覆盖前者。
 - `builtin`/`locked` 是派生值，不落盘；官方插件清单在平台 `package.json`。
 - 文件损坏 → `.bak` → `.corrupt-*` + 官方默认；恢复提示通过 `/api/v1/plugins.warning` 显示在管理页。
 - 两个 Moonan 实例共享同一文件时没有跨进程锁，按原子写“最后写入者胜”；这是单进程本地工具的已知边界。
@@ -243,7 +248,7 @@ ai-gateway/config  dataset { value, version }
 - `--allow-origin <origin>`：除同源外精确放行一个浏览器 origin（可重复）。WebSocket 与内建 `POST /api/plugins/reload`、`/api/data/*` 都校验 `Origin`；`/api/plugins/reload` 与 `/api/v1/plugins*` 还先受管理开关限制。无 `Origin` 的客户端（curl、测试）不受影响，`Origin: null` 与畸形值被拒绝。
 - 插件 HTTP 路由拒绝浏览器跨站请求：命中的插件路由在调用前检查 `Sec-Fetch-Site`，浏览器的 `cross-site` 请求（第三方页面里的 `<img>`、`<form>`、iframe，以及从其它站点进入的顶层导航）得到 `403`，包括有副作用的 GET。非浏览器客户端不发送该头，接口调用不受影响。这是平台级拒绝，插件无法放行；显式 `--allow-origin` 放行的 origin 例外（与其他内建端点的信任一致），插件仍可自行校验自己接受的 `Origin`/cookie。这是平台策略，不是 chord 规定。
 - `--max-calls <n>`：把 chord 的 `maxCalls` 接到每条 WebSocket 链路上；默认不设上限（chord 默认）。超过上限的调用得到 `unavailable/too_many_calls`，不可重试。
-- `--data-file <path>`：统一数据文件路径；也可用 `MOONAN_DATA_FILE`，默认 `~/.moonan/data.json`。
+- `--data-db <path>`：统一数据库路径（SQLite）；也可用 `MOONAN_DATA_DB`，默认 `~/.moonan/data.db`。
 - `--plugins-file <path>`：插件注册表路径；也可用 `MOONAN_PLUGINS_FILE`，默认 `~/.moonan/plugins.json`。
 - `--allow-management`：非回环绑定时默认关闭 `/api/v1/plugins*`（403 `management_disabled`）；显式开启后仍校验同源/跨站。管理接口能改变进程加载的代码，等价于本机代码执行入口。
 - 启动降级与 `--safe-mode`：见「一次装载」。
@@ -254,7 +259,7 @@ ai-gateway/config  dataset { value, version }
 
 **单宿主，启动失败先降级再退出。** 所有服务端切面都装在同一个 chord 宿主里，共享一个代码版本。Chord 的 `install` 不是回滚事务：一个切面在 `api.serve` 之后抛错，它的服务已经留在宿主里。所以启动阶段有两种诚实的结果——全部成功，或关闭宿主后以「只加载锁定官方插件」再试一次；仍失败才退出。隔离粒度的上限是“隔离所有非锁定条目”，不是进程级隔离（那要连带 cluster reload、relay 授权、跨宿主契约）。
 
-**插件注册表独立于统一数据。** 注册表是引擎配置：启动前就要读、不能由数据导入改变。代价是用户要备份两份文件，且 `plugins.json` 没有跨进程锁。把选择放进 `moonan:data` 会让启动变成两阶段（先建宿主才能读数据），破坏插件在激活期就能 `self.get(DataStore)` / `self.get(WebFacetCatalog)` 的保证。
+**插件注册表独立于统一数据。** 注册表是引擎配置（`plugins.json`，仍是 JSON）：启动前就要读、不能由数据导入改变。代价是用户要备份两处，且 `plugins.json` 没有跨进程锁。把选择放进 `moonan:data` 会让启动变成两阶段（先建宿主才能读数据），破坏插件在激活期就能 `self.get(DataStore)` / `self.get(WebFacetCatalog)` 的保证。
 
 **管理接口是 HTTP，不是 Chord 对象。** 启停要提交 reload，reload 会等待根结束（gate/retire 各有默认 5 秒期限）。超期时 Chord abort 的是**这次 reload**（`aborted/gate_deadline`，错误里列出阻塞的根），retire 超期则 abort 旧代码版本的根（`superseded`）；驱动 reload 的那次调用属于旧版本，会随之中断并以失败告终，但不会永久自锁。控制面留在 HTTP 处理路径，数据面（浏览器切面）继续走 `WebFacetCatalog`。
 
@@ -262,4 +267,4 @@ ai-gateway/config  dataset { value, version }
 
 **平台只提供统一数据，不提供功能语义。** `moonan:data` 只存 namespace + version + JSON，不校验插件 schema；schema/version/migrate/脱敏由 `DataCodec` 负责。这样平台仍然不知道对话、模型或面板是什么，同时导出/导入有一个统一的原子边界。
 
-**卸载插件不会自动删除数据。** 统一数据文件里的 namespace 会保留；导出时没有 codec 的 dataset 会进入 `skipped`。需要清理时用 `DataStore.remove`（目前没有 UI），或手动编辑/重建数据文件。
+**卸载插件不会自动删除数据。** 统一数据库里的 dataset 行会保留；导出时没有 codec 的 dataset 会进入 `skipped`。需要清理时用 `DataStore.remove`（目前没有 UI），或用 SQLite 工具删除对应行/重建数据库。

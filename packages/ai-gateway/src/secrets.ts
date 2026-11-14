@@ -2,8 +2,8 @@
  * Sensitive request values: what may leave the server, and how a write from the browser
  * finds its way back to the stored value.
  *
- * The gateway stores provider/model configuration in the platform's data file and shows it
- * in a browser panel. `apiKey` never leaves the server (only `hasKey` and a hint do); the
+ * The gateway stores provider/model configuration in the platform's data database and shows
+ * it in a browser panel. `apiKey` never leaves the server (only `hasKey` and a hint do); the
  * same has to hold for credential-like headers and environment variables (an
  * `Authorization` header, `AWS_SECRET_ACCESS_KEY`, …), and for the default export, which is
  * meant to be portable. The contract schemas are unchanged: only values are replaced.

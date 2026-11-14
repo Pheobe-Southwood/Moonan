@@ -20,7 +20,7 @@ const apps: Moonan[] = [];
 const dirs: string[] = [];
 
 export interface AppOptions {
-	readonly dataFile?: string;
+	readonly dataDb?: string;
 	readonly pluginsFile?: string;
 	readonly hostname?: string;
 	readonly official?: boolean | readonly OfficialPluginRef[];
@@ -38,11 +38,11 @@ export async function tempDir(prefix: string): Promise<string> {
 	return dir;
 }
 
-/** A fresh temporary unified data file; removed by `cleanup()`. */
-export async function tempDataFile(): Promise<string> {
-	const dir = await mkdtemp(join(tmpdir(), "moonan-data-"));
+/** A fresh temporary unified data database; removed by `cleanup()`. */
+export async function tempDataDb(): Promise<string> {
+	const dir = await mkdtemp(join(tmpdir(), "moonan-data-db-"));
 	dirs.push(dir);
-	return join(dir, "data.json");
+	return join(dir, "data.db");
 }
 
 /** A fresh temporary plugin registry; removed by `cleanup()`. */
@@ -63,14 +63,14 @@ export async function pluginDir(source: string): Promise<string> {
 export async function appFor(plugins: readonly string[], options: AppOptions = {}): Promise<Moonan> {
 	const pluginsDir = await mkdtemp(join(tmpdir(), "moonan-plugins-"));
 	dirs.push(pluginsDir);
-	const dataFile = options.dataFile ?? (await tempDataFile());
+	const dataDb = options.dataDb ?? (await tempDataDb());
 	const pluginsFile = options.pluginsFile ?? (await tempPluginsFile());
 	const app = await start({
 		port: 0,
 		hostname: "127.0.0.1",
 		plugins: [...plugins],
 		pluginsDir,
-		dataFile,
+		dataDb,
 		pluginsFile,
 		// Tests must never read the developer's real registry, and the official plugins would
 		// add a second, unrelated facet batch to every harness app.

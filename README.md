@@ -1,8 +1,8 @@
 # Moonan
 
-一个本地运行的插件工作台。平台建 Chord 宿主、开一个端口、把插件目录/包解析成切面模块 URL、把 HTTP 交给插件的 `Routes` 注册表、发布 `WebFacetCatalog` 告诉浏览器加载哪些切面，并维护一个统一的 `moonan:data` 数据文件。所有功能都是插件；「装哪些插件」本身有一份引擎配置（`plugins.json`），可以在 WebUI 的「插件」页里改。
+一个本地运行的插件工作台。平台建 Chord 宿主、开一个端口、把插件目录/包解析成切面模块 URL、把 HTTP 交给插件的 `Routes` 注册表、发布 `WebFacetCatalog` 告诉浏览器加载哪些切面，并维护一个统一的 `moonan:data` 数据存储（内嵌 SQLite 数据库 `~/.moonan/data.db`）。所有功能都是插件；「装哪些插件」本身有一份引擎配置（`plugins.json`），可以在 WebUI 的「插件」页里改。
 
-A local plugin workbench. The platform builds a Chord host, opens one port, resolves plugins to facet module URLs, publishes `WebFacetCatalog`, and keeps one unified data file. Every feature is a plugin, and which plugins load is a small engine config the 插件 tab can edit.
+A local plugin workbench. The platform builds a Chord host, opens one port, resolves plugins to facet module URLs, publishes `WebFacetCatalog`, and keeps one unified data store (an embedded SQLite database). Every feature is a plugin, and which plugins load is a small engine config the 插件 tab can edit.
 
 **平台不是 Chord 的 host。** Chord 的 host 才是对象、状态与重载的运行时；Moonan 是它上面的应用层，负责进程、端口、插件发现、切面装载、Web 切面目录、统一数据和浏览器外壳。
 
@@ -50,7 +50,7 @@ pnpm dev
 | `--dev` | 校验每次 cell 写入与暴露状态 |
 | `--allow-origin <o>` | 同源之外额外放行一个浏览器 origin |
 | `--max-calls <n>` | 每条 WebSocket 链路的并发调用上限 |
-| `--data-file <path>` | 统一数据文件（默认 `~/.moonan/data.json`） |
+| `--data-db <path>` | 统一数据库路径（SQLite，默认 `~/.moonan/data.db`） |
 
 只想本机用，就别传 `--hostname`：平台不做账号鉴权，端口对谁开放，谁就能驱动所有插件。
 
@@ -84,7 +84,7 @@ pnpm start:tailnet -- --port 21316
 | 契约 Contract | 用 JSON Schema 描述的、两端各写一份的对象说明（构建器来自 `@earendil-works/pi-schema`）；身份是指纹，不是模块实例 |
 | 注册表 Registry | 插件贡献东西的唯一通道：键值表，整表随代码版本替换 |
 | Web 切面目录 WebFacetCatalog | 平台公布给浏览器的唯一远程对象：已解析的切面、显示名、版本与错误 |
-| 数据存储 DataStore | 平台唯一的统一数据文件：插件按 namespace 读写，导出/导入由平台协调 |
+| 数据存储 DataStore | 平台唯一的统一数据：内嵌 SQLite 数据库，插件按 namespace 读写，导出/导入由平台协调 |
 | 模型提供商 ModelProviders | ai-gateway 自己定义并导出的服务端注册表：其他插件按 id 查找模型运行时 |
 
 完整释义（含每个词的取舍与反例）见 [CONTEXT.md](CONTEXT.md)。
@@ -101,14 +101,14 @@ pnpm start:tailnet -- --port 21316
 
 依赖方向是单向的：`moonan → sdk`、`web → sdk`、`sdk → chord + pi-schema`，官方插件 `ai-gateway → sdk + pi-ai`、`plugin-manager → sdk`。平台不导入任何插件代码，只把切面 URL 交给 Chord；官方插件只出现在平台 `package.json` 的 `optionalDependencies` 与 `moonan.officialPlugins` 清单里——`packages/platform/test/layering.test.ts` 盯着这条线。
 
-Chord 锁定在 `1.5.0`（`sdk`、`web`、`moonan` 都依赖这一版），契约 schema 用 `@earendil-works/pi-schema` `1.5.0` 的构建器写；插件按同一版本对齐。
+Chord 锁定在 `1.5.0`（`sdk`、`web`、`moonan` 都依赖这一版），契约 schema 用 `@earendil-works/pi-schema` `1.5.0` 的构建器写；插件按同一版本对齐。统一数据用 Chord 1.5.0 自带的 SQLite 层（`@earendil-works/chord/sqlite` + `@earendil-works/chord/sqlite/node`，底层是 Node 内置的 `node:sqlite`），不引入额外数据库依赖。
 
 ## 内置插件
 
 ### ai-gateway（「模型」页）
 
 [`packages/ai-gateway`](packages/ai-gateway/README.md) 是仓库内置的模型网关面板。它把 pi-ai 的提供商、模型和请求参数搬进
-统一数据文件中的一个数据集：
+统一数据库中的一个数据集：
 
 - 内置目录来自 `@earendil-works/pi-ai@1.5.0`：42 个提供商，添加时导入它们的对话模型目录。
 - 自定义提供商支持 OpenAI 兼容、Anthropic、Google、Mistral、Bedrock、Vertex 等 API。
@@ -116,13 +116,13 @@ Chord 锁定在 `1.5.0`（`sdk`、`web`、`moonan` 都依赖这一版），契�
   提示缓存、采样参数、`compat` 兼容覆盖（按 API 从 pi-ai 的真实 schema 生成表单）、模型请求头。
 - 「拉取模型」从上游的 `/models`（Anthropic `/v1/models`、Google `models`、Ollama `/api/tags`）
   读取目录；失败时按提供商回退到 pi-ai 内置目录，并把回退原因显示在面板上。
-- 密钥、提供商、模型、全局请求默认值全部写在服务端统一数据文件的
-  `ai-gateway/config` 数据集里（默认 `~/.moonan/data.json`，可用 `MOONAN_DATA_FILE`
-  或 `--data-file` 改路径）。文件权限 `0600`，目录 `0700`；浏览器只拿到掩码。
+- 密钥、提供商、模型、全局请求默认值全部写在服务端统一数据库的
+  `ai-gateway/config` 数据集里（默认 `~/.moonan/data.db`，可用 `MOONAN_DATA_DB`
+  或 `--data-db` 改路径）。数据库文件权限 `0600`，目录 `0700`；浏览器只拿到掩码。
 - 面板不写 `localStorage`、`sessionStorage` 或 IndexedDB。
 
-服务端切面重载不会丢配置：`DataStore` 是权威，`config` cell 是投影；统一数据文件原子替换。
-「高级」页可以显式从统一数据文件重新加载；主文件损坏时会尝试 `.bak`，再不行就保留 `.corrupt-*` 并从空数据开始。
+服务端切面重载不会丢配置：`DataStore` 是权威，`config` cell 是投影；统一数据库的每次变更都是一个事务。
+「高级」页可以显式从统一数据库重新加载；数据库损坏时会隔离为 `data.corrupt-<ts>.db` 并从空库开始（不再有 `.bak` 备份或 JSON 文件恢复）。
 其他服务端插件可以通过 `ModelProviders` 注册表按 id 取得 ai-gateway 的 `MutableModels` 运行时。
 
 ### plugin-manager（「插件」页）
@@ -139,8 +139,11 @@ Chord 锁定在 `1.5.0`（`sdk`、`web`、`moonan` 都依赖这一版），契�
 
 ## 统一数据 · Unified data
 
-平台把可导出的插件数据放在一个 JSON 文件里（默认 `~/.moonan/data.json`，`--data-file` 或
-`MOONAN_DATA_FILE` 可改）。插件注册 `DataCodecs` 后，自己的 namespace 才会进入统一导出：
+平台把可导出的插件数据放在一个内嵌的 SQLite 数据库里（默认 `~/.moonan/data.db`，`--data-db` 或
+`MOONAN_DATA_DB` 可改）。它由 Node 内置的 `node:sqlite` 打开（经 Chord 1.5.0 的
+`@earendil-works/chord/sqlite/node`），没有独立的数据库进程；WAL + `synchronous=NORMAL`，
+每次变更都在一个事务里（同目录会出现 SQLite 的 `-wal`/`-shm` 边车文件，属于数据库的一部分）。
+插件注册 `DataCodecs` 后，自己的 namespace 才会进入统一导出：
 
 ```bash
 curl http://127.0.0.1:21315/api/data/status
@@ -150,10 +153,21 @@ curl -X POST http://127.0.0.1:21315/api/data/import \
 ```
 
 导出默认省略 API Key；`?includeSecrets=1` 才包含明文。导入是原子的：未知 namespace、重复
-namespace 或 codec 失败都会整批拒绝。`moonan:data` 内部用 `DataStore.update` 串行化读改写。
+namespace 或 codec 失败都会整批拒绝。`DataStore.read` 是异步的，`DataStore.update` 仍是串行化的
+读改写入口。
 
-插件选择**不在**这份导出里：`plugins.json` 是引擎配置，故意独立于 `moonan:data`——否则导入一个
-数据文件就能改变进程下次加载哪些插件。
+库内三张表：`moonan_data_datasets` 每行是一个 dataset（`namespace` 主键、`version`、JSON
+`value`、`updated_at`）；`moonan_data_meta` 单行记录格式标识、store revision、dataset 数量与
+最近保存时间；`moonan_data_schema` 记录数据库自己的迁移版本。数据库文件权限 `0600`、目录
+`0700`；库损坏时保留为 `data.corrupt-<ts>.db`（连同 `-wal`/`-shm` 边车）并从空库开始，
+`notice` 会显示在 ai-gateway 的存储信息里——不再有 `.bak` 备份或 JSON 文件恢复。
+
+导出/导入仍是可移植的 JSON bundle（`format: "moonan.data"`，`formatVersion: 1`），只有存储引擎
+变了。这是破坏性变更：旧版的 JSON 数据文件不会被读取，也没有 `--data-file` 之类的兼容别名，
+更不会自动迁移（本项目尚无用户，因此不提供迁移路径）。
+
+插件选择**不在**这份导出里：`plugins.json` 是引擎配置，故意独立于 `moonan:data`——否则导入一份
+数据 bundle 就能改变进程下次加载哪些插件。
 
 ## 写一个插件 · Writing a plugin
 
@@ -199,7 +213,7 @@ export default defineFacet((api) => {
 
 - **没有账号鉴权。** 同源校验与 `--allow-origin` 只拒绝跨源浏览器，不是安全边界，也不保护直接访问端口的非浏览器客户端。命中的插件路由会拒绝浏览器跨站请求（`Sec-Fetch-Site: cross-site`，例如第三方页面的 `<img>`/`<form>`，或从其它站点进入的导航）；插件无法放行，显式 `--allow-origin` 的 origin 例外，非浏览器客户端不受影响。
 - **插件管理接口默认只在本机可用。** `/api/v1/plugins*` 在回环绑定之外返回 403，除非显式 `--allow-management`；它同样校验同源/跨站。管理接口能改变进程加载的代码，等同于本机代码执行入口。
-- **平台落两类文件。** 可导出的插件数据在统一数据文件 `~/.moonan/data.json`（`moonan:data`）；「装哪些插件」在引擎配置 `~/.moonan/plugins.json`（`--plugins-file`）。插件选择不参与数据导出/导入。
+- **平台落两类持久化。** 可导出的插件数据在内嵌 SQLite 数据库 `~/.moonan/data.db`（`moonan:data`，`--data-db` 可改）；「装哪些插件」在引擎配置 `~/.moonan/plugins.json`（`--plugins-file`，仍是 JSON）。插件选择不参与数据导出/导入。
 - **单宿主，启动失败会降级。** 所有服务端切面共享一个代码版本；一个切面在 `setup` 里抛错时，平台先整体启动失败，再自动用「只加载锁定插件」重试一次（registry 不改动），让「插件」页能打开并定位问题。`--safe-mode` 直接走这条恢复路径。
 - **重载粒度是切面，不是插件。** `POST /api/plugins/reload` 重新解析入口，然后把**当前全部**服务端切面放进**一次** `host.reload` 重新 import（breaking 契约的提供方与消费方永远同批），再 `await host.ready()`；没有服务端切面时它也提交空批次，revision 照常 +1。启用/停用只把**新增/移除的切面**放进批次，未列出的切面继续运行。`/api/plugins/reload` 与 `/api/v1/plugins/reload` 是同一个管理策略（非回环绑定默认 403）。
 - **浏览器不参与服务端提交。** 它靠 `WebFacetCatalog` 得知切面变化，只在 `web.url#hash` 变化时换自己的切面；服务端-only 的改动不会刷新页面。
@@ -225,12 +239,12 @@ pnpm dev        # build 后以 --dev 启动，官方插件（模型 + 插件）�
 
 ## 状态 · Status
 
-`0.1.0-alpha2`：契约 schema 从 TypeBox 换到 `@earendil-works/pi-schema`（Chord 1.5.0 的官方写法），`sdk` 不再导出 `Type`，改用 `obj`、`str`、`num`、`literal`、`record` 等构建器；契约 JSON 与指纹不变，旧页面只会整页刷新一次。平台建立在 Chord 之上，不含预设能力契约或功能语义；持久化分为统一数据文件与插件注册表两份。插件由切面组成；启停只重载新增/移除的切面，手动 reload 才重读全部服务端切面。
+`0.1.0-alpha2`：契约 schema 从 TypeBox 换到 `@earendil-works/pi-schema`（Chord 1.5.0 的官方写法），`sdk` 不再导出 `Type`，改用 `obj`、`str`、`num`、`literal`、`record` 等构建器；契约 JSON 与指纹不变，旧页面只会整页刷新一次。平台建立在 Chord 之上，不含预设能力契约或功能语义；持久化分为统一数据库与插件注册表两份。插件由切面组成；启停只重载新增/移除的切面，手动 reload 才重读全部服务端切面。
 
-`0.0.5-alpha3`：平台建立在 Chord 之上，不含预设能力契约或功能语义；唯一的持久化是 `moonan:data` 统一数据文件。插件由切面组成；平台一次装载/重载全部服务端切面，启动失败即关闭宿主。
+`0.0.5-alpha3`：平台建立在 Chord 之上，不含预设能力契约或功能语义；唯一的持久化是 `moonan:data` 统一数据。插件由切面组成；平台一次装载/重载全部服务端切面，启动失败即关闭宿主。
 
 `sdk` / `moonan` / `ai-gateway` / `plugin-manager` 四个包发布到 npm（本版新增插件管理页）；`ai-gateway` 在「模型」标签页配置 pi-ai 的提供商与模型，
-配置保存在平台统一数据文件的 `ai-gateway/config` 数据集里，并通过 `ModelProviders` 暴露给其他服务端插件。AI 对话尚未回归——它会作为一个普通插件回来，和 `ai-gateway` 走同一条加载路径。
+配置保存在平台统一数据库的 `ai-gateway/config` 数据集里，并通过 `ModelProviders` 暴露给其他服务端插件。AI 对话尚未回归——它会作为一个普通插件回来，和 `ai-gateway` 走同一条加载路径。
 
 ## 许可 · License
 

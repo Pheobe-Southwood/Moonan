@@ -33,8 +33,8 @@ _Avoid_: 接口, interface, API, 类型定义
 _Avoid_: 清单, manifest, 插件列表, 配置, config
 
 **数据存储（DataStore）**
-平台唯一的统一数据文件，local、host-lifetime。插件按 namespace 读写 JSON 数据集；`DataStore` 负责原子写入、备份、导出/导入和 revision。它不知道任何插件的 schema。
-_Avoid_: 数据库, database, 配置文件, config file
+平台唯一的统一数据，落在内嵌的 SQLite 数据库 `~/.moonan/data.db` 里；local、host-lifetime。插件按 namespace 读写 JSON 数据集；`DataStore` 负责事务化写入、数据库迁移、导出/导入和 revision，库损坏时隔离为 `data.corrupt-<ts>.db` 并从空库开始。它不知道任何插件的 schema。
+_Avoid_: data.json, JSON 文件, JSON file, 数据文件, 配置文件, config file
 
 **插件注册表（Plugin Registry）**
 引擎配置 `~/.moonan/plugins.json`：一组 `{ ref, enabled }`，决定进程启动时加载谁。它**不是** Chord 的 Registry（后者是插件贡献的键值表）；这里“注册表”只是文件名沿用。官方默认由平台 `package.json` 的 `moonan.officialPlugins` 给出，`builtin`/`locked` 是派生值，不落盘。

@@ -157,7 +157,7 @@ export class GatewayService {
 		return {
 			ok: true,
 			version: this.options.version,
-			dataPath: this.options.data.storage.value.file,
+			database: this.options.data.storage.value.database,
 			providers: config.providers.length,
 			enabledProviders: config.providers.filter((provider) => provider.enabled).length,
 			models: config.providers.reduce((total, provider) => total + provider.models.length, 0),
@@ -170,19 +170,21 @@ export class GatewayService {
 	}
 
 	/**
-	 * The gateway's view of the platform data file. It is derived from the store's
-	 * `storage` cell, so the snapshot's `storage` block must be recomputed whenever that
-	 * cell changes (the snapshot derivation lists it as a source), not only when the
+	 * The gateway's view of the platform's unified data database. It is derived from the
+	 * store's `storage` cell, so the snapshot's `storage` block must be recomputed whenever
+	 * that cell changes (the snapshot derivation lists it as a source), not only when the
 	 * gateway's own config cell does.
 	 */
 	private storageView(info: DataStoreStorageInfo): StorageInfo {
 		return {
-			dataPath: info.file,
-			backupPath: info.backup,
+			database: info.database,
 			namespace: this.options.namespace,
 			exists: info.exists,
 			...(info.mode === undefined ? {} : { mode: info.mode }),
 			writable: info.writable,
+			schemaVersion: info.schemaVersion,
+			...(info.journalMode === undefined ? {} : { journalMode: info.journalMode }),
+			...(info.sizeBytes === undefined ? {} : { sizeBytes: info.sizeBytes }),
 			...(info.lastSavedAt === undefined ? {} : { lastSavedAt: info.lastSavedAt }),
 			...(info.notice === undefined ? {} : { notice: info.notice }),
 			revision: info.revision,

@@ -33,24 +33,27 @@ pnpm start        # 同上去掉 chord 的写入校验
 
 ## 数据放在哪
 
-配置是平台统一数据文件里的 `ai-gateway/config` 数据集，默认文件
-`~/.moonan/data.json`：
+配置是平台统一 SQLite 数据库里的 `ai-gateway/config` 数据集，默认数据库
+`~/.moonan/data.db`。数据库由 `node:sqlite` 内嵌在进程里，没有单独的数据库服务：
 
-- 平台目录 `0700`，文件 `0600`；写入采用临时文件 + fsync + rename 的原子替换；
-- 每次保存前把上一版复制到 `data.json.bak`；
-- 主文件损坏时先尝试 `.bak`；两者都不可用时保留 `data.corrupt-<timestamp>.json`；
-- API Key 以明文保存在统一数据文件里（面板不假装它是密钥链），快照和 HTTP 响应只含 `hasKey` 与末四位提示；
-- `headers`/`env`、以及模型级 `headers` 中名称像凭据的项（`Authorization`、`api-key`、`token`、`secret` 等）与 API Key 同等级：快照、HTTP 响应和默认导出里显示为 `moonan:redacted`，服务端数据文件里仍是明文；面板保存时未改动这些值会保留原值；
-- `/api/data/export` 默认脱敏，`?includeSecrets=1` 才导出明文；导入脱敏包时按 provider id / model id 保留已有密钥与敏感值。跨机器导入脱敏包时，这些敏感值没有可回填的当前值，会被丢弃（与 API Key 相同语义）。
+- 平台目录 `0700`，数据库文件 `0600`；WAL 日志模式、`synchronous=NORMAL`；
+- 每次保存都在一个事务里完成，失败会整体回滚，revision 只在提交后前进；
+- 表结构迁移记录在 `moonan_data_schema`，数据集行在 `moonan_data_datasets`（`namespace`、`version`、JSON `value`、`updated_at`），全局 revision 与数据集数量在 `moonan_data_meta`；
+- 数据库文件不是 SQLite 或磁盘镜像损坏时，会被隔离为 `data.corrupt-<timestamp>.db`，然后以空库重新开始，面板会显示提示；不再有 `.bak` 或 JSON 文件恢复路径；
+- API Key 以明文保存在统一数据库里（面板不假装它是密钥链），快照和 HTTP 响应只含 `hasKey` 与末四位提示；
+- `headers`/`env`、以及模型级 `headers` 中名称像凭据的项（`Authorization`、`api-key`、`token`、`secret` 等）与 API Key 同等级：快照、HTTP 响应和默认导出里显示为 `moonan:redacted`，服务端数据库里仍是明文；面板保存时未改动这些值会保留原值；
+- `/api/data/export` 仍是可移植的 JSON 包（`moonan.data` v1），默认脱敏，`?includeSecrets=1` 才导出明文；导入在一个事务里原子完成，脱敏包按 provider id / model id 保留已有密钥与敏感值。跨机器导入脱敏包时，这些敏感值没有可回填的当前值，会被丢弃（与 API Key 相同语义）。
 
-路径可用 `--data-file` 或环境变量覆盖：
+决定加载哪些插件的 `~/.moonan/plugins.json` 仍是 JSON 引擎配置，故意留在数据存储之外：它在 Chord host 存在之前就要读取，导入数据也不应改变插件加载集合。
+
+路径可用 `--data-db` 或环境变量覆盖：
 
 ```bash
-node packages/platform/bin/moonan.js --plugin @moonan_ai/ai-gateway --data-file /path/to/data.json
-MOONAN_DATA_FILE=/path/to/data.json node packages/platform/bin/moonan.js --plugin @moonan_ai/ai-gateway
+node packages/platform/bin/moonan.js --plugin @moonan_ai/ai-gateway --data-db /path/to/data.db
+MOONAN_DATA_DB=/path/to/data.db node packages/platform/bin/moonan.js --plugin @moonan_ai/ai-gateway
 ```
 
-旧的 `~/.moonan/ai-gateway/config.json` 不再读取；如需保留配置，请先手动备份并重新录入。这是 v0.0.x alpha 的破坏性变更。
+旧的 `~/.moonan/ai-gateway/config.json` 不再读取，旧版的 JSON 数据文件也没有迁移路径；从旧版本升级需要重新录入配置。这是 v0.0.x alpha 的破坏性变更。
 
 ## 配置了什么
 

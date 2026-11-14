@@ -176,7 +176,7 @@ export const ModelConfigSchema = obj({
 	api: opt(str({ minLength: 1 })),
 	/** A per-model endpoint override; the provider's Base URL is used when omitted. */
 	baseUrl: opt(str()),
-	/** Chat is the default model type in pi-ai; keep it explicit in the file. */
+	/** Chat is the default model type in pi-ai; keep it explicit in the stored config. */
 	type: opt(literal("chat")),
 	input: arr(InputModalitySchema, { minItems: 1 }),
 	inputLimits: opt(ModelInputLimitsSchema),
@@ -344,13 +344,16 @@ export const GatewayOptionsSchema = obj({
 
 export type GatewayOptions = Static<typeof GatewayOptionsSchema>;
 
+/** The gateway's view of the platform's unified SQLite data database. */
 export const StorageInfoSchema = obj({
-	dataPath: str(),
-	backupPath: str(),
+	database: str(),
 	namespace: str(),
 	exists: bool(),
 	mode: opt(str()),
 	writable: bool(),
+	schemaVersion: num(),
+	journalMode: opt(str()),
+	sizeBytes: opt(num()),
 	lastSavedAt: opt(str()),
 	notice: opt(str()),
 	revision: num(),
@@ -473,7 +476,7 @@ export const SaveSettingsInputSchema = obj({ settings: GatewaySettingsSchema });
 export const GatewayHealthSchema = obj({
 	ok: bool(),
 	version: str(),
-	dataPath: str(),
+	database: str(),
 	providers: int(),
 	enabledProviders: int(),
 	models: int(),

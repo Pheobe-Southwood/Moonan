@@ -14,7 +14,7 @@ import {
 	type DataImportReport,
 	type DataStoreStorageInfo,
 } from "@moonan_ai/sdk";
-import { createDataFacet, defaultDataFile } from "./data.js";
+import { createDataFacet, defaultDataDb } from "./data.js";
 import { createLogger, type Logger } from "./logger.js";
 import { createWebFacetCatalogFacet, WebFacetCatalogStore, type WebFacetCatalogStoreRef } from "./web-facet-catalog.js";
 import { normalizeRef, resolvePluginRef, resolvePlugins, scanPluginDirectory } from "./plugins.js";
@@ -49,8 +49,8 @@ export interface PlatformOptions {
 	registry?: PluginRegistry;
 	/** Set by `start` when the fallback booted a reduced plugin set. */
 	startup?: StartupReport;
-	/** Absolute path of the unified plugin data file. Defaults to `MOONAN_DATA_FILE` or `~/.moonan/data.json`. */
-	dataFile?: string;
+	/** Absolute path of the unified plugin data database. Defaults to `MOONAN_DATA_DB` or `~/.moonan/data.db`. */
+	dataDb?: string;
 	/** Validate every cell write against its schema (chord's `dev`). Default: chord's default (off). */
 	dev?: boolean;
 	logger?: Logger;
@@ -70,8 +70,8 @@ export interface Platform {
 	host: Host<Principal>;
 	/** Resolution order; entries carry `error` rather than disappearing when they fail. */
 	plugins: PluginState[];
-	/** The one data file every exportable plugin dataset lives in. */
-	readonly dataFile: string;
+	/** The one SQLite database every exportable plugin dataset lives in. */
+	readonly dataDb: string;
 	/** The engine's plugin registry file, when this platform was started from one. */
 	readonly pluginsFile?: string;
 	/** Non-undefined when the degraded startup fallback skipped some entries. */
@@ -153,7 +153,7 @@ function resolutionSignature(plugins: readonly PluginState[]): string {
  */
 export async function createPlatform(options: PlatformOptions): Promise<Platform> {
 	const logger = options.logger ?? createLogger();
-	const dataFile = options.dataFile ?? defaultDataFile();
+	const dataDb = options.dataDb ?? defaultDataDb();
 	const baseDir = process.cwd();
 
 	const skipped = new Set(options.skipped ?? []);
@@ -245,7 +245,7 @@ export async function createPlatform(options: PlatformOptions): Promise<Platform
 	 */
 	const loadFacets = async (): Promise<void> => {
 		const serverPlugins = plugins.filter(isLoadable);
-		const dataFacet = createDataFacet({ file: dataFile });
+		const dataFacet = createDataFacet({ database: dataDb });
 		const catalogFacet = createWebFacetCatalogFacet({
 			version: options.version,
 			facets: plugins.filter(isActive).map(describe),
@@ -600,7 +600,7 @@ export async function createPlatform(options: PlatformOptions): Promise<Platform
 	return {
 		host,
 		plugins,
-		dataFile,
+		dataDb,
 		...(options.pluginsFile === undefined ? {} : { pluginsFile: options.pluginsFile }),
 		...(options.startup === undefined ? {} : { startup: options.startup }),
 		get revision() {
