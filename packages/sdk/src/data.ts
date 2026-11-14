@@ -64,36 +64,45 @@ export const DataCodecs = defineRegistry<DatasetCodec>("moonan.data-codecs", {
 });
 
 /**
- * What the data store reports about its file. This is a state member, so a plugin can read
- * it synchronously once the store is live; the platform also exposes it over HTTP.
+ * What the data store reports about its SQLite database. This is a state member, so a plugin
+ * can read it synchronously once the store is live; the platform also exposes it over HTTP.
  */
 export const DataStoreStorageInfoSchema = obj({
-	file: str(),
-	backup: str(),
+	database: str(),
 	exists: bool(),
 	mode: opt(str()),
 	writable: bool(),
 	revision: num(),
 	datasets: num(),
+	schemaVersion: num(),
+	journalMode: opt(str()),
+	sizeBytes: opt(num()),
 	lastSavedAt: opt(str()),
 	notice: opt(str()),
 });
 
 export type DataStoreStorageInfo = {
-	file: string;
-	backup: string;
+	/** Absolute path of the one SQLite database every plugin dataset lives in. */
+	database: string;
 	exists: boolean;
 	mode?: string;
 	writable: boolean;
 	revision: number;
 	datasets: number;
+	/** Version of the database's own schema (migrations), not of any dataset. */
+	schemaVersion: number;
+	journalMode?: string;
+	sizeBytes?: number;
 	lastSavedAt?: string;
 	notice?: string;
 };
 
 /**
- * The wire/JSON envelope for a complete export. The file itself has a different, richer
- * shape (it also keeps per-dataset timestamps); this is the portable subset.
+ * The wire/JSON envelope for a complete export.
+ *
+ * Export stays portable JSON even though the store is SQLite: this envelope is what
+ * `/api/data/export` returns and what `/api/data/import` accepts, and it deliberately does
+ * not expose the database's tables, revision bookkeeping or per-dataset timestamps.
  */
 export const DataBundleSchema = obj({
 	format: literal("moonan.data"),
@@ -135,13 +144,18 @@ export type DataImportReport = {
  * The platform's unified data service.
  *
  * It is local and host-lifetime: exactly one object exists for the server host, it owns
- * the only data file, and every plugin reads/writes through it. It is not a remote type;
+ * the only data database, and every plugin reads/writes through it. It is not a remote type;
  * browsers get data through plugin methods or the platform's export/import HTTP surface.
+ *
+ * The backing store is one embedded SQLite database (`~/.moonan/data.db` by default), not a
+ * JSON document: every mutation is one transaction, and the store's revision and dataset
+ * count live in the database itself. The contract hides that: callers only see namespaced
+ * `{ value, version }` datasets.
  *
  * `read` returns the raw `{ value, version }` and deliberately does not consult a codec:
  * a plugin's `config` cell may initialize before its codec registration is published, so
  * the plugin validates/migrates its own first value. `write` replaces a whole dataset;
- * `update` is the read-modify-write form that runs inside the store's serial queue.
+ * `update` is the read-modify-write form that runs inside one database transaction.
  *
  * `read`'s result and `update`'s callback stay `unknown()`: `read` may return `undefined`
  * (not a JSON value) and a local contract's callback is a function, so neither can be
@@ -152,7 +166,7 @@ export type DataImportReport = {
  * may turn `DataStore` into a `remote` type or hand it to another host.
  */
 export const DataStore = local("moonan.data", {
-	version: 1,
+	version: 2,
 	input: obj({}, { open: true }),
 	members: {
 		revision: num(),

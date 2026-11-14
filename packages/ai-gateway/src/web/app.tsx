@@ -253,7 +253,7 @@ export function AiGatewayPanel({ host }: PanelProps) {
 										providerId: selectedProvider.id,
 										modelId: model.id,
 										title: model.name || model.id,
-										detail: `从 ${selectedProvider.name} 删除模型 "${model.id}"？配置文件会立即更新。`,
+										detail: `从 ${selectedProvider.name} 删除模型 "${model.id}"？统一数据库会立即更新。`,
 									})
 								}
 								onDiscover={() => setDiscoveryOpen(true)}
@@ -263,7 +263,7 @@ export function AiGatewayPanel({ host }: PanelProps) {
 										kind: "provider",
 										providerId: selectedProvider.id,
 										title: selectedProvider.name,
-										detail: `删除 ${selectedProvider.name} 及其 ${selectedProvider.models.length} 个模型？这会从服务端配置文件里移除它，无法撤销。`,
+										detail: `删除 ${selectedProvider.name} 及其 ${selectedProvider.models.length} 个模型？这会从服务端统一数据库里移除它，无法撤销。`,
 									})
 								}
 								enabledPending={enabledPending}
@@ -275,7 +275,7 @@ export function AiGatewayPanel({ host }: PanelProps) {
 								<EmptyMark />
 								<h3>先接一路上游</h3>
 								<p>
-									添加一个 pi-ai 内置提供商，或填写自定义 OpenAI 兼容端点。所有配置会写进插件的服务端文件，浏览器不保存任何业务数据。
+									添加一个 pi-ai 内置提供商，或填写自定义 OpenAI 兼容端点。所有配置会写进插件的服务端统一数据库，浏览器不保存任何业务数据。
 								</p>
 								<div className="gw-actions">
 									<Button variant="signal" onClick={() => setAddOpen(true)}>

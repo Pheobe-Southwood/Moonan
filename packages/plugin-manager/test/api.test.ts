@@ -14,7 +14,7 @@ const SNAPSHOT = {
 	version: "0.1.0",
 	revision: 3,
 	management: true,
-	paths: { cwd: "/tmp", pluginsFile: "/tmp/plugins.json", dataFile: "/tmp/data.json", pluginsDir: "/tmp/plugins" },
+	paths: { cwd: "/tmp", pluginsFile: "/tmp/plugins.json", dataDb: "/tmp/data.db", pluginsDir: "/tmp/plugins" },
 	plugins: [],
 };
 

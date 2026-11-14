@@ -64,8 +64,8 @@ export interface PluginAdminPaths {
 	cwd: string;
 	/** The plugin registry file (`~/.moonan/plugins.json` by default). */
 	pluginsFile: string;
-	/** The unified plugin data file. */
-	dataFile: string;
+	/** The unified plugin data database (SQLite, `~/.moonan/data.db` by default). */
+	dataDb: string;
 	/** The read-only startup scan directory. */
 	pluginsDir: string;
 }

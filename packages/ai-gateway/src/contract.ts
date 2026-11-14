@@ -29,7 +29,7 @@ const EMPTY = obj({}, { open: true });
  * so the config cell survives as a projection of the platform DataStore dataset.
  */
 export const GatewayState = local("moonan.ai-gateway.state", {
-	version: 2,
+	version: 3,
 	input: EMPTY,
 	members: {
 		snapshot: GatewaySnapshotSchema,
@@ -54,7 +54,7 @@ export const GatewayState = local("moonan.ai-gateway.state", {
  * visible to every panel on the next Chord revision.
  */
 export const AiGateway = remote("moonan.ai-gateway", {
-	version: 2,
+	version: 3,
 	input: EMPTY,
 	host: hostNamed("moonan"),
 	variants: {

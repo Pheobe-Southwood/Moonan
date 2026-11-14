@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { defaultDataFile } from "./data.js";
+import { defaultDataDb } from "./data.js";
 import { createLogger, type Logger } from "./logger.js";
 import { officialPlugins, type OfficialPluginRef } from "./official.js";
 import { createPlatform, type Platform } from "./platform.js";
@@ -28,8 +28,8 @@ export interface StartOptions {
 	safeMode?: boolean;
 	/** Allow the plugin-management endpoints even on a non-loopback bind. */
 	allowManagement?: boolean;
-	/** Absolute path of the unified plugin data file. */
-	dataFile?: string;
+	/** Absolute path of the unified plugin data database (SQLite). */
+	dataDb?: string;
 	/** The built shell. Defaults to `MOONAN_WEB_DIST`, then the copy shipped next to this file. */
 	webDist?: string;
 	/** Validate every cell write against its schema (chord's `dev`). Default: off. */
@@ -131,7 +131,7 @@ export async function start(options: StartOptions = {}): Promise<Moonan> {
 	const logger = options.logger ?? createLogger();
 	const version = options.version ?? VERSION;
 	const webDist = resolveWebDist(options.webDist);
-	const dataFile = options.dataFile ?? defaultDataFile();
+	const dataDb = options.dataDb ?? defaultDataDb();
 	const pluginsFile = options.pluginsFile ?? defaultPluginsFile();
 	const pluginsDir = options.pluginsDir ?? defaultPluginsDir();
 	const hostname = options.hostname ?? "127.0.0.1";
@@ -157,7 +157,7 @@ export async function start(options: StartOptions = {}): Promise<Moonan> {
 
 	const platformOptions = {
 		version,
-		dataFile,
+		dataDb,
 		pluginsFile,
 		registry,
 		...(options.dev === undefined ? {} : { dev: options.dev }),
@@ -209,7 +209,7 @@ export async function start(options: StartOptions = {}): Promise<Moonan> {
 			managementEnabled,
 			pluginsFile,
 			pluginsDir,
-			dataFile,
+			dataDb,
 			cwd: baseDir,
 			registryWarning: () => registry.warning(),
 			...(startup ? { startup } : {}),
@@ -228,7 +228,7 @@ export async function start(options: StartOptions = {}): Promise<Moonan> {
 			url: server.url,
 			server,
 			pluginsFile,
-			dataFile: platform.dataFile,
+			dataDb: platform.dataDb,
 			...(startup ? { startup } : {}),
 			get host() {
 				return platform.host;
@@ -260,7 +260,7 @@ export async function start(options: StartOptions = {}): Promise<Moonan> {
 }
 
 export { createPlatform, type Platform, type PlatformOptions } from "./platform.js";
-export { defaultDataFile } from "./data.js";
+export { defaultDataDb } from "./data.js";
 export { createLogger, silentLogger, type Logger } from "./logger.js";
 export { officialPlugins, type OfficialPluginRef } from "./official.js";
 export { defaultPluginsFile, PluginRegistry, type RegistryEntry } from "./plugin-registry.js";

@@ -24,6 +24,15 @@ export function formatTokens(value: number | undefined): string {
 	return String(Math.round(value));
 }
 
+/** A storage size for the database panel: `n B` / `n.n KB` / `n.n MB`. */
+export function formatBytes(value: number | undefined): string {
+	if (value === undefined || !Number.isFinite(value) || value < 0) return "—";
+	if (value < 1_024) return `${Math.round(value)} B`;
+	const kilobytes = value / 1_024;
+	if (kilobytes < 1_024) return `${kilobytes.toFixed(1)} KB`;
+	return `${(kilobytes / 1_024).toFixed(1)} MB`;
+}
+
 export function formatPrice(value: number | undefined): string {
 	if (value === undefined || !Number.isFinite(value)) return "—";
 	if (value === 0) return "0";

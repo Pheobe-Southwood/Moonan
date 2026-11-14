@@ -111,7 +111,7 @@ export default defineFacet(
 
 				// The remote state is a projection, never the raw config: keys do not cross the
 				// wire and the panel cannot accidentally mutate what the server owns.
-				// The snapshot carries the data file's status (`storage`), so it follows the
+				// The snapshot carries the data database's status (`storage`), so it follows the
 				// store's `storage` cell as well: a dataset written by another plugin or an
 				// import changes it without touching this plugin's `config` cell.
 				const snapshot = self.derive([config, data.storage], (current, storage) =>

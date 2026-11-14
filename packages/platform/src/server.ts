@@ -63,7 +63,7 @@ export interface WebServerOptions {
 	managementEnabled: boolean;
 	pluginsFile: string;
 	pluginsDir: string;
-	dataFile: string;
+	dataDb: string;
 	cwd: string;
 	/** A recovery notice from the plugin registry file, read per request (a save clears it). */
 	registryWarning?: () => string | undefined;
@@ -270,7 +270,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 			paths: {
 				cwd: options.cwd,
 				pluginsFile: options.pluginsFile,
-				dataFile: options.dataFile,
+				dataDb: options.dataDb,
 				pluginsDir: options.pluginsDir,
 			},
 			plugins: plugins().map(adminEntry),

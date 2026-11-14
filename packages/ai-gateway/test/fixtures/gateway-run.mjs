@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,9 +16,20 @@ const packageJson = JSON.parse(await readFile(new URL("../../package.json", impo
 
 const home = await mkdtemp(join(tmpdir(), "moonan-gateway-home-"));
 const pluginsDir = await mkdtemp(join(tmpdir(), "moonan-gateway-plugins-"));
-const dataFile = join(home, "data.json");
+const dataDb = join(home, "data.db");
 const pluginsFile = join(home, "plugins.json");
 const consumerDir = fileURLToPath(new URL("./consumer-plugin", import.meta.url));
+
+/**
+ * `node:sqlite` prints Node's one-time "SQLite is an experimental feature" warning when it
+ * loads, and the platform only starts filtering that warning when its DataStore opens
+ * (`start()`). The import is therefore deferred until after the app is up; a top-level
+ * import would run first and land on stderr, which `gateway.test.ts` asserts stays empty.
+ */
+async function openDb(path, options) {
+	const { DatabaseSync } = await import("node:sqlite");
+	return new DatabaseSync(path, options);
+}
 
 const upstream = createServer((request, response) => {
 	if (request.url === "/v1/models" && request.headers.authorization === "Bearer sk-upstream-12345678") {
@@ -90,7 +101,7 @@ try {
 		port: 0,
 		plugins: ["@moonan_ai/ai-gateway", consumerDir],
 		pluginsDir,
-		dataFile,
+		dataDb,
 		pluginsFile,
 		official: false,
 		logger: silentLogger,
@@ -176,9 +187,13 @@ try {
 	assert.equal(status.version, packageJson.version);
 	assert.equal(status.providers, 1);
 	assert.equal(status.models, 4);
-	assert.equal(status.storage.exists, true);
+	// The health surface and the storage view both name the one SQLite database.
+	assert.equal(status.database, dataDb);
+	assert.equal(status.storage.database, dataDb);
 	assert.equal(status.storage.mode, "0600");
-	assert.equal(status.storage.dataPath, dataFile);
+	assert.equal(status.storage.schemaVersion, 1);
+	assert.equal(status.storage.journalMode, "wal");
+	assert.equal(status.storage.exists, true);
 	assert.equal(status.storage.namespace, "ai-gateway/config");
 	assert.equal(status.storage.datasets, 1);
 
@@ -291,33 +306,49 @@ try {
 	);
 	assert.ok(touched.storage.revision > 0);
 
-	const raw = await readFile(dataFile, "utf8");
-	const stored = JSON.parse(raw);
+	// The unified store is one SQLite database; inspect it directly. The database is the
+	// server-side authority: the masked round-trips restored the real values instead of
+	// persisting the sentinel, and the panel/export never see these plaintext values.
+	const db = await openDb(dataDb, { readOnly: true });
+	const row = db.prepare("SELECT version, value FROM moonan_data_datasets WHERE namespace = ?").get("ai-gateway/config");
+	db.close();
+	assert.ok(row, "the ai-gateway dataset is stored in the SQLite database");
+	assert.equal(row.version, 1);
+	const raw = row.value;
 	assert.ok(raw.includes("sk-upstream-12345678"));
-	// The data file is the server-side authority: the masked round-trips restored the real
-	// values instead of persisting the sentinel.
 	for (const secret of ["tok-header-secret", "sk-env-secret", "sk-model-secret"]) {
-		assert.ok(raw.includes(secret), `data file lost ${secret}`);
+		assert.ok(raw.includes(secret), `database lost ${secret}`);
 	}
 	assert.ok(!raw.includes(REDACTED));
-	// The stored values are the real ones, not just present somewhere in the file.
-	const rawProvider = stored.datasets["ai-gateway/config"].value.providers.find((provider) => provider.id === "atlas");
+	// The stored values are the real ones, not just present somewhere in the row.
+	const stored = JSON.parse(raw);
+	const rawProvider = stored.providers.find((provider) => provider.id === "atlas");
 	assert.equal(rawProvider.headers["x-secret-token"], "tok-header-secret");
 	assert.equal(rawProvider.headers["x-project-id"], "proj-1");
 	assert.equal(rawProvider.env.OPENAI_API_KEY, "sk-env-secret");
 	const rawModel = rawProvider.models.find((model) => model.id === "hand-written");
 	assert.equal(rawModel.headers.authorization, "Bearer sk-model-secret");
-	assert.equal(stored.datasets["ai-gateway/config"].version, 1);
-	assert.equal((await stat(dataFile)).mode & 0o777, 0o600);
+	assert.equal((await stat(dataDb)).mode & 0o777, 0o600);
 
 	const reload = await fetch(`${app.url}/api/plugins/reload`, { method: "POST" });
 	assert.equal(reload.status, 200);
 	await new Promise((resolve) => setTimeout(resolve, 100));
 	assert.equal(ref.snapshot.value.providers[0]?.models.length, 4);
 
+	// An external writer (another process, or a manual `sqlite3` session) edits the stored
+	// dataset. It also bumps the meta revision/updated_at, as a real writer would, so the
+	// reload path has honest bookkeeping to reconcile.
 	const edited = JSON.parse(raw);
-	edited.datasets["ai-gateway/config"].value.providers[0].name = "Atlas Renamed";
-	await writeFile(dataFile, JSON.stringify(edited, null, 2), "utf8");
+	edited.providers[0].name = "Atlas Renamed";
+	const writer = await openDb(dataDb);
+	const editedAt = new Date().toISOString();
+	writer
+		.prepare("UPDATE moonan_data_datasets SET value = ?, updated_at = ? WHERE namespace = ?")
+		.run(JSON.stringify(edited), editedAt, "ai-gateway/config");
+	writer
+		.prepare("UPDATE moonan_data_meta SET revision = revision + 1, updated_at = ? WHERE singleton = 1")
+		.run(editedAt);
+	writer.close();
 	const reloaded = await ref.reloadFromDisk();
 	assert.equal(reloaded.providers[0]?.name, "Atlas Renamed");
 
@@ -337,7 +368,7 @@ try {
 		port: 0,
 		plugins: ["@moonan_ai/ai-gateway", consumerDir],
 		pluginsDir,
-		dataFile,
+		dataDb,
 		pluginsFile,
 		official: false,
 		logger: silentLogger,

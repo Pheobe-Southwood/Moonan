@@ -33,10 +33,15 @@ function canonical(value: unknown): string {
  * The schema layer's migration guard.
  *
  * Chord 1.5.0 replaces TypeBox with `@earendil-works/pi-schema`, and the JSON a builder
- * emits is what a contract's fingerprint is computed from. These snapshots are captured
- * against the TypeBox formulas and must stay byte-identical after the rewrite: a diff here
- * means an already-loaded browser tab or a prebuilt plugin would meet `contract_mismatch`
- * for no semantic reason.
+ * emits is what a contract's fingerprint is computed from. These snapshots are the review
+ * gate for that JSON: an unintended diff means an already-loaded browser tab or a prebuilt
+ * plugin would meet `contract_mismatch` for no semantic reason.
+ *
+ * This snapshot changes once in the SQLite data-store refactor, deliberately: the store is
+ * `DataStore` version 2 and `DataStoreStorageInfoSchema` now describes the database
+ * (`database`/`schemaVersion`/`journalMode`/`sizeBytes`) instead of a file (`file`/
+ * `backup`). The new values are captured here rather than hidden, but they are regenerated
+ * from CI, never hand-written; any later diff still needs the same justification.
  */
 describe("contract schema JSON", () => {
 	it("keeps every published schema's JSON", () => {

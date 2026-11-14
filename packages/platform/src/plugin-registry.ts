@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { arr, bool, compile, literal, obj, opt, str } from "@moonan_ai/sdk";
-import { quarantineFile, writeJsonFileAtomic } from "./data.js";
+import { quarantineFile, writeJsonFileAtomic } from "./json-file.js";
 
 const REGISTRY_FORMAT = 1;
 const MAX_REGISTRY_FILE = 1024 * 1024;

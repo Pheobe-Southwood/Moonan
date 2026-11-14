@@ -135,15 +135,17 @@ describe("moonan:data", () => {
 		expect(await readValue(app.url)).toBe("keep");
 	});
 
-	it("exposes the unified data file through the platform status surface", async () => {
+	it("exposes the unified data database through the platform status surface", async () => {
 		const dir = await pluginDir(PLUGIN);
 		const app = await appFor([dir]);
 		const status = (await (await fetch(`${app.url}/api/data/status`)).json()) as {
-			file: string;
+			database: string;
 			datasets: number;
+			schemaVersion: number;
 		};
-		expect(status.file).toBe(app.dataFile);
+		expect(status.database).toBe(app.dataDb);
 		expect(status.datasets).toBe(0);
+		expect(status.schemaVersion).toBe(1);
 	});
 
 	it("refuses a non-function update callback from a local caller", async () => {

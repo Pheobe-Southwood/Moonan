@@ -30,7 +30,7 @@ function snapshot(plugins: PluginAdminEntry[], overrides: Partial<PluginAdminSna
 		version: "0.1.0",
 		revision: 2,
 		management: true,
-		paths: { cwd: "/tmp", pluginsFile: "/tmp/plugins.json", dataFile: "/tmp/data.json", pluginsDir: "/tmp/plugins" },
+		paths: { cwd: "/tmp", pluginsFile: "/tmp/plugins.json", dataDb: "/tmp/data.db", pluginsDir: "/tmp/plugins" },
 		plugins,
 		...overrides,
 	};

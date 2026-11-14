@@ -7,7 +7,7 @@ import type { Moonan } from "../src/index.js";
 import { silentLogger } from "../src/logger.js";
 import { createPlatform } from "../src/platform.js";
 import { resolvePluginRef } from "../src/plugins.js";
-import { appFor, cleanup, closeClient, connectClient, pluginDir, request, tempDataFile, tempDir } from "./support.js";
+import { appFor, cleanup, closeClient, connectClient, pluginDir, request, tempDataDb, tempDir } from "./support.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..", "..");
@@ -84,7 +84,7 @@ describe("the platform", () => {
 		const platform = await createPlatform({
 			version: "test",
 			plugins: [join(root, "does-not-exist"), demoDir],
-			dataFile: await tempDataFile(),
+			dataDb: await tempDataDb(),
 			logger: silentLogger,
 		});
 		try {
@@ -126,7 +126,7 @@ export default defineFacet((api) => {
 		const platform = await createPlatform({
 			version: "test",
 			plugins: [consumerDir, providerDir],
-			dataFile: await tempDataFile(),
+			dataDb: await tempDataDb(),
 			logger: silentLogger,
 		});
 		try {
@@ -162,7 +162,7 @@ export default defineFacet((api) => {
 		const platform = await createPlatform({
 			version: "test",
 			plugins: [consumerDir, providerDir],
-			dataFile: await tempDataFile(),
+			dataDb: await tempDataDb(),
 			logger: silentLogger,
 		});
 		try {
@@ -194,7 +194,7 @@ export default defineFacet((api) => {
 		await writeFile(join(own, "index.js"), 'throw new Error("the plugin imports its own chord");\n');
 		await writeFile(join(dir, "server.mjs"), 'import "@earendil-works/chord";\nexport default { setup() {} };\n');
 
-		await expect(createPlatform({ version: "test", plugins: [dir, demoDir], dataFile: await tempDataFile(), logger: silentLogger })).rejects.toThrow(
+		await expect(createPlatform({ version: "test", plugins: [dir, demoDir], dataDb: await tempDataDb(), logger: silentLogger })).rejects.toThrow(
 			/the plugin imports its own chord/,
 		);
 	});
@@ -212,7 +212,7 @@ export default defineFacet((api) => {
 
 		// chord's install is not a rollback transaction: continuing would leave Angry's
 		// service behind. The platform closes the host and refuses to start instead.
-		await expect(createPlatform({ version: "test", plugins: [dir], dataFile: await tempDataFile(), logger: silentLogger })).rejects.toThrow(
+		await expect(createPlatform({ version: "test", plugins: [dir], dataDb: await tempDataDb(), logger: silentLogger })).rejects.toThrow(
 			/setup said no/,
 		);
 	});
@@ -248,7 +248,7 @@ export default defineFacet((api) => {
 `,
 		);
 
-		const platform = await createPlatform({ version: "test", plugins: [dir], dataFile: await tempDataFile(), logger: silentLogger });
+		const platform = await createPlatform({ version: "test", plugins: [dir], dataDb: await tempDataDb(), logger: silentLogger });
 		try {
 			// The assertion is that startup resolved: if the catalog facet were installed after
 			// the plugin batch, Probe's activation would fail with `unknown_type`.
