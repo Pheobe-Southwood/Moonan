@@ -496,8 +496,9 @@ export class DataStoreDatabase {
 				skipped.push(row.namespace);
 				continue;
 			}
-			let value: unknown = parseStoredValue(row.namespace, row.value);
-			if (row.version < codec.version) value = codec.migrate(value, row.version);
+			const stored = parseStoredValue(row.namespace, row.value);
+			const value: unknown =
+				row.version < codec.version ? codec.migrate(stored, row.version) : stored;
 			const exported = codec.export(value, { includeSecrets });
 			checkJson(exported);
 			datasets.push({ namespace: row.namespace, version: codec.version, value: exported });
