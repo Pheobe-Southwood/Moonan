@@ -190,12 +190,12 @@ export default defineFacet((api) => {
 ```
 
 - `read` 返回 `{ value, version } | undefined`，不查 codec；插件自己校验/迁移第一个值。`read` 是异步的。
-- `update` 是推荐的读改写入口：它和 `importAll` 在同一个串行队列里，读改写在一个 SQLite 事务里，不会丢更新。它的 `update` 回调只在同一进程内有效——`DataStore` 是 `local` 契约，回调没有线上表示；平台会在运行时拒绝非函数，也不要把 `DataStore` 改成 `remote` 类型。
+- `update` 是推荐的读改写入口：它和 `importAll` 在同一个串行队列里，读改写在一个 SQLite 事务里，不会丢更新。它的 `update` 回调只在同一进程内有效——`DataStore` 是 `local` 契约，回调没有线上表示；平台会在运行时拒绝非函数，也不要把 `DataStore` 改成 `remote` 类型。回调在数据库事务里运行，**不要在回调里再调用任何 DataStore 方法**（会立刻抛 `invalid`，而不是等待）；需要别的数据请在调用前读好，或用回调收到的 `current`。
 - `write` 只做整值替换。
 - `DataStore.storage` 报告数据库信息：`database`、`exists`、`mode`、`writable`、`revision`、`datasets`、`schemaVersion`、`journalMode`、`sizeBytes`、`lastSavedAt`、`notice`。存储状态 schema 变了，所以 `DataStore` 的本地契约版本升到 2；平台与 SDK 一起升级即可，插件方法签名不变。
-- `exportAll` 只导出有 codec 的 namespace；`importAll` 要求每个 dataset 都有 codec，任一失败都不写入数据库。
+- `exportAll` 只导出有 codec 的 namespace；`importAll` 要求每个 dataset 都有 codec，任一失败都不写入数据库。导入时会校验 dataset version：比当前 codec 新的 bundle 会被拒绝，不做静默降级；codec 的 `import` 在导入事务里运行，应保持同步、纯函数。
 - `includeSecrets` 默认 `false`；codec 的 `export` 负责脱敏，`import` 负责从 `current` 合并回被省略/脱敏的密钥与敏感值。
-- 数据库文件权限 `0600`、目录 `0700`。库损坏时保留为 `data.corrupt-<ts>.db` 并从空库开始，`notice` 会显示在 ai-gateway 的存储信息里；不再有 `.bak` 或 JSON 文件恢复，也不迁移旧版 JSON 数据。
+- 数据库文件权限 `0600`、目录 `0700`。库损坏时保留为 `data.corrupt-<ts>.db` 并从空库开始，`notice` 会显示在 ai-gateway 的存储信息里；不再有 `.bak` 或 JSON 文件恢复，也不迁移旧版 JSON 数据。`--data-db`/`MOONAN_DATA_DB` 指向已有非 Moonan SQLite 库时，会在打开前拒绝，不会改写它的 journal mode 或权限。
 - 想直接看库里存了什么：`moonan_data_datasets` 每行一个 dataset（`namespace` 主键、`version`、JSON `value`、`updated_at`），`moonan_data_meta` 记录格式标识、revision、dataset 数量与最近保存时间，`moonan_data_schema` 记录迁移版本。导出/导入仍是可移植的 JSON bundle（`moonan.data` v1）。
 
 不想参与统一导出/导入的缓存或二进制资产，仍可由插件自己开文件；它们不在 `/api/data/export` 里。

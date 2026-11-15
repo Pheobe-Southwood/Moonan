@@ -80,6 +80,23 @@ describe("DataStoreDatabase", () => {
 		expect(store.datasetCount).toBe(1);
 	});
 
+	it("rejects a store call made from inside an update callback", async () => {
+		const { file } = await tempDb();
+		const store = await openStore(file);
+		await store.write("test/value", 1, "kept");
+
+		await expect(
+			store.update("test/value", 1, async (current) => {
+				// The callback runs on the single connection's transaction; re-entering the store
+				// would wait for its own transaction forever. The guard turns that into an error.
+				await store.read("test/value");
+				return current ?? { value: "changed", version: 1 };
+			}),
+		).rejects.toThrow(/cannot be used from inside/);
+		expect(store.revision).toBe(1);
+		expect(await store.read("test/value")).toEqual({ value: "kept", version: 1 });
+	});
+
 	it("exports codec-owned datasets, migrating older rows", async () => {
 		const { file } = await tempDb();
 		const store = await openStore(file);
@@ -236,6 +253,38 @@ describe("DataStoreDatabase", () => {
 		expect(store.datasetCount).toBe(1);
 	});
 
+	it("refuses an import from a newer dataset version", async () => {
+		const { file } = await tempDb();
+		const store = await openStore(file);
+		const codecs = {
+			table: () =>
+				new Map([
+					[
+						"test/value",
+						{
+							namespace: "test/value",
+							version: 1,
+							migrate: (value: unknown) => String(value),
+							export: (value: unknown) => String(value),
+							import: (value: unknown) => String(value),
+						},
+					],
+				]),
+		};
+
+		await expect(
+			store.importAll(codecs, undefined, {
+				format: "moonan.data" as const,
+				formatVersion: 1 as const,
+				createdAt: new Date().toISOString(),
+				revision: 1,
+				datasets: [{ namespace: "test/value", version: 2, value: "future" }],
+			}),
+		).rejects.toThrow(/newer than/);
+		expect(await store.read("test/value")).toBeUndefined();
+		expect(store.revision).toBe(0);
+	});
+
 	it("quarantines a corrupt database and starts empty with a notice", async () => {
 		const { dir, file } = await tempDb();
 		const store = await openStore(file);
@@ -257,24 +306,71 @@ describe("DataStoreDatabase", () => {
 		expect((await recovered.info()).notice).toBeUndefined();
 	});
 
-	it("refuses a foreign SQLite database without creating Moonan tables", async () => {
-		const { file } = await tempDb();
+	it("refuses a foreign SQLite database without changing journal mode or permissions", async () => {
+		const { dir, file } = await tempDb();
+		await chmod(dir, 0o755);
 		const foreign = new DatabaseSync(file);
 		try {
 			foreign.exec("CREATE TABLE unrelated (id INTEGER PRIMARY KEY, value TEXT)");
 		} finally {
 			foreign.close();
 		}
+		const probe = new DatabaseSync(file, { readOnly: true });
+		let journalMode: string;
+		try {
+			journalMode = (
+				probe.prepare("PRAGMA journal_mode").get() as { journal_mode: string }
+			).journal_mode;
+		} finally {
+			probe.close();
+		}
+		expect(journalMode).toBe("delete");
+		const beforeFileMode = (await stat(file)).mode & 0o777;
+		const beforeDirMode = (await stat(dir)).mode & 0o777;
 
 		await expect(DataStoreDatabase.open(file)).rejects.toThrow(/not a Moonan data store/);
 
-		const check = new DatabaseSync(file);
+		// Refusing must happen before Chord opens the file: a failed open would otherwise set
+		// WAL in the header, and hardening must not chmod a database that is not ours.
+		expect((await stat(file)).mode & 0o777).toBe(beforeFileMode);
+		expect((await stat(dir)).mode & 0o777).toBe(beforeDirMode);
+		expect((await readdir(dir)).sort()).toEqual(["data.db"]);
+
+		const check = new DatabaseSync(file, { readOnly: true });
 		try {
+			expect(check.prepare("PRAGMA journal_mode").get()).toEqual({ journal_mode: "delete" });
 			const names = check
 				.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
 				.all()
 				.map((row) => String(row.name));
 			expect(names).toEqual(["unrelated"]);
+		} finally {
+			check.close();
+		}
+	});
+
+	it("refuses a foreign application id without opening the database", async () => {
+		const { dir, file } = await tempDb();
+		await chmod(dir, 0o755);
+		const foreign = new DatabaseSync(file);
+		try {
+			foreign.exec("PRAGMA application_id = 305419896");
+		} finally {
+			foreign.close();
+		}
+		const beforeFileMode = (await stat(file)).mode & 0o777;
+		const beforeDirMode = (await stat(dir)).mode & 0o777;
+
+		await expect(DataStoreDatabase.open(file)).rejects.toThrow(/not a Moonan data store/);
+
+		expect((await stat(file)).mode & 0o777).toBe(beforeFileMode);
+		expect((await stat(dir)).mode & 0o777).toBe(beforeDirMode);
+		const check = new DatabaseSync(file, { readOnly: true });
+		try {
+			expect(check.prepare("PRAGMA journal_mode").get()).toEqual({ journal_mode: "delete" });
+			expect(check.prepare("PRAGMA application_id").get()).toEqual({
+				application_id: 305419896,
+			});
 		} finally {
 			check.close();
 		}

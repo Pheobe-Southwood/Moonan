@@ -39,6 +39,9 @@ export interface DatasetCodec<T = unknown> {
 	 *
 	 * `current` is the value already stored at this namespace, if any. A codec may use it
 	 * to preserve secrets that a redacted export deliberately omitted.
+	 *
+	 * Runs inside the import transaction (and on the store's single connection): keep it
+	 * synchronous and pure, and do not call DataStore methods from it.
 	 */
 	import(value: JsonValue, fromVersion: number, current: JsonValue | undefined): T;
 }
@@ -155,7 +158,9 @@ export type DataImportReport = {
  * `read` returns the raw `{ value, version }` and deliberately does not consult a codec:
  * a plugin's `config` cell may initialize before its codec registration is published, so
  * the plugin validates/migrates its own first value. `write` replaces a whole dataset;
- * `update` is the read-modify-write form that runs inside one database transaction.
+ * `update` is the read-modify-write form that runs inside one database transaction. The
+ * `update` callback must not call any DataStore method: the store runs on one serialized
+ * connection, so a re-entrant call would wait for its own transaction and never settle.
  *
  * `read`'s result and `update`'s callback stay `unknown()`: `read` may return `undefined`
  * (not a JSON value) and a local contract's callback is a function, so neither can be

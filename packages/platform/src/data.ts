@@ -1,6 +1,8 @@
-import { access, chmod, constants, mkdir, rename, stat } from "node:fs/promises";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { access, chmod, constants, mkdir, open as openFile, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import {
 	copyJson,
 	defineFacet,
@@ -39,6 +41,8 @@ const SCHEMA_TABLE = "moonan_data_schema";
 const META_TABLE = "moonan_data_meta";
 const DATASET_TABLE = "moonan_data_datasets";
 const MEMORY_PATH = ":memory:";
+/** Marks the async context of a store transaction, so re-entrant calls fail instead of hanging. */
+const transactionScope = new AsyncLocalStorage<DataStoreDatabase>();
 
 /**
  * The database schema.
@@ -221,14 +225,24 @@ async function fileExists(path: string): Promise<boolean> {
  * A file that exists but is not a SQLite database, or a damaged one. `node:sqlite` reports
  * SQLite's primary result codes: 11 is `SQLITE_CORRUPT`, 26 is `SQLITE_NOTADB`.
  */
-function isDatabaseCorruption(error: unknown): boolean {
-	if (typeof error !== "object" || error === null) return false;
-	const { errcode, message } = error as { errcode?: unknown; message?: unknown };
+function isDatabaseCorruption(error: unknown, depth = 0): boolean {
+	if (depth > 8 || typeof error !== "object" || error === null) return false;
+	if (error instanceof AggregateError) {
+		return error.errors.some((inner) => isDatabaseCorruption(inner, depth + 1));
+	}
+	const { errcode, message, cause } = error as {
+		errcode?: unknown;
+		message?: unknown;
+		cause?: unknown;
+	};
 	if (errcode === 11 || errcode === 26) return true;
-	return (
+	if (
 		typeof message === "string" &&
 		/not a database|database disk image is malformed|file is encrypted/i.test(message)
-	);
+	) {
+		return true;
+	}
+	return cause !== undefined && cause !== error && isDatabaseCorruption(cause, depth + 1);
 }
 
 /** Moves a broken database (and its WAL sidecars) aside so the user still has the bytes. */
@@ -278,6 +292,75 @@ async function assertMoonanDatabase(database: NodeSqliteDatabase, path: string):
 	);
 	if (tables.length > 0 && !tables.some((row) => row.name === SCHEMA_TABLE)) {
 		throw invalid("data", `the SQLite database at ${path} is not a Moonan data store`);
+	}
+}
+
+/**
+ * Refuses a foreign database before Chord opens it.
+ *
+ * Chord's Node adapter always turns WAL on when it opens a database, and the platform narrows
+ * the file mode before migrations. Doing either to a mistyped `--data-db` target would modify
+ * somebody else's database even though the open is refused, so inspect the header first and
+ * let `assertMoonanDatabase` remain the authoritative check after opening.
+ *
+ * A WAL database is left to the post-open check: opening it read-only creates `-wal`/`-shm`
+ * sidecars, while Chord's open cannot change a journal mode that is already WAL. Everything
+ * else is inspected through a read-only connection, which does not write.
+ */
+async function assertNotForeignDatabase(
+	path: string,
+	databaseClass: new (path: string, options: { readOnly: boolean }) => DatabaseSync,
+): Promise<void> {
+	if (path === MEMORY_PATH) return;
+	let size: number;
+	try {
+		size = (await stat(path)).size;
+	} catch {
+		return;
+	}
+	if (size < 100) return;
+	let handle;
+	try {
+		handle = await openFile(path, "r");
+	} catch {
+		return;
+	}
+	let header: Buffer;
+	try {
+		header = Buffer.alloc(100);
+		const { bytesRead } = await handle.read(header, 0, 100, 0);
+		if (bytesRead < 100) return;
+	} finally {
+		await handle.close();
+	}
+	// The 16-byte magic of a SQLite database; anything else is handled by the corruption path.
+	if (header.toString("latin1", 0, 16) !== "SQLite format 3\u0000") return;
+	const applicationId = header.readUInt32BE(68);
+	if (applicationId !== 0 && applicationId !== DATA_APPLICATION_ID) {
+		throw invalid("data", `the SQLite database at ${path} is not a Moonan data store`);
+	}
+	// 1 is the rollback journal, 2 is WAL (offsets 18/19 are the write/read format versions).
+	if (header.readUInt8(18) === 2 || header.readUInt8(19) === 2) return;
+	let probe: DatabaseSync;
+	try {
+		probe = new databaseClass(path, { readOnly: true });
+	} catch {
+		return;
+	}
+	try {
+		let tables: { name: string }[];
+		try {
+			tables = probe
+				.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+				.all() as { name: string }[];
+		} catch {
+			return;
+		}
+		if (tables.length > 0 && !tables.some((row) => row.name === SCHEMA_TABLE)) {
+			throw invalid("data", `the SQLite database at ${path} is not a Moonan data store`);
+		}
+	} finally {
+		probe.close();
 	}
 }
 
@@ -385,11 +468,13 @@ export class DataStoreDatabase {
 	}
 
 	async read(namespace: string): Promise<StoredDataset | undefined> {
+		this.assertOutsideTransaction();
 		const stored = await readDataset(this.database, namespace);
 		return stored === undefined ? undefined : clone(stored);
 	}
 
 	async write(namespace: string, version: number, value: JsonValue): Promise<StoredDataset> {
+		this.assertOutsideTransaction();
 		checkNamespace(namespace);
 		checkVersion(version);
 		checkJson(value);
@@ -411,12 +496,16 @@ export class DataStoreDatabase {
 	/**
 	 * Read-modify-write in one database transaction. This is the only safe way to update a
 	 * dataset that another code version, an import, or another plugin may also touch.
+	 *
+	 * The callback runs on the transaction's connection: calling any DataStore method from
+	 * inside it would wait for the transaction that is already running. Use `current` instead.
 	 */
 	async update(
 		namespace: string,
 		version: number,
 		update: (current: StoredDataset | undefined) => StoredDataset | Promise<StoredDataset>,
 	): Promise<StoredDataset> {
+		this.assertOutsideTransaction();
 		checkNamespace(namespace);
 		checkVersion(version);
 		return this.commit(async (transaction) => {
@@ -436,40 +525,46 @@ export class DataStoreDatabase {
 	}
 
 	async remove(namespace: string): Promise<DataStoreStorageInfo> {
+		this.assertOutsideTransaction();
 		checkNamespace(namespace);
-		const removed = await this.database.transaction(async (transaction) => {
-			const meta = await readMeta(transaction);
-			const changes = await transaction.runCounted(
-				`DELETE FROM ${DATASET_TABLE} WHERE namespace = ?`,
-				namespace,
-			);
-			if (changes === 0) return { removed: false, meta };
-			const at = nowIso();
-			meta.revision += 1;
-			meta.datasets = Math.max(0, meta.datasets - 1);
-			meta.updated_at = at;
-			await writeMeta(transaction, meta);
-			return { removed: true, meta };
-		});
+		const removed = await this.database.transaction((transaction) =>
+			transactionScope.run(this, async () => {
+				const meta = await readMeta(transaction);
+				const changes = await transaction.runCounted(
+					`DELETE FROM ${DATASET_TABLE} WHERE namespace = ?`,
+					namespace,
+				);
+				if (changes === 0) return { removed: false, meta };
+				const at = nowIso();
+				meta.revision += 1;
+				meta.datasets = Math.max(0, meta.datasets - 1);
+				meta.updated_at = at;
+				await writeMeta(transaction, meta);
+				return { removed: true, meta };
+			}),
+		);
 		if (removed.removed) {
-			await hardenPermissions(this.path);
 			this.publish(removed.meta);
+			await hardenPermissions(this.path).catch(() => undefined);
 		}
 		return this.info();
 	}
 
 	async reload(): Promise<DataStoreStorageInfo> {
-		const meta = await this.database.transaction(async (transaction) => {
-			const current = await readMeta(transaction);
-			const actual = await countDatasets(transaction);
-			if (actual !== current.datasets) {
-				current.datasets = actual;
-				await writeMeta(transaction, current);
-			}
-			return current;
-		});
-		await hardenPermissions(this.path);
+		this.assertOutsideTransaction();
+		const meta = await this.database.transaction((transaction) =>
+			transactionScope.run(this, async () => {
+				const current = await readMeta(transaction);
+				const actual = await countDatasets(transaction);
+				if (actual !== current.datasets) {
+					current.datasets = actual;
+					await writeMeta(transaction, current);
+				}
+				return current;
+			}),
+		);
 		this.publish(meta);
+		await hardenPermissions(this.path).catch(() => undefined);
 		return this.info();
 	}
 
@@ -478,6 +573,7 @@ export class DataStoreDatabase {
 		ctx: Ctx | undefined,
 		includeSecrets: boolean,
 	): Promise<DataBundle> {
+		this.assertOutsideTransaction();
 		// One short transaction gives the codecs a consistent row set and revision; the codec
 		// work itself runs after it commits so a slow export does not hold a write transaction.
 		const snapshot = await this.database.transaction(async (transaction) => {
@@ -522,6 +618,7 @@ export class DataStoreDatabase {
 			readonly datasets: readonly { readonly namespace: string; readonly version: number; readonly value: unknown }[];
 		},
 	): Promise<DataImportReport> {
+		this.assertOutsideTransaction();
 		if (!bundleValidator.check(bundle)) {
 			throw invalid("data", "import bundle does not match the moonan.data format");
 		}
@@ -538,6 +635,13 @@ export class DataStoreDatabase {
 			if (codec === undefined) {
 				throw invalid("data", `no codec registered for dataset "${item.namespace}"`);
 			}
+			checkVersion(item.version);
+			if (item.version > codec.version) {
+				throw invalid(
+					"data",
+					`imported dataset "${item.namespace}" is version ${item.version}, newer than codec version ${codec.version}`,
+				);
+			}
 			checkJson(item.value);
 			items.push({ namespace: item.namespace, version: item.version, value: item.value, codec });
 		}
@@ -545,32 +649,44 @@ export class DataStoreDatabase {
 			const meta = await readMeta(this.database);
 			return { imported: [], revision: meta.revision };
 		}
-		const report = await this.database.transaction(async (transaction) => {
-			const meta = await readMeta(transaction);
-			const at = nowIso();
-			const imported: string[] = [];
-			let inserted = 0;
-			for (const item of items) {
-				const current = await readDataset(transaction, item.namespace);
-				const value = item.codec.import(item.value, item.version, current?.value);
-				checkJson(value);
-				await upsertDataset(transaction, item.namespace, item.codec.version, value, at);
-				if (current === undefined) inserted += 1;
-				imported.push(item.namespace);
-			}
-			meta.revision += 1;
-			meta.datasets += inserted;
-			meta.updated_at = at;
-			await writeMeta(transaction, meta);
-			return { imported: imported.sort(), meta };
-		});
-		await hardenPermissions(this.path);
+		const report = await this.database.transaction((transaction) =>
+			transactionScope.run(this, async () => {
+				const meta = await readMeta(transaction);
+				const at = nowIso();
+				const imported: string[] = [];
+				let inserted = 0;
+				for (const item of items) {
+					const current = await readDataset(transaction, item.namespace);
+					const value = item.codec.import(item.value, item.version, current?.value);
+					checkJson(value);
+					await upsertDataset(transaction, item.namespace, item.codec.version, value, at);
+					if (current === undefined) inserted += 1;
+					imported.push(item.namespace);
+				}
+				meta.revision += 1;
+				meta.datasets += inserted;
+				meta.updated_at = at;
+				await writeMeta(transaction, meta);
+				return { imported: imported.sort(), meta };
+			}),
+		);
 		this.publish(report.meta);
+		await hardenPermissions(this.path).catch(() => undefined);
 		return { imported: report.imported, revision: report.meta.revision };
 	}
 
 	async close(): Promise<void> {
+		this.assertOutsideTransaction();
 		await this.database.close();
+	}
+
+	private assertOutsideTransaction(): void {
+		if (transactionScope.getStore() === this) {
+			throw invalid(
+				"data",
+				"the data store cannot be used from inside a transaction callback; use the value passed to update instead",
+			);
+		}
 	}
 
 	private publish(meta: MetaRow): void {
@@ -583,9 +699,13 @@ export class DataStoreDatabase {
 	private async commit<T>(
 		task: (transaction: SqliteExecutor) => Promise<{ result: T; meta: MetaRow }>,
 	): Promise<T> {
-		const { result, meta } = await this.database.transaction(task);
-		await hardenPermissions(this.path);
+		const { result, meta } = await this.database.transaction((transaction) =>
+			transactionScope.run(this, () => task(transaction)),
+		);
+		// The transaction is already committed; a permission repair must not turn a durable
+		// write into an error. Publish first so the cached revision cannot lag a failed repair.
 		this.publish(meta);
+		await hardenPermissions(this.path).catch(() => undefined);
 		return result;
 	}
 
@@ -597,10 +717,13 @@ export class DataStoreDatabase {
 			} catch (error) {
 				if (!isDatabaseCorruption(error)) throw error;
 				const quarantined = await quarantineDatabase(this.path);
-				this.notice =
-					quarantined === undefined
-						? `数据数据库无法读取（${errorMessage(error)}），且无法保留损坏文件。已从空数据库开始。`
-						: `数据数据库无法读取（${errorMessage(error)}）。已保留为 ${quarantined}，从空数据库开始。`;
+				if (quarantined === undefined) {
+					throw invalid(
+						"data",
+						`the data database at ${this.path} is unreadable (${errorMessage(error)}) and could not be moved aside`,
+					);
+				}
+				this.notice = `数据数据库无法读取（${errorMessage(error)}）。已保留为 ${quarantined}，从空数据库开始。`;
 			}
 		}
 		await this.initialize();
@@ -608,13 +731,18 @@ export class DataStoreDatabase {
 
 	private async initialize(): Promise<void> {
 		silenceSqliteExperimentalWarning();
-		const { openNodeSqliteDatabase } = await import("@earendil-works/chord/sqlite/node");
+		const [{ openNodeSqliteDatabase }, { DatabaseSync: Database }] = await Promise.all([
+			import("@earendil-works/chord/sqlite/node"),
+			import("node:sqlite"),
+		]);
+		await assertNotForeignDatabase(this.path, Database);
 		const database = await openNodeSqliteDatabase(this.path);
 		try {
-			// The adapter has already created the file/directory with the process umask;
-			// narrow them before any table or WAL sidecar is written.
-			await hardenPermissions(this.path);
 			await assertMoonanDatabase(database, this.path);
+			// The adapter created the file/directory with the process umask; narrow them before
+			// any table or WAL sidecar is written. Identity is checked first so a foreign file is
+			// never chmodded.
+			await hardenPermissions(this.path);
 			await applySqliteMigrations(database, MIGRATIONS, { table: SCHEMA_TABLE });
 			const meta = await readMeta(database);
 			if (meta.format !== "moonan.data") {
