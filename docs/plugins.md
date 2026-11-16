@@ -20,7 +20,7 @@ my-plugin/
 | 目录 | `--plugin ./my-plugin`，或放进 `--plugins-dir` 的任一子目录 | `server.mjs` / `server.js` 与 `web.js` / `web.mjs`，各自可选 |
 | 包 | `--plugin my-plugin` | 包自己的 `exports`：`"."` 是服务端切面，`"./web"` 是浏览器切面，各自可选 |
 
-平台对两者做同一件事：拿到切面模块 URL，交给 Chord。区别只在 URL 从哪来。一个包可以只导出 `"./web"`，一个目录可以只有 `web.js`——平台照样启动，只是没有服务端切面。纯前端插件的启停不触发 chord 提交，但平台会重算它的 web hash；改完 `web.js` 后 `POST /api/plugins/reload`（需管理接口开启）就能让浏览器换上新模块——手动 reload 即使没有服务端切面也会提交一个空批次，revision 照常 +1。
+平台对两者做同一件事：拿到切面模块 URL，交给 Chord。区别只在 URL 从哪来。一个包可以只导出 `"./web"`，一个目录可以只有 `web.js`——平台照样启动，只是没有服务端切面。纯前端插件的启停不触发 chord 提交，但平台会重算它的 web hash；改完 `web.js` 后 `POST /api/plugins/reload`（需管理员登录）就能让浏览器换上新模块——手动 reload 即使没有服务端切面也会提交一个空批次，revision 照常 +1。
 
 ### 依赖从哪来
 
@@ -49,7 +49,7 @@ my-plugin/
 ## 服务端切面
 
 ```js
-import { Routes, defineFacet, hostNamed, local, method, remote, num, obj } from "@moonan_ai/sdk";
+import { defineFacet, hostNamed, method, remote, num, obj } from "@moonan_ai/sdk";
 
 const Clock = remote("moonan.clock", {
 	version: 1,
@@ -76,7 +76,63 @@ export default defineFacet((api) => {
 - **`hostNamed("moonan")`**：服务端只有一个宿主，名字就是这个。写别的名字，`serve` 会当场拒绝（`"… is declared for host X, but moonan serves it"`），启动直接失败——错误停在服务端，浏览器根本看不到这个类型。
 - **生命周期**：默认的对象只活到最后一个引用被释放。想让它常驻，用 `{ lifetime: "host" }`——但只有 `local` 契约、且 `input` 接受 `{}` 的对象可以这样。
 - **任务**：`self.task(async (ctx) => {…})` 里用 `ctx.signal` 退出。对象释放时任务跟着停——别在插件里起一个平台关不掉的后台循环。
-- **注册表贡献**必须来自 `lifetime: "host"` 对象。这也是为什么例子末尾有一个空的 `Root` 对象。
+- **注册表贡献**必须来自 `lifetime: "host"` 对象；只有它才能 `self.register(Routes, …)`、`Panels`、`DataCodecs`、`ModelProviders`。
+
+## 主体与用户数据
+
+Moonan 需要登录，Chord 的 **principal（主体）** 就是登录身份。对插件来说有三件事需要知道：
+
+- **工厂的第二个参数是调用者主体。** 默认（每个引用/每个主体一个对象）的工厂拿到的是调用它的主体；`{ lifetime: "host" }` 对象的工厂拿到的是宿主主体 `{ kind: "host" }`。远程对象按 `(类型, input, principalKey)` 建实例，所以两个账户打开同一个面板会拿到两份对象，互不相通。
+- **HTTP 插件路由以登录用户身份跑。** 未登录的 `/api/*` 请求根本到不了插件：平台先返回 401。到了处理函数里，`ctx.principal` 是 `{ kind: "user", id, username, role, session }`。
+- **数据归属显式传。** `DataStore` 是 host-lifetime 的 local 对象，平台不会从调用里推导“当前用户”；用 SDK 的 `dataOwner(principal)` 得到 `"user:<id>"`，作为每个读写调用的 owner。不要用用户名（改名会丢数据），也不要把 `host` 当共享桶——`HOST_DATA_OWNER` 只用于平台自己的记账。
+
+```js
+import { DataStore, Routes, dataOwner, defineFacet, local, obj, requireAdmin, requireUser } from "@moonan_ai/sdk";
+
+const Root = local("example.user-data", {
+	version: 1,
+	input: obj({}, { open: true }),
+	members: {},
+});
+
+export default defineFacet(
+	(api) => {
+		api.serve(Root, (_input, _principal, self) => {
+			const data = self.get(DataStore, {});
+			self.register(Routes, {
+				"GET /api/example/mine": async (_request, response, ctx) => {
+					const user = requireUser(ctx.principal); // 未登录抛 forbidden（平台通常已经先拦成 401）
+					const stored = await data.read(
+						{ owner: dataOwner(user), namespace: "example/config" },
+						ctx,
+					);
+					response.writeHead(200, { "content-type": "application/json" });
+					response.end(JSON.stringify(stored?.value ?? null));
+				},
+				"POST /api/example/admin-action": async (_request, response, ctx) => {
+					try {
+						const admin = requireAdmin(ctx.principal); // 非管理员抛 forbidden
+						// …管理员动作…
+						response.writeHead(200, { "content-type": "application/json" });
+						response.end(JSON.stringify({ ok: true, admin: admin.username }));
+					} catch (error) {
+						response.writeHead(403, { "content-type": "application/json" });
+						response.end(JSON.stringify({ error: String(error), code: "forbidden" }));
+					}
+				},
+			});
+			return {};
+		}, { lifetime: "host" });
+	},
+	{ uses: [DataStore] },
+);
+```
+
+- `requireUser(principal)` / `requireAdmin(principal)` 只在服务端可用：它们抛 Chord 的 `forbidden`。平台对 `/api/*` 的未登录请求先返回 401，所以路由里主要是 `requireAdmin`；自己 `catch` 后回 403 比让外层兜底（平台会记日志并回 500）更清楚。
+- 管理能力必须在**服务端**校验。`PanelContribution.adminOnly` 只是让外壳不渲染标签页；浏览器里改 URL、直接发 HTTP 请求都绕不过 `requireAdmin`。
+- 新登录是新的 `session`，也就新的对象集合：登出、改密码、改角色、删除账户都会让平台调用 `host.invalidatePrincipal`，该用户的远程对象被强制释放。所以按用户的对象应从 `DataStore` 重建，不要假设对象比一次登录活得更久。
+- 同一个登录的多个标签页共享对象（`principalKey` 里不含标签页），换一个浏览器或重新登录则各自一份。
+- 平台级（全局）注册表贡献仍必须来自 host-lifetime 对象：`Routes`、`DataCodecs`、`ModelProviders` 都是全局表。把“按用户的对象”和“全局注册”分成两个 `api.serve` 是官方写法，ai-gateway 的 `AiGateway`（按主体）与宿主级对象（注册 codec/routes/providers）就是这种分工。
 
 ## 契约要在两边各写一份
 
@@ -126,7 +182,7 @@ export default defineFacet((api) => {
 });
 ```
 
-- 组件收到的 props **只有 `host`**。外壳不传状态、不传语言、不传用户——它没有这些东西。
+- 组件收到的 props **只有 `host`**。外壳不传状态、不传语言、不传账户——面板要按用户取数据就通过服务端对象（远程对象天然按登录会话区分）；管理员资格用 `adminOnly` 让外壳过滤标签页，接口自己再校验。
 - `useRemote` 走的是 Chord 的 `host.hold`：引用**同步**返回，可能仍是 `loading`。它返回 chord 的 `Ref<C>`，所以成员是有类型的：单 variant 契约直接 `clock.at`；**多 variant 契约要先按 `ref.variant` 收窄**，否则 TypeScript 不知道该 variant 有哪些成员。
 - `useRefStatus` 读它的 `status` 决定渲染过渡态；`loading` 时状态成员会抛 `not_ready`，`useReadable` 的 fallback 只是占位，不是数据。（`not_ready` / `not_in_variant` 会安静地降级为 fallback；其他错误会被打成 `console.error`，不会被 fallback 掩盖。）
 - **不要用 `isFatalContractError` 把插件契约失配升级成整页刷新。** 官方的补救是重载 web 切面：外壳在 WebFacetCatalog 报告 `web.hash` 变化时会做，面板只负责显示过期状态。若切面没变而 `upgrade_required` 持续出现，说明插件的 web 代码与契约不同步——重载同一文件或刷新整页都修不了，改插件才是修法。
@@ -134,79 +190,107 @@ export default defineFacet((api) => {
 - 浏览器切面应当是一个**单个 ESM 文件**。浏览器没有模块 hook，重载时只有入口 URL 的缓存参数会变，相对 import 的子文件仍命中缓存——把切面拆成多文件，热重载就只换掉入口。
 - `title` 是纯字符串，外壳原样显示。面板自己决定写什么语言。
 - `order` 决定标签顺序，同值保持注册顺序。
+- `adminOnly: true` 的面板只会在管理员登录时渲染。这是 **展示层过滤**：外壳按 `user.role === "admin"` 决定是否显示标签页；面板调用的接口必须在服务端用 `requireAdmin(ctx.principal)` 再校验一次，否则普通用户直接发 HTTP 请求就能绕过。
 - 你不需要打包。`import "react"`、`import "@moonan_ai/sdk/web"`、`import "@earendil-works/pi-schema"` 由外壳的 import map 指到 `/runtime/*.js`：整个页面只有一份 React、一份 Chord、一份 pi-schema。多一份 React 会让 hooks 报错——而且表现为「面板不出现」，不是一条明确的报错。
 
 ## 直接用 Chord
 
 `@moonan_ai/sdk` 把 Chord 的原语再导出了：`remote`、`local`、`method`、`hostNamed`、`defineFacet`、`defineRegistry`，以及 `forbidden`、`invalid`、`isChordError`、`BACKGROUND_CONTEXT`、`Context` 等错误/上下文入口。契约 schema 的构建器也在这里：`obj`、`str`、`num`、`int`、`bool`、`nul`、`unknown`、`arr`、`union`、`opt`、`literal`、`record`、`compile`，以及类型 `Schema`、`Static`（都是 `@earendil-works/pi-schema` 的再导出；`literal`、`record` 是 SDK 补的两个指纹稳定形式，写契约时用它俩而不是 `lit`/`map`）。插件不直接依赖 Chord 也能写完整功能。想用更深的 API（`track`、`applyImmutable` 等），装 `@earendil-works/chord` 即可，版本对齐 `1.5.0`；浏览器切面还可以直接 `import "@earendil-works/chord/context"` 或 `/delta`，import map 已提供这两个入口。
 
-## 统一数据
+## 统一数据（按账户隔离）
 
 平台提供一个统一数据存储：一个内嵌的 SQLite 数据库，默认 `~/.moonan/data.db`，可用 `MOONAN_DATA_DB`
 或 `--data-db` 改。数据库由 Node 内置的 `node:sqlite` 打开（经 Chord 1.5.0 的
 `@earendil-works/chord/sqlite/node`），没有独立的数据库进程；打开时用 WAL + `synchronous=NORMAL`，
-每次变更都在一个事务里。插件通过 `DataStore`（local、host-lifetime）读写自己的 namespace；要让
-数据参与统一导出/导入，再向 `DataCodecs` 注册一个 codec。
+每次变更都在一个事务里。
+
+每个数据集由 **owner + namespace** 两个键确定。owner 是登录账户的 `user:<uuid>`（用 `dataOwner(principal)` 得到），
+namespace 是插件自己的稳定名字。`DataStore` 是 local、host-lifetime 对象，Chord 不会从调用里推导用户，所以
+**每个方法都显式带 owner**；两个账户可以用同一个 namespace 而互相看不见。旧版 schema 1 的全局数据在升级到
+schema 2 时被丢弃，不做迁移。要让数据参与导出/导入，再向 `DataCodecs` 注册一个 codec。
 
 ```js
-import { DataCodecs, DataStore, defineFacet, local, obj, str } from "@moonan_ai/sdk";
+import {
+	DataCodecs,
+	DataStore,
+	dataOwner,
+	defineFacet,
+	hostNamed,
+	local,
+	obj,
+	remote,
+	requireUser,
+	str,
+} from "@moonan_ai/sdk";
 
-const Root = local("example.data-root", {
+// 注册 codec 的宿主级对象：注册表贡献必须来自 lifetime:"host" 的对象。
+const Root = local("example.data-root", { version: 1, input: obj({}, { open: true }), members: {} });
+
+// 每个登录账户一份的远程对象：读自己 owner 下的数据集。
+const Prefs = remote("example.prefs", {
 	version: 1,
 	input: obj({}, { open: true }),
-	members: {},
+	host: hostNamed("moonan"),
+	variants: { v1: { state: { value: str() } } },
 });
 
-export default defineFacet((api) => {
-	api.serve(Root, (_input, _p, self) => {
-		const data = self.get(DataStore, {});
-		const value = self.state("value", str(), {
-			init: async (ctx) => {
-				const stored = await data.read({ namespace: "example/config" }, ctx);
-				return stored === undefined ? "empty" : String(stored.value);
+export default defineFacet(
+	(api) => {
+		api.serve(
+			Root,
+			(_input, _p, self) => {
+				self.register(DataCodecs, {
+					"example/config": {
+						namespace: "example/config",
+						version: 1,
+						migrate: (stored, from) => String(stored),
+						export: (stored) => stored,
+						import: (stored, from, current) => String(stored),
+					},
+				});
+				return {};
 			},
-		});
+			{ lifetime: "host" },
+		);
 
-		self.register(DataCodecs, {
-			"example/config": {
-				namespace: "example/config",
-				version: 1,
-				migrate: (stored, from) => String(stored),
-				export: (stored) => stored,
-				import: (stored, from, current) => String(stored),
-			},
+		api.serve(Prefs, async (_input, principal, self) => {
+			const owner = dataOwner(requireUser(principal)); // "user:<uuid>"
+			const data = self.get(DataStore, {});
+			const stored = await data.read({ owner, namespace: "example/config" });
+			return {
+				variant: "v1",
+				value: stored === undefined ? "empty" : String(stored.value),
+			};
 		});
-
-		// 导入或外部 reload 后，把权威数据同步回投影 cell。
-		self.on("data", data.revision, async (_revision, ctx) => {
-			const stored = await data.read({ namespace: "example/config" }, ctx);
-			const next = stored === undefined ? "empty" : String(stored.value);
-			if (next !== value.value) value.replace(ctx, next);
-		});
-
-		return { value };
-	}, { lifetime: "host" });
-}, { uses: [DataStore] });
+	},
+	{ uses: [DataStore] },
+);
 ```
 
-- `read` 返回 `{ value, version } | undefined`，不查 codec；插件自己校验/迁移第一个值。`read` 是异步的。
+- 每个方法都带 `{ owner, namespace, ... }`：`read`、`write`、`update`、`remove`、`removeOwner`、
+  `exportAll`、`importAll`。`read` 返回 `{ value, version } | undefined`，不查 codec；插件自己校验/迁移第一个值。`read` 是异步的。
+- `data.revision` 是**整个库**的 revision：任何 owner 的写入都会让它前进。按账户的对象在自己的 listener 里
+  用 `dataOwner(principal)` 重读自己的 owner 即可（`self.on("data-revision", data.revision, …)`）。
 - `update` 是推荐的读改写入口：它和 `importAll` 在同一个串行队列里，读改写在一个 SQLite 事务里，不会丢更新。它的 `update` 回调只在同一进程内有效——`DataStore` 是 `local` 契约，回调没有线上表示；平台会在运行时拒绝非函数，也不要把 `DataStore` 改成 `remote` 类型。回调在数据库事务里运行，**不要在回调里再调用任何 DataStore 方法**（会立刻抛 `invalid`，而不是等待）；需要别的数据请在调用前读好，或用回调收到的 `current`。
-- `write` 只做整值替换。
-- `DataStore.storage` 报告数据库信息：`database`、`exists`、`mode`、`writable`、`revision`、`datasets`、`schemaVersion`、`journalMode`、`sizeBytes`、`lastSavedAt`、`notice`。存储状态 schema 变了，所以 `DataStore` 的本地契约版本升到 2；平台与 SDK 一起升级即可，插件方法签名不变。
-- `exportAll` 只导出有 codec 的 namespace；`importAll` 要求每个 dataset 都有 codec，任一失败都不写入数据库。导入时会校验 dataset version：比当前 codec 新的 bundle 会被拒绝，不做静默降级；codec 的 `import` 在导入事务里运行，应保持同步、纯函数。
+- `write` 只做整值替换；`removeOwner` 只用于账户删除（平台调用），插件卸载不会清数据。
+- `DataStore.storage` 报告整个数据库的聚合信息：`database`、`exists`、`mode`、`writable`、`revision`、`datasets`（全库总数）、`schemaVersion`、`journalMode`、`sizeBytes`、`lastSavedAt`、`notice`。现在 `DataStore` 的本地契约版本是 3（数据库 schema 2）；平台与 SDK 一起升级即可，插件方法签名只多了 owner 参数。
+- `exportAll(owner)` 只导出该 owner 有 codec 的 namespace；`importAll(owner)` 要求每个 dataset 都有 codec，任一失败都不写入数据库。导入时会校验 dataset version：比当前 codec 新的 bundle 会被拒绝，不做静默降级；codec 的 `import` 在导入事务里运行，应保持同步、纯函数。codec 本身看不到 owner，只看到该 owner 的值。
 - `includeSecrets` 默认 `false`；codec 的 `export` 负责脱敏，`import` 负责从 `current` 合并回被省略/脱敏的密钥与敏感值。
-- 数据库文件权限 `0600`、目录 `0700`。库损坏时保留为 `data.corrupt-<ts>.db` 并从空库开始，`notice` 会显示在 ai-gateway 的存储信息里；不再有 `.bak` 或 JSON 文件恢复，也不迁移旧版 JSON 数据。`--data-db`/`MOONAN_DATA_DB` 指向已有非 Moonan SQLite 库时，会在打开前拒绝，不会改写它的 journal mode 或权限。
-- 想直接看库里存了什么：`moonan_data_datasets` 每行一个 dataset（`namespace` 主键、`version`、JSON `value`、`updated_at`），`moonan_data_meta` 记录格式标识、revision、dataset 数量与最近保存时间，`moonan_data_schema` 记录迁移版本。导出/导入仍是可移植的 JSON bundle（`moonan.data` v1）。
+- `/api/data/*` 只作用于当前登录账户：任何登录用户都能读聚合的 `storage`，但不能读别人的值；管理员也没有跨账户导出接口。删除账户时平台先删账户行，再 `removeOwner`；清理失败只回 warning。
+- 数据库文件权限 `0600`、目录 `0700`。库损坏时保留为 `data.corrupt-<ts>.db` 并从空库开始，`notice` 会显示在 ai-gateway 的存储信息里；不再有 `.bak` 或 JSON 文件恢复，也不迁移旧版数据。`--data-db`/`MOONAN_DATA_DB` 指向已有非 Moonan SQLite 库时，会在打开前拒绝，不会改写它的 journal mode 或权限。
+- 想直接看库里存了什么：`moonan_data_datasets` 每行一个数据集（`(owner, namespace)` 主键、`version`、JSON `value`、`updated_at`），`moonan_data_meta` 记录格式标识、revision、dataset 总数与最近保存时间，`moonan_data_schema` 记录迁移版本。导出/导入仍是可移植的 JSON bundle（`moonan.data` v1）。
 
 不想参与统一导出/导入的缓存或二进制资产，仍可由插件自己开文件；它们不在 `/api/data/export` 里。
+
+账户与会话不在这里：它们在单独的 `~/.moonan/auth.db`（`--auth-db` / `MOONAN_AUTH_DB`），不走 `DataStore`，也永远不进入导出包。插件需要的用户信息来自主体（`ctx.principal` / 工厂参数），不是某张可读的用户表。
 
 ## 模型注册表
 
 其他服务端插件如果要使用 ai-gateway 配置好的模型，不直接 import ai-gateway 的内部模块，而是查
-`ModelProviders` 注册表：
+`ModelProviders` 注册表。配置按账户隔离，所以取模型目录和运行时都要把**当前主体**传进去：
 
 ```js
-import { defineFacet, invalid, local, obj } from "@moonan_ai/sdk";
+import { defineFacet, invalid, local, obj, requireUser } from "@moonan_ai/sdk";
 import {
 	AI_GATEWAY_PROVIDER_ID,
 	ModelProviders,
@@ -218,31 +302,33 @@ const Root = local("example.chat-root", { version: 1, input: obj({}, { open: tru
 export default defineFacet((api) => {
 	const providers = api.registry(ModelProviders);
 	api.serve(Root, (_input, _p, self) => {
-		// 在方法里用 ctx 查表，旧根看旧代码版本的表：
 		return {
 			ask: async (args, ctx) => {
+				const user = requireUser(ctx.principal);
+				// 在方法里用 ctx 查表，旧根看旧代码版本的表：
 				const current = providers.get(AI_GATEWAY_PROVIDER_ID, ctx);
 				if (!isAiGatewayModelProvider(current)) throw invalid("args", "ai-gateway is not installed");
-				const runtime = current.runtime();
+				// 异步、按账户：读的是这个用户自己的 ai-gateway 配置。
+				const runtime = await current.runtime(user);
 				const model = runtime.models.getModel(args.provider, args.model);
 				// 用 pi-ai 的 Models API 发起请求
 			},
 		};
-	}, { lifetime: "host" });
+	});
 });
 ```
 
 - 注册表值来自 host-lifetime 对象的 `self.register(ModelProviders, ...)`；表随代码版本替换。
-- `list()` 是 key-free 的模型目录；`runtime()` 是 server-only 的 `MutableModels`，含凭据，绝不能给浏览器。
-- 在同一个配置 revision 内，`runtime()` 返回同一个 `MutableModels` 实例；配置变化（新增/删除 provider 或模型、改凭据）会重建它。不要对它 `setProvider` / `deleteProvider`，那会改到别的消费者手里的实例；持有旧 handle 的一方看到的是旧模型集合，按 `runtime().revision` 判断是否需要重新获取。
-- `runtime().models.stream/complete` 是进程内调用，不是 Chord 调用：长请求放进 `self.task` 或短根，并把 `ctx.signal` 传进 pi-ai 的 options，取消才会跟着根走。
+- `list(principal)` 是 key-free 的模型目录；`runtime(principal)` 是 server-only 的 `MutableModels`，含凭据，绝不能给浏览器。两者都是异步的，并且只接受登录用户主体（`host`/`browser` 会被拒绝）。
+- 每次 `runtime(principal)` 都按该用户当前的 `DataStore` 配置构建，没有全局同步缓存——不要假设两次调用返回同一个实例，也不要对它 `setProvider` / `deleteProvider` 去改别的消费者看到的状态。配置变化后重新调用即可；返回的 `runtime.revision` 是这份配置的标识，可用来判断是否需要刷新。
+- `runtime(principal).models.stream/complete` 是进程内调用，不是 Chord 调用：长请求放进 `self.task` 或短根，并把 `ctx.signal` 传进 pi-ai 的 options，取消才会跟着根走。
 - 消费者不需要 `uses`（注册表不是契约）；如果还直接消费 `DataStore` 等契约，再写 `uses`。
 - ai-gateway 未安装时 `get` 返回 `undefined`，消费者自行降级。
 
 ## 插件管理（启用 / 停用 / 安装 / 移除）
 
 平台把「装哪些插件」放在 `~/.moonan/plugins.json`（`--plugins-file` / `MOONAN_PLUGINS_FILE` 可改），
-与统一数据库分开：它是引擎配置，必须是 JSON，平台必须在建 Chord 宿主之前就知道加载谁；而
+与插件数据数据库分开：它是引擎配置，必须是 JSON，平台必须在建 Chord 宿主之前就知道加载谁；而
 `moonan:data` 是宿主里的一个切面。另外，数据导入不应该能改变下次启动加载哪些插件。
 
 ```json
@@ -266,16 +352,22 @@ export default defineFacet((api) => {
 
 ### HTTP 接口
 
+下面所有接口都要求**管理员会话**：未登录返回 401 `unauthorized`，普通用户返回 403
+`admin_required`；并继续校验 `Origin` 与 `Sec-Fetch-Site`。没有单独的「管理开关」，也没有只读降级。
+
 | 方法 | 路径 | 作用 |
 |---|---|---|
-| GET | `/api/v1/plugins` | 快照：条目（含停用）、`enabled`/`server`/`loaded`/`startupSkipped`、`error`、版本、revision、路径、降级启动信息 |
+| GET | `/api/v1/plugins` | 快照：条目（含停用）、`enabled`/`server`/`loaded`/`startupSkipped`、`error`、版本、revision、路径（含 `authDb`）、降级启动信息 |
 | POST | `/api/v1/plugins/enable` | `{ "id": "<ref>" }` |
 | POST | `/api/v1/plugins/disable` | `{ "id": "<ref>" }` |
 | POST | `/api/v1/plugins/install` | `{ "ref": "<包名或目录>", "enable": true }`（`enable` 可省，默认 true） |
 | POST | `/api/v1/plugins/remove` | `{ "id": "<ref>" }` |
 | POST | `/api/v1/plugins/reload` | 重新解析并重载**当前全部**服务端切面（零服务端切面时仍提交空批次） |
-| GET | `/api/plugins` | 兼容的只读诊断：解析结果 + 启停/ephemeral/skipped 标记。**不受管理开关限制**——管理接口关闭时「插件」页用它降级展示 |
-| POST | `/api/plugins/reload` | 兼容旧拼写；与 `/api/v1/plugins/reload` 完全同一套管理策略 |
+| GET | `/api/plugins` | 管理员诊断：解析结果 + 启停/ephemeral/skipped 标记（`experimental: true`）。同样要求管理员，没有免管理降级 |
+| POST | `/api/plugins/reload` | 兼容旧拼写；与 `/api/v1/plugins/reload` 完全同一套鉴权与语义 |
+
+账户管理是另一个管理员专属接口族：`GET /api/v1/users` 与 `POST /api/v1/users/{create,password,role,remove}`，
+JSON 形状由 SDK 的 `USER_ADMIN_API` / `UserAdmin*` 类型给出；删除账户会顺带清掉该账户的插件数据。
 
 `id` 就是 `ref`。`install` **不下载**：它只解析并登记已安装的包/目录；包不存在时返回 `resolve_failed`，
 附带 `plugin.error`。把 `enable` 设为 `true` 时会顺带执行一次启用事务；启用失败时条目保留为停用。
@@ -327,21 +419,30 @@ moonan plugins enable <ref> | disable <ref>
 moonan plugins remove <ref>
 ```
 
-子命令不启动服务器，直接读写注册表，是启动失败时的恢复通道。内置插件不能 `remove`（它每次启动都会
-被官方默认重新合并，停用才是正确操作）；锁定条目 `disable` 需要 `--force`。
+子命令不启动服务器，直接读写注册表，是启动失败时的恢复通道；它不经过 HTTP，所以不需要登录——能运行
+CLI 的人本来就有本机代码执行权限。内置插件不能 `remove`（它每次启动都会被官方默认重新合并，停用才是
+正确操作）；锁定条目 `disable` 需要 `--force`。
 
 ### 安全与恢复
 
-- 管理接口默认只在回环绑定可用；非回环绑定时返回 403 `management_disabled`，除非 `--allow-management`。
-  它同样校验 `Origin` 与 `Sec-Fetch-Site`。没有账号鉴权：能改插件列表 = 能让进程加载任意代码。
+- 管理接口需要管理员会话：未登录 401 `unauthorized`，普通用户 403 `admin_required`；它同样校验 `Origin`
+  与 `Sec-Fetch-Site`。能改插件列表 = 能让进程加载任意代码，所以这是服务端角色校验，不是界面过滤。
 - 启动失败时的降级：平台先记录错误，再以「只隔离全部非锁定条目」重试一次（registry 不改动），让「插件」页
   能打开并逐个启用定位；`--safe-mode` 直接只加载锁定的官方插件。若降级启动也失败，原始错误照常抛出。
-- 移除不会删除 npm 包或目录；需要彻底卸载请自己 `npm uninstall` / 删目录。
+  账户库打不开时不会降级：没有认证就没有可用平台。
+- 移除不会删除 npm 包或目录；需要彻底卸载请自己 `npm uninstall` / 删目录。移除也不会删除插件写过的数据
+  ——数据按账户 owner 保留，只有删除账户才会清理该账户的全部数据集。
 
 ## 检查平台解析到了什么
 
+插件解析诊断需要管理员登录。用 curl 时先把 cookie 存到 jar：
+
 ```bash
-curl http://127.0.0.1:21315/api/plugins
+curl -c /tmp/moonan-cookies -H 'content-type: application/json' \
+  -d '{"username":"admin","password":"<密码>"}' \
+  http://127.0.0.1:21315/api/auth/login
+
+curl -b /tmp/moonan-cookies http://127.0.0.1:21315/api/plugins
 ```
 
 返回里每项带 `name`、`version`、`source`、`web`（浏览器切面 `{ url, hash }`）和 `error`（如果有），
@@ -351,22 +452,22 @@ curl http://127.0.0.1:21315/api/plugins
 要管理插件（含停用条目与路径）用稳定接口：
 
 ```bash
-curl http://127.0.0.1:21315/api/v1/plugins
+curl -b /tmp/moonan-cookies http://127.0.0.1:21315/api/v1/plugins
 ```
 
-`/api/plugins` 仍是只读诊断接口（`experimental: true`），且**不受管理开关限制**：管理接口关闭时「插件」页
-就是靠它降级成一个只读列表。
+`/api/plugins` 是**管理员诊断**接口（`experimental: true`）：未登录 401、普通用户 403，不会在管理接口
+不可用时降级成只读列表。
 
 ## 热重载
 
 ```bash
-curl -X POST http://127.0.0.1:21315/api/plugins/reload
+curl -b /tmp/moonan-cookies -X POST http://127.0.0.1:21315/api/plugins/reload
 # 等价的稳定接口（管理页用）：
-curl -X POST http://127.0.0.1:21315/api/v1/plugins/reload
+curl -b /tmp/moonan-cookies -X POST http://127.0.0.1:21315/api/v1/plugins/reload
 ```
 
-两个路径都是管理接口：默认只在回环绑定可用，非回环且没开 `--allow-management` 时返回 403
-`management_disabled`；它们同样校验 `Origin` 与 `Sec-Fetch-Site`。
+两个路径都要求管理员会话：未登录 401 `unauthorized`，普通用户 403 `admin_required`；它们同样校验
+`Origin` 与 `Sec-Fetch-Site`。浏览器里则用「插件」页的「重新加载」，或由管理员在登录后触发。
 
 没有 body，也没有插件 ID：平台先重新解析所有已知 ref（删除/改名的入口因此变成 `remove` 的切面，web 文件
 的内容 hash 也重算）。**手动 reload 是唯一会重读已安装模块的路径**：把**当前全部服务端切面**放进同一个

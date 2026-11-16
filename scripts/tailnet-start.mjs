@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 
 /**
  * Starts Moonan on the LAN or on the Tailscale interface, without touching the
- * platform's defaults. The platform has no accounts; binding it beyond loopback is
- * only reasonable on a network you already trust (a tailnet is the intended one).
+ * platform's defaults. Accounts are required; a tailnet is the intended remote network
+ * because it encrypts transport between devices (plain local HTTP does not).
  */
 const root = dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 
@@ -17,14 +17,13 @@ Options
   --lan            Bind 0.0.0.0 (LAN + tailnet) instead of the Tailscale IPv4
   --port <n>       Port to listen on (default 21315)
   --dev            Validate every cell write (chord dev mode)
-  --allow-management  Enable the plugin-management API on this non-loopback bind
   -h, --help       Show this help
 
 Run this through \`pnpm start:tailnet\` / \`pnpm start:lan\`, which build first.
 `);
 }
 
-const options = { lan: false, port: "21315", dev: false, allowManagement: false, help: false };
+const options = { lan: false, port: "21315", dev: false, help: false };
 const argv = process.argv.slice(2);
 for (let index = 0; index < argv.length; index += 1) {
 	const flag = argv[index];
@@ -46,9 +45,6 @@ for (let index = 0; index < argv.length; index += 1) {
 		}
 		case "--dev":
 			options.dev = true;
-			break;
-		case "--allow-management":
-			options.allowManagement = true;
 			break;
 		case "-h":
 		case "--help":
@@ -117,13 +113,11 @@ if (options.lan && lan) urls.push(`http://${lan}:${options.port}`);
 if (tailnet?.dnsName) urls.push(`http://${tailnet.dnsName}:${options.port}`);
 
 console.log("");
-console.log("Moonan is binding outside loopback. There is no account authentication.");
+console.log("Moonan is binding outside loopback. Sign in with an account; the first administrator is created in the browser.");
 console.log(`  bind: ${hostname}:${options.port}`);
 for (const url of [...new Set(urls)]) console.log(`  open: ${url}`);
-console.log("  keep this on your tailnet / trusted LAN; do not port-forward it to the internet");
-if (!options.allowManagement) {
-	console.log("  plugin management is off on this bind; add --allow-management to enable it");
-}
+console.log("  a tailnet encrypts transport; plain LAN HTTP sends passwords in clear text");
+console.log("  do not port-forward it to the internet");
 console.log("");
 
 const platform = join(root, "packages", "platform", "bin", "moonan.js");
@@ -134,7 +128,6 @@ const args = [
 	"--port",
 	options.port,
 	...(options.dev ? ["--dev"] : []),
-	...(options.allowManagement ? ["--allow-management"] : []),
 ];
 
 const child = spawn(process.execPath, args, { cwd: root, stdio: "inherit" });

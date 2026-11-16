@@ -73,10 +73,27 @@ export const PLUGIN_MANAGER_CSS = `
 .pm-paths dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 10px 0 0; }
 .pm-paths dt { color: var(--pm-muted); }
 .pm-paths dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+/* 用户 panel: the same row shell as plugins, plus an inline create form and role badges. */
+.pm-user-create { display: flex; gap: 10px; align-items: center; margin: 18px 0 6px; flex-wrap: wrap; }
+.pm-user-create input[type="text"], .pm-user-create input[type="password"] {
+	flex: 1 1 220px; min-width: 180px; padding: 8px 10px; border: 1px solid var(--pm-line);
+	border-radius: 8px; font: inherit;
+}
+.pm-select {
+	padding: 8px 10px; border: 1px solid var(--pm-line); border-radius: 8px;
+	font: inherit; background: var(--pm-bg); color: var(--pm-fg);
+}
+.pm-user-row[data-self="true"] { border-color: #c9d6f7; background: #f7f9ff; }
+.pm-user-row .pm-row-actions { flex-wrap: wrap; }
+.pm-badge-admin { border-color: #c9d6f7; color: #3357b5; background: #f3f6ff; }
+.pm-badge-user { border-color: #d6dde8; color: #55627a; background: #f7f8fa; }
+.pm-badge-me { border-color: #b7e0c2; color: #1c6b39; background: #f0faf3; }
 @media (max-width: 720px) {
 	.pm-root { padding: 14px; }
 	.pm-row { flex-direction: column; }
 	.pm-row-actions { width: 100%; }
 	.pm-row-actions .pm-btn { flex: 1; }
+	.pm-user-create { flex-direction: column; align-items: stretch; }
+	.pm-user-create input[type="text"], .pm-user-create input[type="password"] { flex-basis: auto; }
 }
 `;

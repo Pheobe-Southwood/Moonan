@@ -23,18 +23,20 @@ function packageJson(area: string): { name?: string; dependencies?: Record<strin
 /**
  * The architecture, asserted rather than assumed.
  *
- * The platform's claim is that it knows no feature. Its persistence is two deliberate
- * seams: `data.ts` owns the unified SQLite database (permission hardening and corrupt-file
- * quarantine are file operations), and `json-file.ts` is the atomic writer the plugin
- * registry uses for engine configuration. Everything else writes no files. That is easy to
- * break with one import and hard to notice: `pnpm build` would still succeed. These are the
- * lines that must not be crossed.
+ * The platform's claim is that it knows no feature. Its persistence is a few deliberate
+ * seams: `data.ts` owns the unified plugin-data database, `auth-store.ts` owns the account
+ * database (through the shared `sqlite-support.ts` permission helper), and `json-file.ts`
+ * is the atomic writer the plugin registry uses for engine configuration. Everything else
+ * writes no files. That is easy to break with one import and hard to notice: `pnpm build`
+ * would still succeed. These are the lines that must not be crossed.
  */
 describe("layering", () => {
 	it("confines file writes to the platform data and JSON-file modules", () => {
 		const allowed = new Set([
 			"packages/platform/src/data.ts",
 			"packages/platform/src/json-file.ts",
+			// Shared by the two SQLite databases: mkdir/chmod of their private directories.
+			"packages/platform/src/sqlite-support.ts",
 		]);
 		for (const { file, text } of sources("packages/platform/src")) {
 			if (allowed.has(file)) continue;

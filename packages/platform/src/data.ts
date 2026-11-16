@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { access, chmod, constants, mkdir, open as openFile, rename, stat } from "node:fs/promises";
+import { access, constants, open as openFile, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -31,10 +31,11 @@ import {
 } from "@moonan_ai/sdk";
 import { compile, num } from "@moonan_ai/sdk";
 import { quarantinePath } from "./json-file.js";
+import { hardenPermissions, silenceSqliteExperimentalWarning } from "./sqlite-support.js";
 import type { Principal } from "./types.js";
 
 /** The database's own schema version; one migration per raise. */
-const DATA_SCHEMA_VERSION = 1;
+const DATA_SCHEMA_VERSION = 2;
 /** SQLite's `application_id`: ASCII "MOON", so a file says what wrote it. */
 const DATA_APPLICATION_ID = 0x4d4f4f4e;
 const SCHEMA_TABLE = "moonan_data_schema";
@@ -51,9 +52,14 @@ const transactionScope = new AsyncLocalStorage<DataStoreDatabase>();
  * dataset count, plus the last write time. Keeping the count in the same transaction as the
  * row changes is what lets `info()` stay cheap as the dataset table grows.
  *
- * `moonan_data_datasets` is one row per namespace. The value stays a JSON document: the
- * platform still knows nothing about a plugin's schema, and `DataCodec` still owns migration
- * and redaction. SQLite's job is the container, transactions, and a bounded write path.
+ * `moonan_data_datasets` is one row per owner and namespace. The value stays a JSON
+ * document: the platform still knows nothing about a plugin's schema, and `DataCodec` still
+ * owns migration and redaction. SQLite's job is the container, transactions, and a bounded
+ * write path.
+ *
+ * Schema v2 introduces the `owner` partition. It is a deliberate breaking change: this
+ * project has no users yet, so the migration drops v1 rows instead of inventing an owner
+ * for them (there is no correct owner to invent).
  */
 const MIGRATIONS: readonly SqliteMigration[] = [
 	{
@@ -74,6 +80,21 @@ const MIGRATIONS: readonly SqliteMigration[] = [
 			) STRICT`,
 			`INSERT INTO ${META_TABLE} (singleton, format, revision, datasets, updated_at)
 			 VALUES (1, 'moonan.data', 0, 0, NULL)`,
+		],
+	},
+	{
+		version: 2,
+		statements: [
+			`DROP TABLE ${DATASET_TABLE}`,
+			`CREATE TABLE ${DATASET_TABLE} (
+				owner TEXT NOT NULL CHECK (length(owner) BETWEEN 1 AND 200),
+				namespace TEXT NOT NULL,
+				version INTEGER NOT NULL CHECK (version >= 1),
+				value TEXT NOT NULL CHECK (json_valid(value)),
+				updated_at TEXT NOT NULL,
+				PRIMARY KEY (owner, namespace)
+			) STRICT`,
+			`UPDATE ${META_TABLE} SET datasets = 0 WHERE singleton = 1`,
 		],
 	},
 ];
@@ -117,6 +138,13 @@ function checkJson(value: unknown): asserts value is JsonValue {
 
 function checkNamespace(namespace: string): void {
 	if (namespace.trim().length === 0) throw invalid("data", "dataset namespace must not be empty");
+}
+
+function checkOwner(owner: string): void {
+	if (typeof owner !== "string" || owner.trim().length === 0) {
+		throw invalid("data", "dataset owner must not be empty");
+	}
+	if (owner.length > 200) throw invalid("data", "dataset owner is too long");
 }
 
 function parseStoredValue(namespace: string, text: string): JsonValue {
@@ -171,9 +199,14 @@ async function countDatasets(executor: SqliteExecutor): Promise<number> {
 	return row?.count ?? 0;
 }
 
-async function datasetExists(executor: SqliteExecutor, namespace: string): Promise<boolean> {
+async function datasetExists(
+	executor: SqliteExecutor,
+	owner: string,
+	namespace: string,
+): Promise<boolean> {
 	const row = await executor.get<{ present: number }>(
-		`SELECT 1 AS present FROM ${DATASET_TABLE} WHERE namespace = ?`,
+		`SELECT 1 AS present FROM ${DATASET_TABLE} WHERE owner = ? AND namespace = ?`,
+		owner,
 		namespace,
 	);
 	return row !== undefined;
@@ -181,10 +214,12 @@ async function datasetExists(executor: SqliteExecutor, namespace: string): Promi
 
 async function readDataset(
 	executor: SqliteExecutor,
+	owner: string,
 	namespace: string,
 ): Promise<StoredDataset | undefined> {
 	const row = await executor.get<DatasetValueRow>(
-		`SELECT version, value FROM ${DATASET_TABLE} WHERE namespace = ?`,
+		`SELECT version, value FROM ${DATASET_TABLE} WHERE owner = ? AND namespace = ?`,
+		owner,
 		namespace,
 	);
 	if (row === undefined) return undefined;
@@ -193,18 +228,20 @@ async function readDataset(
 
 async function upsertDataset(
 	executor: SqliteExecutor,
+	owner: string,
 	namespace: string,
 	version: number,
 	value: JsonValue,
 	at: string,
 ): Promise<void> {
 	await executor.run(
-		`INSERT INTO ${DATASET_TABLE} (namespace, version, value, updated_at)
-		 VALUES (?, ?, ?, ?)
-		 ON CONFLICT(namespace) DO UPDATE SET
+		`INSERT INTO ${DATASET_TABLE} (owner, namespace, version, value, updated_at)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(owner, namespace) DO UPDATE SET
 			version = excluded.version,
 			value = excluded.value,
 			updated_at = excluded.updated_at`,
+		owner,
 		namespace,
 		version,
 		JSON.stringify(value),
@@ -257,22 +294,6 @@ async function quarantineDatabase(path: string): Promise<string | undefined> {
 	await rename(`${path}-wal`, `${target}-wal`).catch(() => undefined);
 	await rename(`${path}-shm`, `${target}-shm`).catch(() => undefined);
 	return target;
-}
-
-/**
- * The directory is `0700` and the database (and SQLite's WAL sidecars) `0600`: plugin data is
- * private to the user. SQLite creates `-wal`/`-shm` with 0644 on first write, so this runs
- * after every commit; the `0700` directory is the primary boundary, the file modes are the
- * second layer.
- */
-async function hardenPermissions(path: string): Promise<void> {
-	if (path === MEMORY_PATH) return;
-	const directory = dirname(path);
-	await mkdir(directory, { recursive: true, mode: 0o700 });
-	await chmod(directory, 0o700).catch(() => undefined);
-	await chmod(path, 0o600).catch(() => undefined);
-	await chmod(`${path}-wal`, 0o600).catch(() => undefined);
-	await chmod(`${path}-shm`, 0o600).catch(() => undefined);
 }
 
 /**
@@ -364,30 +385,6 @@ async function assertNotForeignDatabase(
 	}
 }
 
-let sqliteWarningFilterInstalled = false;
-
-/**
- * Node 22 marks `node:sqlite` experimental and prints an ExperimentalWarning on first import.
- * That would be the first line of every `moonan` start (and would make the integration test's
- * "no stderr" assertion about a Node warning rather than about the app). Keep Node's default
- * printer for every other warning; drop only this known one.
- */
-function silenceSqliteExperimentalWarning(): void {
-	if (sqliteWarningFilterInstalled) return;
-	sqliteWarningFilterInstalled = true;
-	const listeners = process.listeners("warning");
-	process.removeAllListeners("warning");
-	process.on("warning", (warning) => {
-		if (
-			warning.name === "ExperimentalWarning" &&
-			warning.message.includes("SQLite is an experimental feature")
-		) {
-			return;
-		}
-		for (const listener of listeners) (listener as (warning: Error) => void)(warning);
-	});
-}
-
 /**
  * The platform's one SQLite database.
  *
@@ -467,14 +464,17 @@ export class DataStoreDatabase {
 		};
 	}
 
-	async read(namespace: string): Promise<StoredDataset | undefined> {
+	async read(owner: string, namespace: string): Promise<StoredDataset | undefined> {
 		this.assertOutsideTransaction();
-		const stored = await readDataset(this.database, namespace);
+		checkOwner(owner);
+		checkNamespace(namespace);
+		const stored = await readDataset(this.database, owner, namespace);
 		return stored === undefined ? undefined : clone(stored);
 	}
 
-	async write(namespace: string, version: number, value: JsonValue): Promise<StoredDataset> {
+	async write(owner: string, namespace: string, version: number, value: JsonValue): Promise<StoredDataset> {
 		this.assertOutsideTransaction();
+		checkOwner(owner);
 		checkNamespace(namespace);
 		checkVersion(version);
 		checkJson(value);
@@ -482,8 +482,8 @@ export class DataStoreDatabase {
 		await this.commit(async (transaction) => {
 			const at = nowIso();
 			const meta = await readMeta(transaction);
-			const existed = await datasetExists(transaction, namespace);
-			await upsertDataset(transaction, namespace, version, value, at);
+			const existed = await datasetExists(transaction, owner, namespace);
+			await upsertDataset(transaction, owner, namespace, version, value, at);
 			meta.revision += 1;
 			meta.datasets += existed ? 0 : 1;
 			meta.updated_at = at;
@@ -501,21 +501,23 @@ export class DataStoreDatabase {
 	 * inside it would wait for the transaction that is already running. Use `current` instead.
 	 */
 	async update(
+		owner: string,
 		namespace: string,
 		version: number,
 		update: (current: StoredDataset | undefined) => StoredDataset | Promise<StoredDataset>,
 	): Promise<StoredDataset> {
 		this.assertOutsideTransaction();
+		checkOwner(owner);
 		checkNamespace(namespace);
 		checkVersion(version);
 		return this.commit(async (transaction) => {
-			const current = await readDataset(transaction, namespace);
+			const current = await readDataset(transaction, owner, namespace);
 			const produced = await update(current === undefined ? undefined : clone(current));
 			checkVersion(produced.version);
 			checkJson(produced.value);
 			const at = nowIso();
 			const meta = await readMeta(transaction);
-			await upsertDataset(transaction, namespace, produced.version, produced.value, at);
+			await upsertDataset(transaction, owner, namespace, produced.version, produced.value, at);
 			meta.revision += 1;
 			meta.datasets += current === undefined ? 1 : 0;
 			meta.updated_at = at;
@@ -524,20 +526,49 @@ export class DataStoreDatabase {
 		});
 	}
 
-	async remove(namespace: string): Promise<DataStoreStorageInfo> {
+	async remove(owner: string, namespace: string): Promise<DataStoreStorageInfo> {
 		this.assertOutsideTransaction();
+		checkOwner(owner);
 		checkNamespace(namespace);
 		const removed = await this.database.transaction((transaction) =>
 			transactionScope.run(this, async () => {
 				const meta = await readMeta(transaction);
 				const changes = await transaction.runCounted(
-					`DELETE FROM ${DATASET_TABLE} WHERE namespace = ?`,
+					`DELETE FROM ${DATASET_TABLE} WHERE owner = ? AND namespace = ?`,
+					owner,
 					namespace,
 				);
 				if (changes === 0) return { removed: false, meta };
 				const at = nowIso();
 				meta.revision += 1;
-				meta.datasets = Math.max(0, meta.datasets - 1);
+				meta.datasets = Math.max(0, meta.datasets - changes);
+				meta.updated_at = at;
+				await writeMeta(transaction, meta);
+				return { removed: true, meta };
+			}),
+		);
+		if (removed.removed) {
+			this.publish(removed.meta);
+			await hardenPermissions(this.path).catch(() => undefined);
+		}
+		return this.info();
+	}
+
+	/** Delete every dataset of one owner. Used when an account is removed. */
+	async removeOwner(owner: string): Promise<DataStoreStorageInfo> {
+		this.assertOutsideTransaction();
+		checkOwner(owner);
+		const removed = await this.database.transaction((transaction) =>
+			transactionScope.run(this, async () => {
+				const meta = await readMeta(transaction);
+				const changes = await transaction.runCounted(
+					`DELETE FROM ${DATASET_TABLE} WHERE owner = ?`,
+					owner,
+				);
+				if (changes === 0) return { removed: false, meta };
+				const at = nowIso();
+				meta.revision += 1;
+				meta.datasets = Math.max(0, meta.datasets - changes);
 				meta.updated_at = at;
 				await writeMeta(transaction, meta);
 				return { removed: true, meta };
@@ -571,15 +602,18 @@ export class DataStoreDatabase {
 	async exportAll(
 		codecs: { table(ctx?: Ctx): ReadonlyMap<string, DatasetCodec> },
 		ctx: Ctx | undefined,
+		owner: string,
 		includeSecrets: boolean,
 	): Promise<DataBundle> {
 		this.assertOutsideTransaction();
+		checkOwner(owner);
 		// One short transaction gives the codecs a consistent row set and revision; the codec
 		// work itself runs after it commits so a slow export does not hold a write transaction.
 		const snapshot = await this.database.transaction(async (transaction) => {
 			const meta = await readMeta(transaction);
 			const rows = await transaction.all<DatasetValueRow & { namespace: string }>(
-				`SELECT namespace, version, value FROM ${DATASET_TABLE} ORDER BY namespace`,
+				`SELECT namespace, version, value FROM ${DATASET_TABLE} WHERE owner = ? ORDER BY namespace`,
+				owner,
 			);
 			return { revision: meta.revision, rows };
 		});
@@ -612,6 +646,7 @@ export class DataStoreDatabase {
 	async importAll(
 		codecs: { table(ctx?: Ctx): ReadonlyMap<string, DatasetCodec> },
 		ctx: Ctx | undefined,
+		owner: string,
 		// `DataBundle` with `unknown` values: a contract input types values as `unknown`, and
 		// every row is asserted to be strict JSON below before a codec sees it.
 		bundle: Omit<DataBundle, "datasets"> & {
@@ -619,6 +654,7 @@ export class DataStoreDatabase {
 		},
 	): Promise<DataImportReport> {
 		this.assertOutsideTransaction();
+		checkOwner(owner);
 		if (!bundleValidator.check(bundle)) {
 			throw invalid("data", "import bundle does not match the moonan.data format");
 		}
@@ -656,10 +692,10 @@ export class DataStoreDatabase {
 				const imported: string[] = [];
 				let inserted = 0;
 				for (const item of items) {
-					const current = await readDataset(transaction, item.namespace);
+					const current = await readDataset(transaction, owner, item.namespace);
 					const value = item.codec.import(item.value, item.version, current?.value);
 					checkJson(value);
-					await upsertDataset(transaction, item.namespace, item.codec.version, value, at);
+					await upsertDataset(transaction, owner, item.namespace, item.codec.version, value, at);
 					if (current === undefined) inserted += 1;
 					imported.push(item.namespace);
 				}
@@ -816,10 +852,16 @@ export function createDataFacet(options: DataFacetOptions): Facet<Principal> {
 					return {
 						revision,
 						storage,
-						read: (args: { namespace: string }) => database.value.read(args.namespace),
+						read: (args: { owner: string; namespace: string }) =>
+							database.value.read(args.owner, args.namespace),
 						write: async (args, ctx) => {
 							checkJson(args.value);
-							const stored = await database.value.write(args.namespace, args.version, args.value);
+							const stored = await database.value.write(
+								args.owner,
+								args.namespace,
+								args.version,
+								args.value,
+							);
 							publish(ctx, await database.value.info());
 							return stored;
 						},
@@ -836,22 +878,32 @@ export function createDataFacet(options: DataFacetOptions): Facet<Principal> {
 							const update = args.update as (
 								current: StoredDataset | undefined,
 							) => StoredDataset | Promise<StoredDataset>;
-							const stored = await database.value.update(args.namespace, args.version, update);
+							const stored = await database.value.update(
+								args.owner,
+								args.namespace,
+								args.version,
+								update,
+							);
 							publish(ctx, await database.value.info());
 							return stored;
 						},
-						remove: async (args: { namespace: string }, ctx) => {
-							publish(ctx, await database.value.remove(args.namespace));
+						remove: async (args: { owner: string; namespace: string }, ctx) => {
+							publish(ctx, await database.value.remove(args.owner, args.namespace));
+						},
+						removeOwner: async (args: { owner: string }, ctx) => {
+							const info = await database.value.removeOwner(args.owner);
+							publish(ctx, info);
+							return info;
 						},
 						reload: async (ctx) => {
 							const info = await database.value.reload();
 							publish(ctx, info);
 							return info;
 						},
-						exportAll: (args: { includeSecrets?: boolean }, ctx) =>
-							database.value.exportAll(codecs, ctx, args.includeSecrets ?? false),
+						exportAll: (args: { owner: string; includeSecrets?: boolean }, ctx) =>
+							database.value.exportAll(codecs, ctx, args.owner, args.includeSecrets ?? false),
 						importAll: async (args, ctx) => {
-							const report = await database.value.importAll(codecs, ctx, args.bundle);
+							const report = await database.value.importAll(codecs, ctx, args.owner, args.bundle);
 							publish(ctx, await database.value.info());
 							return report;
 						},

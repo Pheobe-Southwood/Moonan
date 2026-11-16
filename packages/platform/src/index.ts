@@ -2,6 +2,8 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { AuthService } from "./auth-http.js";
+import { AuthStore, defaultAuthDb } from "./auth-store.js";
 import { defaultDataDb } from "./data.js";
 import { createLogger, type Logger } from "./logger.js";
 import { officialPlugins, type OfficialPluginRef } from "./official.js";
@@ -26,10 +28,12 @@ export interface StartOptions {
 	official?: boolean | readonly OfficialPluginRef[];
 	/** Load only the locked official plugins (the recovery shell); the registry is not read. */
 	safeMode?: boolean;
-	/** Allow the plugin-management endpoints even on a non-loopback bind. */
-	allowManagement?: boolean;
 	/** Absolute path of the unified plugin data database (SQLite). */
 	dataDb?: string;
+	/** Absolute path of the account database (SQLite). Defaults to `MOONAN_AUTH_DB` or ~/.moonan/auth.db. */
+	authDb?: string;
+	/** Mark the session cookie `Secure`; set this when serving Moonan behind an HTTPS reverse proxy. */
+	secureCookies?: boolean;
 	/** The built shell. Defaults to `MOONAN_WEB_DIST`, then the copy shipped next to this file. */
 	webDist?: string;
 	/** Validate every cell write against its schema (chord's `dev`). Default: off. */
@@ -47,15 +51,11 @@ export interface Moonan extends Platform {
 	url: string;
 	server: WebServerHandle;
 	pluginsFile: string;
+	authDb: string;
 }
 
 export function defaultPluginsDir(env: NodeJS.ProcessEnv = process.env): string {
 	return join(env.MOONAN_HOME?.trim() || join(homedir(), ".moonan"), "plugins");
-}
-
-/** Binds the management API to loopback unless the operator explicitly opts in. */
-export function isLoopback(hostname: string): boolean {
-	return hostname === "localhost" || hostname === "::1" || /^127\./.test(hostname);
 }
 
 /** `dist/web` ships inside the package; in a dev tree `--web-dist` points at `packages/web/dist`. */
@@ -132,11 +132,13 @@ export async function start(options: StartOptions = {}): Promise<Moonan> {
 	const version = options.version ?? VERSION;
 	const webDist = resolveWebDist(options.webDist);
 	const dataDb = options.dataDb ?? defaultDataDb();
+	const authDb = options.authDb ?? defaultAuthDb();
 	const pluginsFile = options.pluginsFile ?? defaultPluginsFile();
 	const pluginsDir = options.pluginsDir ?? defaultPluginsDir();
 	const hostname = options.hostname ?? "127.0.0.1";
 	const baseDir = process.cwd();
 
+	const authStore = await AuthStore.open(authDb);
 	const manifest = officialPlugins();
 	const official = Array.isArray(options.official)
 		? options.official
@@ -174,6 +176,7 @@ export async function start(options: StartOptions = {}): Promise<Moonan> {
 		const skipped = entries.filter((entry) => entry.enabled !== false && entry.locked !== true).map((entry) => entry.ref);
 		if (skipped.length === 0) {
 			await registry.close();
+			await authStore.close().catch(() => undefined);
 			throw error;
 		}
 		logger.warn(
@@ -185,11 +188,17 @@ export async function start(options: StartOptions = {}): Promise<Moonan> {
 		} catch (fallbackError) {
 			logger.error("degraded startup also failed", fallbackError);
 			await registry.close();
+			await authStore.close().catch(() => undefined);
 			throw error;
 		}
 	}
 
-	const managementEnabled = options.allowManagement === true || isLoopback(hostname);
+	const auth = new AuthService({
+		store: authStore,
+		version,
+		...(options.secureCookies === undefined ? {} : { secureCookies: options.secureCookies }),
+		logger: logger.child("auth"),
+	});
 
 	try {
 		const server = await startWebServer({
@@ -206,10 +215,12 @@ export async function start(options: StartOptions = {}): Promise<Moonan> {
 				add: platform.addPlugin,
 				remove: platform.removePlugin,
 			},
-			managementEnabled,
+			auth,
+			accounts: { removeUserData: (owner) => platform.removeUserData(owner).then(() => undefined) },
 			pluginsFile,
 			pluginsDir,
 			dataDb,
+			authDb,
 			cwd: baseDir,
 			registryWarning: () => registry.warning(),
 			...(startup ? { startup } : {}),
@@ -229,6 +240,7 @@ export async function start(options: StartOptions = {}): Promise<Moonan> {
 			server,
 			pluginsFile,
 			dataDb: platform.dataDb,
+			authDb,
 			...(startup ? { startup } : {}),
 			get host() {
 				return platform.host;
@@ -246,19 +258,25 @@ export async function start(options: StartOptions = {}): Promise<Moonan> {
 			dataStatus: platform.dataStatus,
 			exportData: platform.exportData,
 			importData: platform.importData,
+			removeUserData: platform.removeUserData,
 			close: async () => {
 				await server.close();
 				await platform.close();
+				await authStore.close().catch(() => undefined);
 				await registry.close();
 			},
 		};
 	} catch (error) {
 		await platform.close();
+		await authStore.close().catch(() => undefined);
 		await registry.close();
 		throw error;
 	}
 }
 
+export { AuthError } from "./auth-store.js";
+export { AuthService } from "./auth-http.js";
+export { AuthStore, defaultAuthDb } from "./auth-store.js";
 export { createPlatform, type Platform, type PlatformOptions } from "./platform.js";
 export { defaultDataDb } from "./data.js";
 export { createLogger, silentLogger, type Logger } from "./logger.js";

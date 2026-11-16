@@ -6,14 +6,22 @@ import { acceptWebSockets, isChordError, type Host, type ReloadReport } from "@e
 import {
 	PLUGIN_ADMIN_API,
 	Routes,
+	dataOwner,
 	type DataBundle,
 	type DataImportReport,
 	type DataStoreStorageInfo,
 	type PluginAdminSnapshot,
 } from "@moonan_ai/sdk";
 import { WebSocketServer } from "ws";
+import {
+	handlePrivateAuth,
+	handlePublicAuth,
+	type AuthService,
+} from "./auth-http.js";
+import { crossSite, readJsonBody, sameOrigin, sendJson } from "./http-util.js";
 import type { Logger } from "./logger.js";
 import type { PluginMutationResult } from "./platform.js";
+import { handleUsers } from "./users-http.js";
 import {
 	adminEntry,
 	describe,
@@ -27,8 +35,13 @@ import {
 
 export interface WebServerData {
 	status(): Promise<DataStoreStorageInfo>;
-	export(options: { includeSecrets: boolean }): Promise<DataBundle>;
-	import(bundle: unknown): Promise<DataImportReport>;
+	export(owner: string, options: { includeSecrets: boolean }): Promise<DataBundle>;
+	import(owner: string, bundle: unknown): Promise<DataImportReport>;
+}
+
+/** The account database's application surface, for the admin snapshot's paths. */
+export interface WebServerAccounts {
+	removeUserData(owner: string): Promise<void>;
 }
 
 /**
@@ -57,13 +70,16 @@ export interface WebServerOptions {
 	/** chord's code version: what a browser and an external tool compare to know a commit landed. */
 	revision: () => number;
 	reload: () => Promise<ReloadReport | undefined>;
-	/** Plugin management, served on `/api/v1/plugins*`. */
+	/** Plugin management, served on `/api/v1/plugins*`. Administrator only. */
 	admin: WebServerAdmin;
-	/** Loopback only unless the operator passed `--allow-management`. */
-	managementEnabled: boolean;
+	/** Account authentication and the admin account operations behind `/api/v1/users*`. */
+	auth: AuthService;
+	/** Account database cleanup when an account is deleted. */
+	accounts: WebServerAccounts;
 	pluginsFile: string;
 	pluginsDir: string;
 	dataDb: string;
+	authDb: string;
 	cwd: string;
 	/** A recovery notice from the plugin registry file, read per request (a save clears it). */
 	registryWarning?: () => string | undefined;
@@ -92,32 +108,6 @@ export interface WebServerHandle {
 const RETRY_LIMIT = 1;
 const RETRY_DELAY_MS = 10;
 
-/**
- * Moonan's origin policy, not a chord one.
- *
- * A browser sends `Origin`; a same-host origin is accepted, and so is an explicitly
- * configured one. No `Origin` means a non-browser client (tests, curl), which is allowed —
- * chord's own WebSocket test connects that way. `Origin: null` and malformed values are
- * refused. Reverse proxies that rewrite `Host` are outside this check.
- */
-function sameOrigin(request: IncomingMessage, allowedOrigins: readonly string[]): boolean {
-	const origin = request.headers.origin;
-	if (origin === undefined) return true;
-	if (origin === "null") return false;
-	if (allowedOrigins.includes(origin)) return true;
-
-	let parsed: URL;
-	try {
-		parsed = new URL(origin);
-	} catch {
-		return false;
-	}
-	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
-	const host = request.headers.host;
-	if (host === undefined) return false;
-	return parsed.host.toLowerCase() === host.toLowerCase();
-}
-
 function delay(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -138,42 +128,6 @@ const MIME: Record<string, string> = {
 	".woff2": "font/woff2",
 	".txt": "text/plain; charset=utf-8",
 };
-
-function sendJson(
-	response: ServerResponse,
-	status: number,
-	body: unknown,
-	headers: Record<string, string> = {},
-): void {
-	const payload = JSON.stringify(body);
-	response.writeHead(status, {
-		"content-type": "application/json; charset=utf-8",
-		"cache-control": "no-store",
-		"content-length": Buffer.byteLength(payload),
-		...headers,
-	});
-	response.end(payload);
-}
-
-const MAX_DATA_BODY = 16 * 1024 * 1024;
-
-async function readJsonBody(request: IncomingMessage): Promise<unknown> {
-	let size = 0;
-	const chunks: Buffer[] = [];
-	for await (const chunk of request) {
-		const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-		size += buffer.byteLength;
-		if (size > MAX_DATA_BODY) throw new Error("request body is too large");
-		chunks.push(buffer);
-	}
-	if (chunks.length === 0) return undefined;
-	const text = Buffer.concat(chunks).toString("utf8");
-	try {
-		return JSON.parse(text);
-	} catch {
-		throw new Error("request body is not valid JSON");
-	}
-}
 
 async function sendFile(response: ServerResponse, file: string, cache: boolean): Promise<boolean> {
 	try {
@@ -205,15 +159,19 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 	const wss = new WebSocketServer({ noServer: true });
 	const allowedOrigins = options.allowedOrigins ?? [];
 	acceptWebSockets(wss, options.host, {
-		// No authentication by design (README): every connection acts as the same principal, so
-		// all browsers share one instance of every remote type they hold. The authenticator is
-		// still chord's official refusal point, so a cross-origin page is turned away there.
-		principal: (request) => {
+		// The session cookie is the only identity source. Chord stamps the returned principal
+		// on the link; a client can never supply its own. Returning undefined closes the link.
+		principal: async (request) => {
 			if (!sameOrigin(request, allowedOrigins)) {
 				options.logger.warn(`refused a websocket from origin ${request.headers.origin ?? "(null)"}`);
 				return undefined;
 			}
-			return { id: "browser" };
+			try {
+				return await options.auth.authenticate(request);
+			} catch (error) {
+				options.logger.warn("websocket authentication failed", error);
+				return undefined;
+			}
 		},
 		...(options.maxCalls === undefined ? {} : { maxCalls: options.maxCalls }),
 		// chord closes a link whose peer announced another protocol version, and the peer closes
@@ -264,13 +222,13 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 			api: PLUGIN_ADMIN_API,
 			version: options.version,
 			revision: options.revision(),
-			management: options.managementEnabled,
 			...(warning === undefined ? {} : { warning }),
 			...(options.startup ? { startup: options.startup } : {}),
 			paths: {
 				cwd: options.cwd,
 				pluginsFile: options.pluginsFile,
 				dataDb: options.dataDb,
+				authDb: options.authDb,
 				pluginsDir: options.pluginsDir,
 			},
 			plugins: plugins().map(adminEntry),
@@ -278,25 +236,25 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 	};
 
 	/**
-	 * The management endpoints change the running process, so they are refused when they are
-	 * disabled (non-loopback bind), cross-origin, or embedded cross-site. This is Moonan
-	 * policy: there is no account authentication to fall back on.
+	 * The plugin-management endpoints change the running process. They are refused for a
+	 * non-administrator, cross-origin, or embedded cross-site request. The role comes from the
+	 * server-stamped principal, never from the request body.
 	 */
-	const guardManagement = (request: IncomingMessage, response: ServerResponse): boolean => {
-		if (!options.managementEnabled) {
-			sendJson(response, 403, {
-				error:
-					"plugin management is disabled: it is limited to a loopback bind unless --allow-management is set",
-				code: "management_disabled",
-			});
-			return true;
-		}
+	const guardAdmin = (
+		request: IncomingMessage,
+		response: ServerResponse,
+		principal: Principal,
+	): boolean => {
 		if (!sameOrigin(request, allowedOrigins)) {
-			sendJson(response, 403, { error: "forbidden" });
+			sendJson(response, 403, { error: "forbidden", code: "forbidden" });
 			return true;
 		}
-		if (request.headers["sec-fetch-site"] === "cross-site") {
+		if (crossSite(request)) {
 			sendJson(response, 403, { error: "cross-site request refused", code: "forbidden" });
+			return true;
+		}
+		if (principal.kind !== "user" || principal.role !== "admin") {
+			sendJson(response, 403, { error: "需要管理员权限", code: "admin_required" });
 			return true;
 		}
 		return false;
@@ -360,9 +318,10 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 	const runAdmin = async (
 		request: IncomingMessage,
 		response: ServerResponse,
+		principal: Principal,
 		action: (body: Record<string, unknown>) => Promise<PluginMutationResult>,
 	): Promise<void> => {
-		if (guardManagement(request, response)) return;
+		if (guardAdmin(request, response, principal)) return;
 		try {
 			const body = await readAdminBody(request);
 			sendMutation(response, await action(body));
@@ -405,10 +364,99 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 		}
 	};
 
+	const authOptions = {
+		service: options.auth,
+		allowedOrigins,
+		logger: options.logger,
+	};
+
+	const accountsOptions = {
+		service: options.auth,
+		allowedOrigins,
+		logger: options.logger,
+		removeUserData: (owner: string) => options.accounts.removeUserData(owner),
+	};
+
+	/**
+	 * Revoke the Chord side after an account/session change. The response has already been
+	 * written (or is about to be); a link invalidation failure is logged, not retried, because
+	 * the session is already gone and cannot be used for new requests.
+	 */
+	const revoke = async (target: { readonly id: string; readonly session?: string } | undefined): Promise<void> => {
+		if (target === undefined) return;
+		try {
+			await options.host.invalidatePrincipal(
+				target.session === undefined
+					? { kind: "user", id: target.id }
+					: { kind: "user", id: target.id, session: target.session },
+			);
+		} catch (error) {
+			options.logger.error("principal invalidation failed", error);
+		}
+	};
+
 	const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
 		const url = new URL(request.url ?? "/", "http://localhost");
 		const pathname = decodeURIComponent(url.pathname);
 		const method = request.method ?? "GET";
+
+		// Public account endpoints run before authentication. Setup is only reachable while the
+		// account table is empty; every other path below needs a session.
+		const publicAuth = await handlePublicAuth(request, response, pathname, method, authOptions);
+		if (publicAuth !== undefined) {
+			await revoke(publicAuth.invalidate);
+			return;
+		}
+
+		let principal;
+		try {
+			principal = await options.auth.authenticate(request);
+		} catch (error) {
+			options.logger.error("session lookup failed", error);
+			sendJson(response, 500, { error: "internal error" });
+			return;
+		}
+
+		if (principal === undefined) {
+			// The shell is public so the login page can render; plugin facets and every API are not.
+			if (pathname.startsWith("/api/") || pathname.startsWith("/facets/")) {
+				sendJson(response, 401, { error: "需要登录", code: "unauthorized" });
+				return;
+			}
+			if (await serveStatic(pathname, response)) return;
+			sendJson(response, 404, { error: "not found" });
+			return;
+		}
+
+		// A cross-site browser request must not drive an authenticated API or facet. Static
+		// shell navigations stay possible (a link from another site may open Moonan); plugin
+		// routes check `Sec-Fetch-Site` at dispatch, where the route actually exists.
+		if (
+			(pathname === "/api" || pathname.startsWith("/api/") || pathname.startsWith("/facets/")) &&
+			crossSite(request)
+		) {
+			const origin = request.headers.origin;
+			if (origin === undefined || !sameOrigin(request, allowedOrigins)) {
+				sendJson(response, 403, { error: "cross-site request refused", code: "forbidden" });
+				return;
+			}
+		}
+
+		const owner = dataOwner(principal);
+
+		// Self-service password change; it revokes every session of the user.
+		const privateAuth = await handlePrivateAuth(
+			request,
+			response,
+			pathname,
+			method,
+			principal,
+			authOptions,
+		);
+		if (privateAuth !== undefined) {
+			await revoke(privateAuth.invalidate);
+			return;
+		}
 
 		if (pathname === "/api/data/status") {
 			if (method !== "GET") {
@@ -438,7 +486,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 			}
 			try {
 				const includeSecrets = url.searchParams.get("includeSecrets") === "1";
-				const bundle = await options.data.export({ includeSecrets });
+				const bundle = await options.data.export(owner, { includeSecrets });
 				sendJson(response, 200, bundle, {
 					"content-disposition": `attachment; filename="moonan-data-${Date.now()}.json"`,
 					...(includeSecrets ? { "x-moonan-secrets": "included" } : {}),
@@ -460,7 +508,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 			}
 			try {
 				const bundle = await readJsonBody(request);
-				sendJson(response, 200, await options.data.import(bundle));
+				sendJson(response, 200, await options.data.import(owner, bundle));
 			} catch (error) {
 				sendJson(response, 400, {
 					error: errorMessage(error),
@@ -473,8 +521,11 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 		}
 
 		if (pathname === "/api/plugins") {
-			// Deliberately ungated: the read-only diagnostic, and the plugin-manager's fallback
-			// when management is disabled (packages/plugin-manager/src/web/app.tsx).
+			if (method !== "GET") {
+				sendJson(response, 405, { error: "method not allowed" });
+				return;
+			}
+			if (guardAdmin(request, response, principal)) return;
 			sendJson(response, 200, {
 				version: options.version,
 				revision: options.revision(),
@@ -498,10 +549,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 				sendJson(response, 405, { error: "method not allowed" });
 				return;
 			}
-			// The legacy spelling of the management reload: same policy as
-			// `/api/v1/plugins/reload`, so a non-loopback bind without `--allow-management`
-			// cannot drive a reload through this path.
-			if (guardManagement(request, response)) return;
+			if (guardAdmin(request, response, principal)) return;
 			await runReload(response);
 			return;
 		}
@@ -511,7 +559,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 				sendJson(response, 405, { error: "method not allowed" });
 				return;
 			}
-			if (guardManagement(request, response)) return;
+			if (guardAdmin(request, response, principal)) return;
 			sendJson(response, 200, snapshot());
 			return;
 		}
@@ -521,7 +569,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 				sendJson(response, 405, { error: "method not allowed" });
 				return;
 			}
-			if (guardManagement(request, response)) return;
+			if (guardAdmin(request, response, principal)) return;
 			await runReload(response);
 			return;
 		}
@@ -531,7 +579,9 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 				sendJson(response, 405, { error: "method not allowed" });
 				return;
 			}
-			await runAdmin(request, response, (body) => options.admin.setEnabled(stringField(body, "id"), true));
+			await runAdmin(request, response, principal, (body) =>
+				options.admin.setEnabled(stringField(body, "id"), true),
+			);
 			return;
 		}
 
@@ -540,7 +590,9 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 				sendJson(response, 405, { error: "method not allowed" });
 				return;
 			}
-			await runAdmin(request, response, (body) => options.admin.setEnabled(stringField(body, "id"), false));
+			await runAdmin(request, response, principal, (body) =>
+				options.admin.setEnabled(stringField(body, "id"), false),
+			);
 			return;
 		}
 
@@ -549,7 +601,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 				sendJson(response, 405, { error: "method not allowed" });
 				return;
 			}
-			await runAdmin(request, response, (body) =>
+			await runAdmin(request, response, principal, (body) =>
 				options.admin.add(stringField(body, "ref"), { enabled: body.enable !== false }),
 			);
 			return;
@@ -560,7 +612,13 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 				sendJson(response, 405, { error: "method not allowed" });
 				return;
 			}
-			await runAdmin(request, response, (body) => options.admin.remove(stringField(body, "id")));
+			await runAdmin(request, response, principal, (body) => options.admin.remove(stringField(body, "id")));
+			return;
+		}
+
+		const users = await handleUsers(request, response, pathname, method, principal, accountsOptions);
+		if (users !== undefined) {
+			await revoke(users.invalidate);
 			return;
 		}
 
@@ -586,12 +644,8 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 							const view = options.host.registry(Routes);
 							const handler = view.get(`${method} ${pathname}`, ctx) ?? view.get(pathname, ctx);
 							if (!handler) return false;
-							// A browser-initiated request from another site (`<img>`, `<form>`, a
-							// third-party frame) must not drive a plugin route, including side-effectful
-							// GETs. Browsers send `Sec-Fetch-Site`; non-browser clients (curl, tests,
-							// other services) do not. An origin the operator explicitly allowed keeps
-							// the same trust it has on the built-in endpoints; a cross-site embed has
-							// no Origin header and is always refused.
+							// A cross-site request was rejected above unless its origin is explicitly
+							// allowed; this second check keeps the policy local to the route dispatch too.
 							if (request.headers["sec-fetch-site"] === "cross-site") {
 								const origin = request.headers.origin;
 								const explicitlyAllowed = origin !== undefined && sameOrigin(request, allowedOrigins);
@@ -603,7 +657,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 							await handler(request, response, ctx);
 							return true;
 						},
-						{ signal: controller.signal },
+						{ principal, signal: controller.signal },
 					);
 					break;
 				} catch (error) {

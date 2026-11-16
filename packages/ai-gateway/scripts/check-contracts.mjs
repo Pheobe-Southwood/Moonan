@@ -25,7 +25,9 @@ async function load(entry, label) {
 	}
 }
 
-const CONTRACTS = ["AiGateway", "GatewayState"];
+// The remote token the browser facet holds. `GatewayAdmin` is local to the server host and
+// is deliberately not exported by the web bundle, so there is nothing to compare for it.
+const CONTRACTS = ["AiGateway"];
 
 const server = await load(dist("contract.js"), "dist/contract.js");
 const web = await load(dist("web.js"), "dist/web.js");

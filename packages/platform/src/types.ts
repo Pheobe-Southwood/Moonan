@@ -1,9 +1,10 @@
-import type { FacetSetEntry, PluginAdminEntry } from "@moonan_ai/sdk";
+import type { FacetSetEntry, MoonanPrincipal, PluginAdminEntry } from "@moonan_ai/sdk";
 
-/** Who is calling. The platform makes no distinction beyond the host's own code. */
-export interface Principal {
-	id: string;
-}
+/**
+ * Who is calling. The SDK owns the shape because browser facets, server facets and the
+ * platform all narrow on the same principal; the platform only re-exports it here.
+ */
+export type Principal = MoonanPrincipal;
 
 /** Where a plugin's facets came from. */
 export type PluginSource = FacetSetEntry["source"];

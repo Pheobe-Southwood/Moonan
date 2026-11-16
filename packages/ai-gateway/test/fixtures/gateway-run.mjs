@@ -17,8 +17,12 @@ const packageJson = JSON.parse(await readFile(new URL("../../package.json", impo
 const home = await mkdtemp(join(tmpdir(), "moonan-gateway-home-"));
 const pluginsDir = await mkdtemp(join(tmpdir(), "moonan-gateway-plugins-"));
 const dataDb = join(home, "data.db");
+const authDb = join(home, "auth.db");
 const pluginsFile = join(home, "plugins.json");
 const consumerDir = fileURLToPath(new URL("./consumer-plugin", import.meta.url));
+
+const ADMIN = { username: "root", password: "root-password-123" };
+const BOB = { username: "bob", password: "bob-password-123" };
 
 /**
  * `node:sqlite` prints Node's one-time "SQLite is an experimental feature" warning when it
@@ -64,11 +68,53 @@ const upstreamUrl = `http://127.0.0.1:${address.port}/v1`;
 
 let app;
 let client;
+let bobClient;
+let cookie;
+let adminUserId;
+let bobCookie;
+let bobUserId;
 
-async function connect(target) {
-	const socket = new WebSocket(target.url.replace(/^http/, "ws") + "/ws");
-	const host = createHost({ kind: "client", self: { id: "browser" }, onError: () => undefined });
-	host.connect(webSocketLink(socket), { principal: { id: "host" } });
+/** One HTTP request carrying a session cookie; every API below `/api/` needs one. */
+function fetchAs(sessionCookie, path, init = {}) {
+	return fetch(`${app.url}${path}`, {
+		...init,
+		headers: { ...(init.headers ?? {}), ...(sessionCookie ? { cookie: sessionCookie } : {}) },
+	});
+}
+
+/** An administrator request: all gateway routes and the data/plugin surfaces are per user. */
+function authFetch(path, init) {
+	return fetchAs(cookie, path, init);
+}
+
+function postJson(sessionCookie, path, body) {
+	return fetchAs(sessionCookie, path, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(body),
+	});
+}
+
+/**
+ * Public authentication: setup creates the first administrator and returns a session
+ * cookie; login creates another session for an existing account. Chord and every HTTP
+ * route authenticate from that cookie alone.
+ */
+async function authenticate(path, account) {
+	const response = await postJson("", path, account);
+	assert.equal(response.status, 200, `${path} for ${account.username}: ${await response.clone().text()}`);
+	const body = await response.json();
+	const setCookie = response.headers.getSetCookie()[0];
+	assert.ok(setCookie, `${path} sets a session cookie`);
+	return { cookie: setCookie.split(";")[0], user: body.user };
+}
+
+async function connect(target, sessionCookie) {
+	const socket = new WebSocket(target.url.replace(/^http/, "ws") + "/ws", {
+		headers: { cookie: sessionCookie },
+	});
+	const host = createHost({ kind: "client", self: { kind: "browser" }, onError: () => undefined });
+	host.connect(webSocketLink(socket), { principal: { kind: "host" } });
 	await new Promise((resolve, reject) => {
 		socket.once("open", () => resolve());
 		socket.once("error", reject);
@@ -104,11 +150,40 @@ try {
 		plugins: ["@moonan_ai/ai-gateway", consumerDir],
 		pluginsDir,
 		dataDb,
+		authDb,
 		pluginsFile,
 		official: false,
 		logger: silentLogger,
 	});
-	client = await connect(app);
+
+	// Public status works before setup; everything else is closed until a session exists.
+	const initialStatus = await (await fetch(`${app.url}/api/auth/status`)).json();
+	assert.equal(initialStatus.setupRequired, true);
+	assert.equal(initialStatus.authenticated, false);
+	const anonymous = await fetch(`${app.url}/api/ai-gateway/status`);
+	assert.equal(anonymous.status, 401);
+	assert.equal((await anonymous.json()).code, "unauthorized");
+
+	const admin = await authenticate("/api/auth/setup", ADMIN);
+	cookie = admin.cookie;
+	adminUserId = admin.user.id;
+	assert.equal(admin.user.role, "admin");
+	const adminOwner = `user:${adminUserId}`;
+	assert.deepEqual(
+		{ id: admin.user.id, username: admin.user.username },
+		{ id: adminUserId, username: ADMIN.username },
+	);
+
+	// The HTTP face creates (and releases) a per-request reference to the caller's own
+	// object; no browser client is connected yet and it must still answer from the owner row.
+	const preflight = await (await authFetch("/api/ai-gateway/status")).json();
+	assert.equal(preflight.providers, 0);
+	assert.equal(preflight.models, 0);
+	assert.equal(preflight.database, dataDb);
+	assert.equal(preflight.storage.namespace, "ai-gateway/config");
+	assert.equal(preflight.storage.datasets, 0);
+
+	client = await connect(app, cookie);
 	const ref = client.ref;
 
 	await ref.addProvider({
@@ -185,7 +260,9 @@ try {
 		assert.ok(!JSON.stringify(snapshot).includes(secret), `snapshot leaked ${secret}`);
 	}
 
-	const status = await (await fetch(`${app.url}/api/ai-gateway/status`)).json();
+	// The HTTP face answers from the caller's own per-user object; it is only reachable
+	// with the session cookie.
+	const status = await (await authFetch("/api/ai-gateway/status")).json();
 	assert.equal(status.version, packageJson.version);
 	assert.equal(status.providers, 1);
 	assert.equal(status.models, 4);
@@ -193,13 +270,13 @@ try {
 	assert.equal(status.database, dataDb);
 	assert.equal(status.storage.database, dataDb);
 	assert.equal(status.storage.mode, "0600");
-	assert.equal(status.storage.schemaVersion, 1);
+	assert.equal(status.storage.schemaVersion, 2);
 	assert.equal(status.storage.journalMode, "wal");
 	assert.equal(status.storage.exists, true);
 	assert.equal(status.storage.namespace, "ai-gateway/config");
 	assert.equal(status.storage.datasets, 1);
 
-	const configText = await (await fetch(`${app.url}/api/ai-gateway/config`)).text();
+	const configText = await (await authFetch("/api/ai-gateway/config")).text();
 	assert.ok(!configText.includes("sk-upstream-12345678"));
 	assert.ok(configText.includes("•••• 5678"));
 	for (const secret of ["tok-header-secret", "sk-env-secret", "sk-model-secret"]) {
@@ -207,18 +284,18 @@ try {
 	}
 	assert.ok(configText.includes(REDACTED));
 
-	const exported = await (await fetch(`${app.url}/api/data/export`)).json();
+	const exported = await (await authFetch("/api/data/export")).json();
 	assert.ok(exported.datasets.some((dataset) => dataset.namespace === "ai-gateway/config"));
 	assert.ok(!JSON.stringify(exported).includes("sk-upstream-12345678"));
 	for (const secret of ["tok-header-secret", "sk-env-secret", "sk-model-secret"]) {
 		assert.ok(!JSON.stringify(exported).includes(secret), `export leaked ${secret}`);
 	}
-	const withSecrets = await (await fetch(`${app.url}/api/data/export?includeSecrets=1`)).json();
+	const withSecrets = await (await authFetch("/api/data/export?includeSecrets=1")).json();
 	assert.ok(JSON.stringify(withSecrets).includes("sk-upstream-12345678"));
 	for (const secret of ["tok-header-secret", "sk-env-secret", "sk-model-secret"]) {
 		assert.ok(JSON.stringify(withSecrets).includes(secret), `includeSecrets omitted ${secret}`);
 	}
-	const importResponse = await fetch(`${app.url}/api/data/import`, {
+	const importResponse = await fetchAs(cookie, "/api/data/import", {
 		method: "POST",
 		body: JSON.stringify(exported),
 	});
@@ -242,12 +319,12 @@ try {
 		assert.ok(!JSON.stringify(savedModel).includes(secret), `saveModel returned ${secret}`);
 	}
 
-	const consumer = await (await fetch(`${app.url}/api/model-provider`)).json();
+	const consumer = await (await authFetch("/api/model-provider")).json();
 	assert.ok(consumer.models.includes("hand-written"));
 
 	// The HTTP surface maps a Chord error to a status and carries its code: a bad provider
 	// id is the caller's mistake (400), not a gateway failure.
-	const badDiscover = await fetch(`${app.url}/api/ai-gateway/discover`, {
+	const badDiscover = await authFetch("/api/ai-gateway/discover", {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({ providerId: "no-such-provider" }),
@@ -258,7 +335,7 @@ try {
 	assert.match(badDiscoverBody.error, /不存在/);
 
 	// A malformed body is the caller's mistake too (400), not a gateway failure (502).
-	const malformed = await fetch(`${app.url}/api/ai-gateway/discover`, {
+	const malformed = await authFetch("/api/ai-gateway/discover", {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: "{",
@@ -267,7 +344,7 @@ try {
 	assert.equal((await malformed.json()).code, "invalid");
 
 	await ref.addProvider({ id: "bad-auth", name: "Bad Auth", api: "openai-completions", baseUrl: upstreamUrl, apiKey: "wrong-key" });
-	const badAuth = await fetch(`${app.url}/api/ai-gateway/discover`, {
+	const badAuth = await authFetch("/api/ai-gateway/discover", {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({ providerId: "bad-auth" }),
@@ -282,7 +359,7 @@ try {
 		baseUrl: "http://127.0.0.1:1/v1",
 		apiKey: "sk-unreachable",
 	});
-	const unreachable = await fetch(`${app.url}/api/ai-gateway/discover`, {
+	const unreachable = await authFetch("/api/ai-gateway/discover", {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({ providerId: "unreachable" }),
@@ -296,10 +373,11 @@ try {
 
 	assert.equal(consumer.model, "hand-written");
 
-	// Another plugin writes a dataset of its own. Only the store's `storage` cell changes,
-	// so a gateway snapshot that only followed its own `config` cell would stay stale.
+	// Another plugin writes a dataset of its own into this user's partition. Only the
+	// store's `storage` cell changes, so a gateway snapshot that only followed its own
+	// `config` cell would stay stale.
 	assert.equal(ref.snapshot.value.storage.datasets, 1);
-	const touch = await fetch(`${app.url}/api/data-touch`);
+	const touch = await authFetch("/api/data-touch");
 	assert.equal(touch.status, 200);
 	const touched = await waitFor(
 		() => ref.snapshot.value,
@@ -310,13 +388,22 @@ try {
 
 	// The unified store is one SQLite database; inspect it directly. The database is the
 	// server-side authority: the masked round-trips restored the real values instead of
-	// persisting the sentinel, and the panel/export never see these plaintext values.
+	// persisting the sentinel, and the panel/export never see these plaintext values. Every
+	// row belongs to one account's owner, so the query names it instead of reading whatever
+	// happens to be in the table.
 	const db = await openDb(dataDb, { readOnly: true });
-	const row = db.prepare("SELECT version, value FROM moonan_data_datasets WHERE namespace = ?").get("ai-gateway/config");
+	const adminRow = db
+		.prepare("SELECT owner, version, value FROM moonan_data_datasets WHERE owner = ? AND namespace = ?")
+		.get(adminOwner, "ai-gateway/config");
+	const aiGatewayRows = db
+		.prepare("SELECT COUNT(*) AS count FROM moonan_data_datasets WHERE namespace = ?")
+		.get("ai-gateway/config");
 	db.close();
-	assert.ok(row, "the ai-gateway dataset is stored in the SQLite database");
-	assert.equal(row.version, 1);
-	const raw = row.value;
+	assert.ok(adminRow, "the administrator's ai-gateway dataset is stored in the SQLite database");
+	assert.equal(adminRow.owner, adminOwner);
+	assert.equal(adminRow.version, 1);
+	assert.equal(aiGatewayRows.count, 1);
+	const raw = adminRow.value;
 	assert.ok(raw.includes("sk-upstream-12345678"));
 	for (const secret of ["tok-header-secret", "sk-env-secret", "sk-model-secret"]) {
 		assert.ok(raw.includes(secret), `database lost ${secret}`);
@@ -332,7 +419,7 @@ try {
 	assert.equal(rawModel.headers.authorization, "Bearer sk-model-secret");
 	assert.equal((await stat(dataDb)).mode & 0o777, 0o600);
 
-	const reload = await fetch(`${app.url}/api/plugins/reload`, { method: "POST" });
+	const reload = await authFetch("/api/plugins/reload", { method: "POST" });
 	assert.equal(reload.status, 200);
 	await new Promise((resolve) => setTimeout(resolve, 100));
 	assert.equal(ref.snapshot.value.providers[0]?.models.length, 4);
@@ -345,8 +432,8 @@ try {
 	const writer = await openDb(dataDb);
 	const editedAt = new Date().toISOString();
 	writer
-		.prepare("UPDATE moonan_data_datasets SET value = ?, updated_at = ? WHERE namespace = ?")
-		.run(JSON.stringify(edited), editedAt, "ai-gateway/config");
+		.prepare("UPDATE moonan_data_datasets SET value = ?, updated_at = ? WHERE owner = ? AND namespace = ?")
+		.run(JSON.stringify(edited), editedAt, adminOwner, "ai-gateway/config");
 	writer
 		.prepare("UPDATE moonan_data_meta SET revision = revision + 1, updated_at = ? WHERE singleton = 1")
 		.run(editedAt);
@@ -363,6 +450,110 @@ try {
 	const anthropic = withBuiltin.providers.find((provider) => provider.id === "anthropic");
 	assert.ok(anthropic.models.length > 10);
 
+	// A second account gets an independent gateway object and an independent DataStore
+	// partition. The administrator creates the account; the account signs in through the
+	// public login endpoint and holds its own Chord session and cookie.
+	const created = await postJson(cookie, "/api/v1/users/create", {
+		username: BOB.username,
+		password: BOB.password,
+		role: "user",
+	});
+	assert.equal(created.status, 200);
+	const createdBody = await created.json();
+	bobUserId = createdBody.user.id;
+	assert.equal(createdBody.user.role, "user");
+	const bobOwner = `user:${bobUserId}`;
+	assert.notEqual(bobOwner, adminOwner);
+
+	const bobAuth = await authenticate("/api/auth/login", BOB);
+	bobCookie = bobAuth.cookie;
+	assert.equal(bobAuth.user.id, bobUserId);
+
+	bobClient = await connect(app, bobCookie);
+	const bobRef = bobClient.ref;
+	const bobInitial = await waitFor(
+		() => bobRef.snapshot.value,
+		(value) => Array.isArray(value.providers),
+		"bob snapshot",
+	);
+	// Same remote contract, different principal: no sign of the administrator's providers.
+	assert.deepEqual(bobInitial.providers, []);
+	assert.equal(bobInitial.settings.discoveryTimeoutMs, defaultSettings().discoveryTimeoutMs);
+
+	await bobRef.addProvider({
+		id: "bob-only",
+		name: "Bob Only",
+		api: "openai-completions",
+		baseUrl: upstreamUrl,
+		apiKey: "sk-bob-secret-1234",
+	});
+	const bobSnapshot = await waitFor(
+		() => bobRef.snapshot.value,
+		(value) => value.providers.some((provider) => provider.id === "bob-only"),
+		"bob provider in snapshot",
+	);
+	assert.equal(bobSnapshot.providers.length, 1);
+	assert.equal(bobSnapshot.providers[0]?.hasKey, true);
+	assert.ok(!JSON.stringify(bobSnapshot).includes("sk-upstream-12345678"));
+
+	// The administrator's object and HTTP config did not change: a write by one user is
+	// invisible to another even though both objects live on the same server host.
+	const adminSnapshot = ref.snapshot.value;
+	assert.equal(adminSnapshot.providers.length, 2);
+	assert.ok(!adminSnapshot.providers.some((provider) => provider.id === "bob-only"));
+	assert.ok(!JSON.stringify(adminSnapshot).includes("sk-bob-secret-1234"));
+	const adminConfig = await (await authFetch("/api/ai-gateway/config")).json();
+	assert.deepEqual(
+		adminConfig.providers.map((provider) => provider.id).sort(),
+		["anthropic", "atlas"],
+	);
+	const bobConfig = await (await fetchAs(bobCookie, "/api/ai-gateway/config")).json();
+	assert.deepEqual(
+		bobConfig.providers.map((provider) => provider.id),
+		["bob-only"],
+	);
+	assert.ok(!JSON.stringify(bobConfig).includes("sk-upstream-12345678"));
+
+	// The health/storage surface follows the caller too.
+	const adminHealth = await (await authFetch("/api/ai-gateway/health")).json();
+	const bobHealth = await (await fetchAs(bobCookie, "/api/ai-gateway/health")).json();
+	assert.equal(adminHealth.providers, 2);
+	assert.equal(adminHealth.models, 4 + anthropic.models.length);
+	assert.equal(bobHealth.providers, 1);
+	assert.equal(bobHealth.models, 0);
+	assert.equal(bobHealth.updatedAt, bobSnapshot.generatedAt);
+
+	// The ModelProviders contribution is global but reads the caller's partition: the
+	// consumer plugin sees the administrator's models with the administrator's cookie and
+	// an empty catalog for bob.
+	const bobConsumer = await (await fetchAs(bobCookie, "/api/model-provider")).json();
+	assert.deepEqual(bobConsumer.models, []);
+	assert.equal(bobConsumer.model, null);
+
+	// Both accounts' datasets are rows of the one database, separated by owner. Neither
+	// row carries the other account's provider or credential.
+	const splitDb = await openDb(dataDb, { readOnly: true });
+	const rows = splitDb
+		.prepare("SELECT owner, value FROM moonan_data_datasets WHERE namespace = ? ORDER BY owner")
+		.all("ai-gateway/config");
+	splitDb.close();
+	assert.equal(rows.length, 2);
+	const byOwner = new Map(rows.map((row) => [row.owner, JSON.parse(row.value)]));
+	const adminStored = byOwner.get(adminOwner);
+	const bobStored = byOwner.get(bobOwner);
+	assert.ok(adminStored, "administrator dataset row present");
+	assert.ok(bobStored, "bob dataset row present");
+	assert.ok(adminStored.providers.some((provider) => provider.id === "atlas"));
+	assert.ok(!adminStored.providers.some((provider) => provider.id === "bob-only"));
+	assert.ok(bobStored.providers.some((provider) => provider.id === "bob-only"));
+	assert.ok(!bobStored.providers.some((provider) => provider.id === "atlas"));
+	assert.ok(!JSON.stringify(adminStored).includes("sk-bob-secret-1234"));
+	assert.ok(!JSON.stringify(bobStored).includes("sk-upstream-12345678"));
+
+	// A restart keeps both partitions: the session cookie survives (sessions live in the
+	// auth database) and the per-user config cell is re-initialized from each owner's row.
+	await closeClient(bobClient);
+	bobClient = undefined;
 	await closeClient(client);
 	client = undefined;
 	await app.close();
@@ -371,11 +562,12 @@ try {
 		plugins: ["@moonan_ai/ai-gateway", consumerDir],
 		pluginsDir,
 		dataDb,
+		authDb,
 		pluginsFile,
 		official: false,
 		logger: silentLogger,
 	});
-	client = await connect(app);
+	client = await connect(app, cookie);
 	const restored = await waitFor(
 		() => client.ref.snapshot.value,
 		(value) => value.providers.length === 2,
@@ -387,11 +579,22 @@ try {
 	assert.equal(atlas?.models.length, 4);
 	assert.equal(restored.settings.discoveryTimeoutMs, 12_345);
 
+	bobClient = await connect(app, bobCookie);
+	const bobRestored = await waitFor(
+		() => bobClient.ref.snapshot.value,
+		(value) => value.providers.length === 1,
+		"restored bob providers",
+	);
+	assert.equal(bobRestored.providers[0]?.id, "bob-only");
+	assert.equal(bobRestored.providers[0]?.hasKey, true);
+	assert.notEqual(bobRestored.generatedAt, restored.generatedAt);
+
 	console.log(JSON.stringify({ ok: true, providers: restored.providers.length, models: status.models }));
 } catch (error) {
 	console.error(error.stack || error);
 	process.exitCode = 1;
 } finally {
+	await closeClient(bobClient).catch(() => undefined);
 	await closeClient(client).catch(() => undefined);
 	await app?.close().catch(() => undefined);
 	await new Promise((resolve) => upstream.close(() => resolve()));

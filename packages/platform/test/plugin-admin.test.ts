@@ -3,7 +3,16 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { PluginAdminEntry, PluginAdminSnapshot } from "@moonan_ai/sdk";
 import type { Moonan } from "../src/index.js";
-import { appFor, cleanup, pluginDir, request, tempDir, tempPluginsFile } from "./support.js";
+import {
+	appFor,
+	cleanup,
+	createUser,
+	loginAs,
+	pluginDir,
+	request,
+	tempDir,
+	tempPluginsFile,
+} from "./support.js";
 
 afterEach(cleanup);
 
@@ -44,11 +53,29 @@ function mutation(
 	app: Moonan,
 	path: string,
 	body: unknown,
-	options: { origin?: string | null; headers?: Record<string, string> } = {},
+	options: { origin?: string | null; headers?: Record<string, string>; cookie?: string | null } = {},
 ) {
 	const headers: Record<string, string> = { "content-type": "application/json", ...options.headers };
 	if (options.origin !== null) headers.origin = options.origin ?? app.url;
-	return request(`${app.url}${path}`, { method: "POST", headers, body: JSON.stringify(body) });
+	return request(`${app.url}${path}`, {
+		method: "POST",
+		headers,
+		body: JSON.stringify(body),
+		...(options.cookie === undefined ? {} : { cookie: options.cookie }),
+	});
+}
+
+/** GET with an explicit session cookie (or none), like `mutation` above. */
+function read(app: Moonan, path: string, cookie?: string | null) {
+	return request(`${app.url}${path}`, {
+		...(cookie === undefined ? {} : { cookie }),
+	});
+}
+
+/** Creates a non-administrator account and returns its session cookie. */
+async function regularUser(app: Moonan, username = "viewer"): Promise<{ id: string; cookie: string }> {
+	const user = await createUser(app, { username });
+	return { id: user.id, cookie: await loginAs(app, username) };
 }
 
 async function registryDocument(app: Moonan): Promise<{ plugins: { ref: string; enabled: boolean }[] }> {
@@ -58,14 +85,15 @@ async function registryDocument(app: Moonan): Promise<{ plugins: { ref: string; 
 }
 
 describe("plugin management API", () => {
-	it("publishes a snapshot with the registry path and management state", async () => {
+	it("publishes an administrator snapshot with both database paths", async () => {
 		const pluginsFile = await tempPluginsFile();
 		const app = await appFor([], { pluginsFile });
 		const body = await snapshot(app);
-		expect(body.api).toBe(1);
-		expect(body.management).toBe(true);
+		expect(body.api).toBe(2);
+		expect(body).not.toHaveProperty("management");
 		expect(body.paths.pluginsFile).toBe(pluginsFile);
 		expect(body.paths.dataDb).toBe(app.dataDb);
+		expect(body.paths.authDb).toBe(app.authDb);
 		expect(body.plugins).toEqual([]);
 	});
 
@@ -227,38 +255,63 @@ describe("plugin management API", () => {
 		expect(app.revision).toBe(revision);
 	});
 
-	it("limits management to loopback unless explicitly allowed", async () => {
-		const denied = await appFor([], { hostname: "0.0.0.0" });
-		const deniedGet = await fetch(`${denied.url}/api/v1/plugins`);
-		expect(deniedGet.status).toBe(403);
-		expect((await deniedGet.json()) as { code?: string }).toMatchObject({ code: "management_disabled" });
-		const deniedPost = await mutation(denied, "/api/v1/plugins/enable", { id: "/x" });
-		expect(deniedPost.status).toBe(403);
+	it("requires an administrator for the plugin management API", async () => {
+		const dir = await pluginDir(TOGGLED);
+		const app = await appFor([dir]);
 
-		const allowed = await appFor([], { hostname: "0.0.0.0", allowManagement: true });
-		expect((await fetch(`${allowed.url}/api/v1/plugins`)).status).toBe(200);
+		// No session: every /api/* path is refused before the management layer runs.
+		const anonymousRead = await read(app, "/api/v1/plugins", null);
+		expect(anonymousRead.status).toBe(401);
+		expect(JSON.parse(anonymousRead.body)).toMatchObject({ code: "unauthorized" });
+		const anonymousWrite = await mutation(app, "/api/v1/plugins/disable", { id: dir }, { cookie: null });
+		expect(anonymousWrite.status).toBe(401);
+
+		// A signed-in non-administrator is refused by role, on the server, not by the panel.
+		const viewer = await regularUser(app);
+		const viewerRead = await read(app, "/api/v1/plugins", viewer.cookie);
+		expect(viewerRead.status).toBe(403);
+		expect(JSON.parse(viewerRead.body)).toMatchObject({ code: "admin_required" });
+		const viewerWrite = await mutation(app, "/api/v1/plugins/disable", { id: dir }, { cookie: viewer.cookie });
+		expect(viewerWrite.status).toBe(403);
+		expect(JSON.parse(viewerWrite.body)).toMatchObject({ code: "admin_required" });
+		// Role is checked before the body, so nothing was actually disabled.
+		expect(await entry(app, dir)).toMatchObject({ enabled: true, loaded: true });
+
+		// The administrator gets the snapshot and can manage; a non-loopback bind no longer
+		// needs an opt-in, because the account is the boundary now.
+		expect((await read(app, "/api/v1/plugins")).status).toBe(200);
+		expect((await mutation(app, "/api/v1/plugins/disable", { id: dir })).status).toBe(200);
+		const remote = await appFor([dir], { hostname: "0.0.0.0" });
+		expect((await read(remote, "/api/v1/plugins")).status).toBe(200);
+		expect((await mutation(remote, "/api/v1/plugins/disable", { id: dir })).status).toBe(200);
 	});
 
-	it("gates the legacy /api/plugins/reload endpoint like the management API", async () => {
+	it("gates the legacy /api/plugins diagnostics and reload endpoints on the administrator role", async () => {
 		const dir = await pluginDir(TOGGLED);
-		const denied = await appFor([dir], { hostname: "0.0.0.0" });
-		// The read-only diagnostic stays available: the plugin manager falls back to it.
-		expect((await fetch(`${denied.url}/api/plugins`)).status).toBe(200);
-		const refused = await mutation(denied, "/api/plugins/reload", {});
-		expect(refused.status).toBe(403);
-		expect(JSON.parse(refused.body)).toMatchObject({ code: "management_disabled" });
+		const app = await appFor([dir]);
 
-		const crossOrigin = await appFor([dir]);
-		expect((await mutation(crossOrigin, "/api/plugins/reload", {}, { origin: "http://evil.example" })).status).toBe(403);
-		const crossSite = await mutation(crossOrigin, "/api/plugins/reload", {}, {
+		// There is no public read-only fallback any more: the diagnostic is an admin surface.
+		const anonymousRead = await read(app, "/api/plugins", null);
+		expect(anonymousRead.status).toBe(401);
+		expect(JSON.parse(anonymousRead.body)).toMatchObject({ code: "unauthorized" });
+		const viewer = await regularUser(app);
+		const viewerRead = await read(app, "/api/plugins", viewer.cookie);
+		expect(viewerRead.status).toBe(403);
+		expect(JSON.parse(viewerRead.body)).toMatchObject({ code: "admin_required" });
+		const viewerReload = await mutation(app, "/api/plugins/reload", {}, { cookie: viewer.cookie });
+		expect(viewerReload.status).toBe(403);
+		expect(JSON.parse(viewerReload.body)).toMatchObject({ code: "admin_required" });
+
+		// The browser's origin policy still applies to the administrator's session.
+		expect((await mutation(app, "/api/plugins/reload", {}, { origin: "http://evil.example" })).status).toBe(403);
+		const crossSite = await mutation(app, "/api/plugins/reload", {}, {
 			headers: { "sec-fetch-site": "cross-site" },
 		});
 		expect(crossSite.status).toBe(403);
 
-		// Management is not disabled on loopback, and an explicit opt-in allows a remote bind.
-		expect((await mutation(crossOrigin, "/api/plugins/reload", {})).status).toBe(200);
-		const allowed = await appFor([dir], { hostname: "0.0.0.0", allowManagement: true });
-		expect((await mutation(allowed, "/api/plugins/reload", {})).status).toBe(200);
+		// Admin, same-origin (or non-browser) requests still work.
+		expect((await mutation(app, "/api/plugins/reload", {})).status).toBe(200);
+		expect((await read(app, "/api/plugins")).status).toBe(200);
 	});
 
 	it("reports the server facet flag and the precise loaded state", async () => {

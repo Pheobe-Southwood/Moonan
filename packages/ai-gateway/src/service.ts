@@ -45,6 +45,13 @@ import {
 
 export interface GatewayServiceOptions {
 	version: string;
+	/**
+	 * The data owner of the signed-in user this service serves (`user:<id>`).
+	 *
+	 * Every `read`/`update` names it: the `DataStore` is a host-lifetime local object, so
+	 * the store cannot derive "the current user" from the call context.
+	 */
+	owner: string;
 	data: Ref<typeof DataStore>;
 	namespace: string;
 	queue: SerialQueue;
@@ -122,11 +129,11 @@ function providerView(provider: ProviderConfig): ProviderView {
 }
 
 /**
- * The gateway's server-side brain. It owns no Chord object itself: the facet hands it the
- * `DataStore` reference, a queue that survives reload, a function to read the current
- * projection cell, and a function to commit a new projection value. Every write goes
- * through {@link GatewayService.mutate}, which stores the unified dataset before the cell
- * is replaced; the data store, not the cell, is the authority.
+ * The gateway's server-side brain for one user. It owns no Chord object itself: the facet
+ * hands it the user's `DataStore` owner, a queue that survives reload, a function to read
+ * the current projection cell, and a function to commit a new projection value. Every write
+ * goes through {@link GatewayService.mutate}, which stores the user's unified dataset before
+ * the cell is replaced; the data store, not the cell, is the authority.
  */
 export class GatewayService {
 	private runtimeCache: { key: string; runtime: AiGatewayRuntime } | undefined;
@@ -487,7 +494,7 @@ export class GatewayService {
 		return this.serialize(async () => {
 			await this.options.data.reload(ctx);
 			const stored = (await this.options.data.read(
-				{ namespace: this.options.namespace },
+				{ owner: this.options.owner, namespace: this.options.namespace },
 				ctx,
 			)) as StoredDataset | undefined;
 			if (stored === undefined) throw invalid("data", "the gateway dataset is missing from the data store");
@@ -500,8 +507,9 @@ export class GatewayService {
 
 	/**
 	 * The only write path. The data store is the authority: the read-modify-write runs in
-	 * its serial queue, then the projection cell is updated. A post-write cell failure
-	 * leaves the dataset durable and the cell stale until the next revision/restart.
+	 * the user's owner partition inside its serial queue, then the projection cell is
+	 * updated. A post-write cell failure leaves the dataset durable and the cell stale until
+	 * the next revision/restart.
 	 */
 	private async mutate<T>(
 		ctx: Ctx,
@@ -513,6 +521,7 @@ export class GatewayService {
 			let result: T | undefined;
 			const stored = await this.options.data.update(
 				{
+					owner: this.options.owner,
 					namespace: this.options.namespace,
 					version: GATEWAY_CONFIG_VERSION,
 					update: async (current: StoredDataset | undefined) => {
