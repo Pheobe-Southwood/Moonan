@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WebFacetCatalog, type FacetSetEntry, type PluginAdminSnapshot } from "@moonan_ai/sdk";
 import { useReadable, useRemote, type PanelProps } from "@moonan_ai/sdk/web";
 import { createPluginAdminClient, PluginAdminRequestError } from "./api.js";
-import { PluginsPanelView, type ReadOnlyPlugin, type ViewStatus } from "./view.js";
+import { PluginsPanelView, type ViewStatus } from "./view.js";
 
 function messageOf(error: unknown): string {
 	if (error instanceof PluginAdminRequestError) {
@@ -19,6 +19,10 @@ function messageOf(error: unknown): string {
  * The 插件 tab. It reads `/api/v1/plugins` and asks the platform for each change; the
  * WebFacetCatalog revision is the signal that a commit landed, so the list also refreshes
  * when another tab (or the CLI) toggles something.
+ *
+ * The endpoints are administrator-only and the shell hides this panel from other roles, but
+ * that is presentation: a stale session (or a demotion in another tab) still reaches them.
+ * The panel stays a plain error list in that case rather than guessing at a read-only mode.
  */
 export function PluginsPanel({ host }: PanelProps) {
 	const client = useMemo(() => createPluginAdminClient(), []);
@@ -30,7 +34,6 @@ export function PluginsPanel({ host }: PanelProps) {
 
 	const [status, setStatus] = useState<ViewStatus>("loading");
 	const [snapshot, setSnapshot] = useState<PluginAdminSnapshot | undefined>();
-	const [readOnlyPlugins, setReadOnlyPlugins] = useState<readonly ReadOnlyPlugin[] | undefined>();
 	const [error, setError] = useState<string | undefined>();
 	const [notice, setNotice] = useState<string | undefined>();
 	const [busy, setBusy] = useState<string | undefined>();
@@ -48,23 +51,10 @@ export function PluginsPanel({ host }: PanelProps) {
 			const next = await client.snapshot();
 			if (!mounted.current) return;
 			setSnapshot(next);
-			setReadOnlyPlugins(undefined);
 			setStatus("ready");
 			setError(undefined);
 		} catch (failure) {
 			if (!mounted.current) return;
-			if (failure instanceof PluginAdminRequestError && failure.code === "management_disabled") {
-				setStatus("disabled");
-				setError(undefined);
-				try {
-					const response = await fetch("/api/plugins");
-					const body = (await response.json()) as { plugins?: ReadOnlyPlugin[] };
-					if (mounted.current) setReadOnlyPlugins(body.plugins ?? []);
-				} catch {
-					// The banner explains how to enable management; the list stays empty.
-				}
-				return;
-			}
 			setStatus("error");
 			setError(messageOf(failure));
 		}
@@ -118,7 +108,6 @@ export function PluginsPanel({ host }: PanelProps) {
 		<PluginsPanelView
 			status={status}
 			{...(snapshot ? { snapshot } : {})}
-			{...(readOnlyPlugins ? { readOnlyPlugins } : {})}
 			{...(error ? { error } : {})}
 			{...(notice ? { notice } : {})}
 			{...(busy ? { busy } : {})}

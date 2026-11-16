@@ -5,9 +5,11 @@ import { AiGatewayPanel } from "./app.js";
 import { GATEWAY_CSS } from "./styles.js";
 
 // The server facet and this browser facet share one contract source. Exporting the
-// contract tokens lets `scripts/check-contracts.mjs` prove, after each build, that the two
-// artifacts carry the same fingerprints instead of trusting that both bundles were rebuilt.
-export { AiGateway, GatewayState } from "../contract.js";
+// contract token lets `scripts/check-contracts.mjs` prove, after each build, that the two
+// artifacts carry the same fingerprint instead of trusting that both bundles were rebuilt.
+// Only the remote object the panel holds crosses to the browser; `GatewayAdmin` is a
+// server-side host object and is not exported here.
+export { AiGateway } from "../contract.js";
 
 class GatewayBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
 	override state = { error: null as Error | null };

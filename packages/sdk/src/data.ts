@@ -152,8 +152,14 @@ export type DataImportReport = {
  *
  * The backing store is one embedded SQLite database (`~/.moonan/data.db` by default), not a
  * JSON document: every mutation is one transaction, and the store's revision and dataset
- * count live in the database itself. The contract hides that: callers only see namespaced
- * `{ value, version }` datasets.
+ * count live in the database itself. The contract hides that: callers only see owned,
+ * namespaced `{ value, version }` datasets.
+ *
+ * **Every call names its owner.** The store is a host-lifetime local object, so Chord cannot
+ * derive "the current user" from the call context: local methods act as the host principal.
+ * A factory receives the caller's principal and passes `dataOwner(principal)` (or another
+ * explicit owner) on every read, write, update and remove. `owner` partitions the data; two
+ * owners can use the same namespace without seeing each other's value.
  *
  * `read` returns the raw `{ value, version }` and deliberately does not consult a codec:
  * a plugin's `config` cell may initialize before its codec registration is published, so
@@ -171,23 +177,25 @@ export type DataImportReport = {
  * may turn `DataStore` into a `remote` type or hand it to another host.
  */
 export const DataStore = local("moonan.data", {
-	version: 2,
+	version: 3,
 	input: obj({}, { open: true }),
 	members: {
 		revision: num(),
 		storage: DataStoreStorageInfoSchema,
-		read: method(obj({ namespace: str() }, { open: true }), unknown()),
+		read: method(obj({ owner: str(), namespace: str() }, { open: true }), unknown()),
 		write: method(
-			obj({ namespace: str(), version: num(), value: unknown() }, { open: true }),
+			obj({ owner: str(), namespace: str(), version: num(), value: unknown() }, { open: true }),
 			StoredDatasetSchema,
 		),
 		update: method(
-			obj({ namespace: str(), version: num(), update: unknown() }, { open: true }),
+			obj({ owner: str(), namespace: str(), version: num(), update: unknown() }, { open: true }),
 			StoredDatasetSchema,
 		),
-		remove: method(obj({ namespace: str() }, { open: true })),
+		remove: method(obj({ owner: str(), namespace: str() }, { open: true })),
+		/** Remove every dataset of one owner; used when an account is deleted. */
+		removeOwner: method(obj({ owner: str() }, { open: true }), DataStoreStorageInfoSchema),
 		reload: method(undefined, DataStoreStorageInfoSchema),
-		exportAll: method(obj({ includeSecrets: opt(bool()) }, { open: true }), DataBundleSchema),
-		importAll: method(obj({ bundle: DataBundleSchema }, { open: true }), DataImportReportSchema),
+		exportAll: method(obj({ owner: str(), includeSecrets: opt(bool()) }, { open: true }), DataBundleSchema),
+		importAll: method(obj({ owner: str(), bundle: DataBundleSchema }, { open: true }), DataImportReportSchema),
 	},
 });

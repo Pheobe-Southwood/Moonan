@@ -1,6 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { invalid, isChordError, type RouteHandler } from "@moonan_ai/sdk";
-import type { GatewayService } from "./service.js";
+import {
+	invalid,
+	isChordError,
+	type Ctx,
+	type Ref,
+	type RouteHandler,
+} from "@moonan_ai/sdk";
+import type { AiGateway } from "./contract.js";
 import { errorMessage } from "./util.js";
 
 const MAX_JSON_BODY = 1_000_000;
@@ -56,38 +62,48 @@ function routeError(response: ServerResponse, status: number, error: unknown): v
 	});
 }
 
-/**
- * The HTTP face of the same service the browser uses. It is intentionally read-mostly:
- * all writes go through Chord, so the panel does not have two competing mutation paths.
- * The exceptions are discovery (a network probe with no persistence) and reload-from-disk
- * (an explicit recovery action), both of which are also available as Chord methods.
- */
-export function gatewayRoutes(getService: () => GatewayService): Record<string, RouteHandler> {
-	const snapshot = () => getService().snapshot();
+/** Resolves the signed-in caller's own gateway object; a route never reaches another user's. */
+export type GatewayResolver = (ctx: Ctx) => Promise<Ref<typeof AiGateway>>;
 
+/**
+ * The HTTP face of the same per-user object the browser uses. It is intentionally
+ * read-mostly: all writes go through Chord, so the panel does not have two competing
+ * mutation paths. The exceptions are discovery (a network probe with no persistence) and
+ * reload-from-disk (an explicit recovery action), both of which are also available as
+ * Chord methods.
+ *
+ * The routes are registered once by the host-lifetime admin object, but every request is
+ * answered from the caller's own {@link AiGateway}: the resolver is handed the request's
+ * `Ctx`, whose principal is the authenticated account the platform stamped on the root.
+ */
+export function gatewayRoutes(resolve: GatewayResolver): Record<string, RouteHandler> {
 	return {
-		"GET /api/ai-gateway/status": (_request, response) => {
-			sendJson(response, 200, {
-				...getService().health(),
-				storage: getService().storageInfo(),
-			});
+		"GET /api/ai-gateway/status": async (_request, response, ctx) => {
+			const gateway = await resolve(ctx);
+			const health = await gateway.health(ctx);
+			sendJson(response, 200, { ...health, storage: gateway.snapshot.value.storage });
 		},
-		"GET /api/ai-gateway/health": (_request, response) => {
-			sendJson(response, 200, getService().health());
+		"GET /api/ai-gateway/health": async (_request, response, ctx) => {
+			const gateway = await resolve(ctx);
+			sendJson(response, 200, await gateway.health(ctx));
 		},
-		"GET /api/ai-gateway/config": (_request, response) => {
-			sendJson(response, 200, snapshot());
+		"GET /api/ai-gateway/config": async (_request, response, ctx) => {
+			const gateway = await resolve(ctx);
+			sendJson(response, 200, gateway.snapshot.value);
 		},
-		"GET /api/ai-gateway/providers": (_request, response) => {
-			sendJson(response, 200, { providers: snapshot().providers });
+		"GET /api/ai-gateway/providers": async (_request, response, ctx) => {
+			const gateway = await resolve(ctx);
+			sendJson(response, 200, { providers: gateway.snapshot.value.providers });
 		},
-		"GET /api/ai-gateway/presets": (_request, response) => {
-			sendJson(response, 200, { presets: snapshot().presets });
+		"GET /api/ai-gateway/presets": async (_request, response, ctx) => {
+			const gateway = await resolve(ctx);
+			sendJson(response, 200, { presets: gateway.snapshot.value.presets });
 		},
-		"GET /api/ai-gateway/models": (request, response) => {
+		"GET /api/ai-gateway/models": async (request, response, ctx) => {
+			const gateway = await resolve(ctx);
 			const url = new URL(request.url ?? "/", "http://localhost");
 			const providerId = url.searchParams.get("provider");
-			const current = snapshot();
+			const current = gateway.snapshot.value;
 			if (providerId) {
 				const provider = current.providers.find((candidate) => candidate.id === providerId);
 				if (!provider) {
@@ -122,8 +138,8 @@ export function gatewayRoutes(getService: () => GatewayService): Record<string, 
 					sendJson(response, 400, { error: "providerId is required" });
 					return;
 				}
-				const result = await getService().discover(providerId, ctx);
-				sendJson(response, 200, result);
+				const gateway = await resolve(ctx);
+				sendJson(response, 200, await gateway.discoverModels({ id: providerId }, ctx));
 			} catch (error) {
 				// A user-fixable configuration error is a 400; a failed upstream is a gateway error.
 				routeError(response, isChordError(error) && error.code === "invalid" ? 400 : 502, error);
@@ -135,7 +151,8 @@ export function gatewayRoutes(getService: () => GatewayService): Record<string, 
 				return;
 			}
 			try {
-				sendJson(response, 200, await getService().reloadFromDisk(ctx));
+				const gateway = await resolve(ctx);
+				sendJson(response, 200, await gateway.reloadFromDisk(ctx));
 			} catch (error) {
 				routeError(response, 400, error);
 			}

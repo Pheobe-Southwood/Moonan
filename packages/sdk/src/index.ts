@@ -30,6 +30,33 @@ export {
 } from "./data.js";
 export { Routes, type RouteHandler } from "./routes.js";
 export {
+	BROWSER_PRINCIPAL,
+	HOST_DATA_OWNER,
+	HOST_PRINCIPAL,
+	dataOwner,
+	isAdminPrincipal,
+	isUserPrincipal,
+	principalKey,
+	requireAdmin,
+	requireUser,
+	userDataOwner,
+	type BrowserPrincipal,
+	type HostPrincipal,
+	type MoonanPrincipal,
+	type MoonanRole,
+	type MoonanUser,
+	type UserPrincipal,
+} from "./principal.js";
+export {
+	USER_ADMIN_API,
+	USER_ADMIN_PATHS,
+	MOONAN_ROLES,
+	type UserAdminError,
+	type UserAdminMutation,
+	type UserAdminSnapshot,
+	type UserAdminUser,
+} from "./user-admin.js";
+export {
 	PLUGIN_ADMIN_API,
 	PLUGIN_ADMIN_PATHS,
 	type PluginAdminEntry,

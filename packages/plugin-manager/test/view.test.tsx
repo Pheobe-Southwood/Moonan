@@ -26,11 +26,16 @@ function entry(overrides: Partial<PluginAdminEntry> = {}): PluginAdminEntry {
 
 function snapshot(plugins: PluginAdminEntry[], overrides: Partial<PluginAdminSnapshot> = {}): PluginAdminSnapshot {
 	return {
-		api: 1,
+		api: 2,
 		version: "0.1.0",
 		revision: 2,
-		management: true,
-		paths: { cwd: "/tmp", pluginsFile: "/tmp/plugins.json", dataDb: "/tmp/data.db", pluginsDir: "/tmp/plugins" },
+		paths: {
+			cwd: "/tmp",
+			pluginsFile: "/tmp/plugins.json",
+			dataDb: "/tmp/data.db",
+			authDb: "/tmp/auth.db",
+			pluginsDir: "/tmp/plugins",
+		},
 		plugins,
 		...overrides,
 	};
@@ -122,7 +127,7 @@ describe("PluginsPanelView", () => {
 		expect(handlers.onInstall).toHaveBeenCalledWith("./my-plugin", true);
 	});
 
-	it("explains a degraded startup and a disabled management API", () => {
+	it("explains a degraded startup", () => {
 		const handlers = actions();
 		render(
 			<PluginsPanelView
@@ -136,17 +141,22 @@ describe("PluginsPanelView", () => {
 		expect(screen.getByText(/启动失败/)).toBeTruthy();
 		expect(screen.getByText(/setup boom/)).toBeTruthy();
 		expect(screen.getByText("启动隔离")).toBeTruthy();
+	});
+
+	it("shows the account database path and a readable authorization error", () => {
+		const handlers = actions();
+		const { container } = render(
+			<PluginsPanelView status="ready" snapshot={snapshot([entry()])} {...handlers} />,
+		);
+		expect(screen.getByText("账户数据库")).toBeTruthy();
+		expect(container.textContent).toContain("/tmp/auth.db");
 
 		cleanup();
 		render(
-			<PluginsPanelView
-				status="disabled"
-				readOnlyPlugins={[{ name: "Alpha", version: "1.0.0", source: "package" }]}
-				{...handlers}
-			/>,
+			<PluginsPanelView status="error" error="需要管理员权限，请重新登录。" {...handlers} />,
 		);
-		expect(screen.getByText(/--allow-management/)).toBeTruthy();
-		expect(screen.getByText("Alpha")).toBeTruthy();
-		expect(screen.getByText("只读")).toBeTruthy();
+		expect(screen.getByText("需要管理员权限，请重新登录。")).toBeTruthy();
+		// No read-only fallback: an authorization failure is just an error, with no list.
+		expect(screen.queryByRole("list")).toBeNull();
 	});
 });

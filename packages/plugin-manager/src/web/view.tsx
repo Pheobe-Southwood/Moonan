@@ -1,22 +1,11 @@
 import { useState } from "react";
 import type { PluginAdminEntry, PluginAdminSnapshot } from "@moonan_ai/sdk";
 
-export type ViewStatus = "loading" | "ready" | "error" | "disabled";
-
-/** A row from the read-only `/api/plugins` fallback, used when management is disabled. */
-export interface ReadOnlyPlugin {
-	name: string;
-	version: string;
-	source: string;
-	error?: string;
-	web?: { url: string } | null;
-}
+export type ViewStatus = "loading" | "ready" | "error";
 
 export interface PluginsPanelViewProps {
 	status: ViewStatus;
 	snapshot?: PluginAdminSnapshot;
-	/** Rows shown instead of the management list when the management API is disabled. */
-	readOnlyPlugins?: readonly ReadOnlyPlugin[];
 	error?: string;
 	notice?: string;
 	/** The ref currently being changed; its buttons are disabled. */
@@ -157,33 +146,6 @@ export function PluginsPanelView(props: PluginsPanelViewProps) {
 			{props.notice ? <div className="pm-note pm-note-ok">{props.notice}</div> : null}
 			{props.error ? <div className="pm-note pm-note-error">{props.error}</div> : null}
 
-			{props.status === "disabled" ? (
-				<>
-					<div className="pm-note pm-note-warn">
-						插件管理接口未启用：默认只允许本机（回环地址）。如果确实需要远程管理，用
-						<code>--allow-management</code> 启动 Moonan。下面是只读列表。
-					</div>
-					<ul className="pm-list">
-						{(props.readOnlyPlugins ?? []).map((plugin) => (
-							<li className="pm-row" key={`${plugin.name}-${plugin.version}`}>
-								<div className="pm-row-main">
-									<div className="pm-row-title">
-										<strong>{plugin.name}</strong>
-										<span className="pm-version">{plugin.version}</span>
-										<Badge kind="readonly">只读</Badge>
-									</div>
-									<div className="pm-row-meta">
-										<span>来源：{plugin.source === "package" ? "npm 包" : "目录"}</span>
-										{plugin.web ? <a href={plugin.web.url}>浏览器切面</a> : null}
-									</div>
-									{plugin.error ? <div className="pm-row-error">{plugin.error}</div> : null}
-								</div>
-							</li>
-						))}
-					</ul>
-				</>
-			) : null}
-
 			{snapshot?.startup?.degraded ? (
 				<div className="pm-note pm-note-warn">
 					上次启动失败，已临时停用以下插件（配置未改动）：{snapshot.startup.skipped.join(", ")}。逐个启用即可定位问题插件。
@@ -247,6 +209,8 @@ export function PluginsPanelView(props: PluginsPanelViewProps) {
 							<dd>{snapshot.paths.pluginsFile}</dd>
 							<dt>统一数据库</dt>
 							<dd>{snapshot.paths.dataDb}</dd>
+							<dt>账户数据库</dt>
+							<dd>{snapshot.paths.authDb}</dd>
 							<dt>扫描目录</dt>
 							<dd>{snapshot.paths.pluginsDir}</dd>
 							<dt>解析基准</dt>

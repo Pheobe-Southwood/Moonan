@@ -1,5 +1,5 @@
 import type { MutableModels } from "@earendil-works/pi-ai";
-import { defineRegistry } from "@moonan_ai/sdk";
+import { defineRegistry, type MoonanPrincipal } from "@moonan_ai/sdk";
 
 /**
  * Provider-neutral metadata for one configured chat model.
@@ -24,11 +24,17 @@ export interface ModelInfo {
  * `list()` is the key-free catalog. `runtime()` is a server-only handle owned by the
  * provider package; ai-gateway returns its pi-ai `MutableModels` there.
  *
+ * Configuration is per user, so both methods take the caller's principal and are async:
+ * the implementation reads that account's gateway config from the platform `DataStore`,
+ * and a caller that is not a signed-in user is refused rather than silently served
+ * somebody else's models.
+ *
  * A consumer looks the provider up with the code version of its root:
  *
  * ```ts
  * const providers = api.registry(ModelProviders);
  * const provider = providers.get(AI_GATEWAY_PROVIDER_ID, ctx);
+ * const models = await provider.list(ctx.principal);
  * ```
  *
  * The registry is a Chord registry, so its table is replaced with each code version and a
@@ -38,8 +44,8 @@ export interface ModelInfo {
 export interface ModelProvider {
 	readonly id: string;
 	readonly title: string;
-	list(): readonly ModelInfo[];
-	runtime(): unknown;
+	list(principal: MoonanPrincipal): Promise<readonly ModelInfo[]>;
+	runtime(principal: MoonanPrincipal): Promise<unknown>;
 }
 
 /**
@@ -65,18 +71,19 @@ export interface AiGatewayRuntime {
 }
 
 export interface AiGatewayModelProvider extends ModelProvider {
-	runtime(): AiGatewayRuntime;
+	list(principal: MoonanPrincipal): Promise<readonly ModelInfo[]>;
+	runtime(principal: MoonanPrincipal): Promise<AiGatewayRuntime>;
 }
 
 export function createAiGatewayModelProvider(source: {
-	list(): readonly ModelInfo[];
-	runtime(): AiGatewayRuntime;
+	list(principal: MoonanPrincipal): Promise<readonly ModelInfo[]>;
+	runtime(principal: MoonanPrincipal): Promise<AiGatewayRuntime>;
 }): AiGatewayModelProvider {
 	return {
 		id: AI_GATEWAY_PROVIDER_ID,
 		title: "AI Gateway",
-		list: () => source.list(),
-		runtime: () => source.runtime(),
+		list: (principal) => source.list(principal),
+		runtime: (principal) => source.runtime(principal),
 	};
 }
 

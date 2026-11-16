@@ -10,11 +10,16 @@ function response(status: number, body: unknown): Response {
 }
 
 const SNAPSHOT = {
-	api: 1,
+	api: 2,
 	version: "0.1.0",
 	revision: 3,
-	management: true,
-	paths: { cwd: "/tmp", pluginsFile: "/tmp/plugins.json", dataDb: "/tmp/data.db", pluginsDir: "/tmp/plugins" },
+	paths: {
+		cwd: "/tmp",
+		pluginsFile: "/tmp/plugins.json",
+		dataDb: "/tmp/data.db",
+		authDb: "/tmp/auth.db",
+		pluginsDir: "/tmp/plugins",
+	},
 	plugins: [],
 };
 
@@ -76,6 +81,26 @@ describe("plugin admin client", () => {
 			chordCode: "invalid",
 			reason: "setup",
 			committed: true,
+		});
+	});
+
+	it("asks for a new login when the session is gone", async () => {
+		const fetcher = vi.fn(async () => response(401, { error: "需要登录", code: "unauthorized" }));
+		const client = createPluginAdminClient(fetcher, "/api/v1/plugins");
+		await expect(client.snapshot()).rejects.toMatchObject({
+			name: "PluginAdminRequestError",
+			code: "unauthorized",
+			message: "登录已失效，请重新登录。",
+		});
+	});
+
+	it("asks for an administrator when the role is insufficient", async () => {
+		const fetcher = vi.fn(async () => response(403, { error: "需要管理员权限", code: "admin_required" }));
+		const client = createPluginAdminClient(fetcher, "/api/v1/plugins");
+		await expect(client.setEnabled("a", true)).rejects.toMatchObject({
+			name: "PluginAdminRequestError",
+			code: "admin_required",
+			message: "需要管理员权限，请重新登录。",
 		});
 	});
 

@@ -37,11 +37,12 @@ function canonical(value: unknown): string {
  * gate for that JSON: an unintended diff means an already-loaded browser tab or a prebuilt
  * plugin would meet `contract_mismatch` for no semantic reason.
  *
- * This snapshot changes once in the SQLite data-store refactor, deliberately: the store is
- * `DataStore` version 2 and `DataStoreStorageInfoSchema` now describes the database
- * (`database`/`schemaVersion`/`journalMode`/`sizeBytes`) instead of a file (`file`/
- * `backup`). The new values are captured here rather than hidden, but they are regenerated
- * from CI, never hand-written; any later diff still needs the same justification.
+ * This snapshot changes once in the multi-user refactor, deliberately: the data store is
+ * `DataStore` version 3, whose methods take an explicit `owner` (and which gained
+ * `removeOwner`), and the data database schema is version 2 with a `(owner, namespace)`
+ * primary key instead of a bare namespace. The values are captured here rather than hidden,
+ * but they are regenerated from CI, never hand-written; any later diff still needs the same
+ * justification. `WebFacetCatalog` and the shared bundle/report schemas are unchanged.
  */
 describe("contract schema JSON", () => {
 	it("keeps every published schema's JSON", () => {

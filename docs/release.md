@@ -111,9 +111,16 @@ npm 上已经存在的版本无法覆盖，只能升版本号重发。发布失�
    npm i @moonan_ai/moonan @moonan_ai/ai-gateway
    npx moonan --version
    npx moonan --port 21399 --plugin @moonan_ai/ai-gateway &
-   curl -s 127.0.0.1:21399/api/plugins     # 两个切面，没有 error
+   # 两个切面：先创建第一个管理员并登录，再请求管理员诊断接口
+   curl -s -c /tmp/moonan-cookies -H 'content-type: application/json' \
+     -d '{"username":"admin","password":"moonan-test-password"}' \
+     127.0.0.1:21399/api/auth/setup
+   curl -s -b /tmp/moonan-cookies 127.0.0.1:21399/api/plugins   # 两个切面，没有 error
    curl -s 127.0.0.1:21399/ | grep -c importmap
    ```
+
+   空 `~/.moonan` 下第一次启动会进入初始化状态；若本机已有账户库，`/api/auth/setup` 会返回
+   `409 setup_complete`，改用 `/api/auth/login` 即可。
 
 3. `ls node_modules/@earendil-works/chord` 只有一份。平台与插件必须共享同一个 chord 实例：插件按
    自己的位置解析依赖，装在两个前缀里就是两份，切面会装不上。这也是 README 里"两个包装在同一棵树"

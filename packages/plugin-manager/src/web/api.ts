@@ -2,8 +2,8 @@ import type { PluginAdminError, PluginAdminMutation, PluginAdminSnapshot } from 
 
 /**
  * A failed management request. `code` is the platform's operation code (`locked`,
- * `duplicate`, `reload_failed`, `management_disabled`, …); `chordCode`/`reason` carry chord's
- * own error when the failure came from a facet reload.
+ * `duplicate`, `reload_failed`, `unauthorized`, `admin_required`, …); `chordCode`/`reason`
+ * carry chord's own error when the failure came from a facet reload.
  */
 export class PluginAdminRequestError extends Error {
 	constructor(
@@ -32,6 +32,17 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Human-readable message for the two authorization failures the admin API can answer with.
+ * They mean the browser session is unusable, not that the operation itself was wrong, so the
+ * server's terse protocol message is replaced with something actionable.
+ */
+function authMessage(status: number, code: string | undefined): string | undefined {
+	if (status === 401 || code === "unauthorized") return "登录已失效，请重新登录。";
+	if (status === 403 && code === "admin_required") return "需要管理员权限，请重新登录。";
+	return undefined;
+}
+
 export function createPluginAdminClient(
 	fetcher: Fetcher = (input, init) => fetch(input, init),
 	base = "/api/v1/plugins",
@@ -54,9 +65,13 @@ export function createPluginAdminClient(
 		}
 		if (!response.ok) {
 			const failure = (body ?? {}) as Partial<PluginAdminError>;
+			const code = typeof failure.code === "string" ? failure.code : undefined;
+			const message =
+				authMessage(response.status, code) ??
+				(typeof failure.error === "string" ? failure.error : `HTTP ${response.status}`);
 			throw new PluginAdminRequestError(
-				typeof failure.error === "string" ? failure.error : `HTTP ${response.status}`,
-				typeof failure.code === "string" ? failure.code : undefined,
+				message,
+				code,
 				typeof failure.reason === "string" ? failure.reason : undefined,
 				typeof failure.chordCode === "string" ? failure.chordCode : undefined,
 				failure.committed === true,

@@ -10,6 +10,7 @@ import { nodeLoader } from "@earendil-works/chord/node";
 import {
 	DataStore,
 	WebFacetCatalog,
+	principalKey,
 	type DataBundle,
 	type DataImportReport,
 	type DataStoreStorageInfo,
@@ -102,10 +103,12 @@ export interface Platform {
 	removePlugin(ref: string): Promise<PluginMutationResult>;
 	/** Current `DataStore.storage` projection. */
 	dataStatus(): Promise<DataStoreStorageInfo>;
-	/** Export every dataset with a registered codec. Secrets are excluded unless requested. */
-	exportData(options?: { includeSecrets?: boolean }): Promise<DataBundle>;
-	/** Import a bundle atomically. Unknown datasets, duplicate namespaces or codec failures reject. */
-	importData(bundle: unknown): Promise<DataImportReport>;
+	/** Export one owner's datasets (a signed-in user's data). Secrets are excluded unless requested. */
+	exportData(owner: string, options?: { includeSecrets?: boolean }): Promise<DataBundle>;
+	/** Import a bundle atomically into one owner's datasets. Unknown datasets or duplicates reject. */
+	importData(owner: string, bundle: unknown): Promise<DataImportReport>;
+	/** Remove every dataset owned by an account (used when the account is deleted). */
+	removeUserData(owner: string): Promise<DataStoreStorageInfo>;
 	close(): Promise<void>;
 }
 
@@ -230,7 +233,8 @@ export async function createPlatform(options: PlatformOptions): Promise<Platform
 
 	const host = createHost<Principal>({
 		name: "moonan",
-		self: { id: "host" },
+		self: { kind: "host" },
+		principalKey,
 		loader: nodeLoader,
 		...(options.dev === undefined ? {} : { dev: options.dev }),
 		// A terminal failure should be loud, not a silent no-op in a background task.
@@ -553,20 +557,33 @@ export async function createPlatform(options: PlatformOptions): Promise<Platform
 		return dataStore.storage.value;
 	};
 
-	const exportData = async (exportOptions: { includeSecrets?: boolean } = {}): Promise<DataBundle> => {
+	const exportData = async (
+		owner: string,
+		exportOptions: { includeSecrets?: boolean } = {},
+	): Promise<DataBundle> => {
 		if (!dataStore) throw new Error("the data store is not ready");
 		// The store validates every exported value as strict JSON (`checkJson`) before it
 		// returns, but the contract types values `unknown`, so the platform re-asserts the
 		// portable envelope it hands to its own HTTP surface.
 		const bundle = await host.root((ctx) =>
-			dataStore!.exportAll({ includeSecrets: exportOptions.includeSecrets ?? false }, ctx),
+			dataStore!.exportAll(
+				{ owner, includeSecrets: exportOptions.includeSecrets ?? false },
+				ctx,
+			),
 		);
 		return bundle as DataBundle;
 	};
 
-	const importData = async (bundle: unknown): Promise<DataImportReport> => {
+	const importData = async (owner: string, bundle: unknown): Promise<DataImportReport> => {
 		if (!dataStore) throw new Error("the data store is not ready");
-		return host.root((ctx) => dataStore!.importAll({ bundle: bundle as DataBundle }, ctx));
+		return host.root((ctx) =>
+			dataStore!.importAll({ owner, bundle: bundle as DataBundle }, ctx),
+		);
+	};
+
+	const removeUserData = async (owner: string): Promise<DataStoreStorageInfo> => {
+		if (!dataStore) throw new Error("the data store is not ready");
+		return host.root((ctx) => dataStore!.removeOwner({ owner }, ctx));
 	};
 
 	try {
@@ -613,6 +630,7 @@ export async function createPlatform(options: PlatformOptions): Promise<Platform
 		dataStatus,
 		exportData,
 		importData,
+		removeUserData,
 		close,
 	};
 }

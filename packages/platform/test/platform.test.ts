@@ -7,7 +7,7 @@ import type { Moonan } from "../src/index.js";
 import { silentLogger } from "../src/logger.js";
 import { createPlatform } from "../src/platform.js";
 import { resolvePluginRef } from "../src/plugins.js";
-import { appFor, cleanup, closeClient, connectClient, pluginDir, request, tempDataDb, tempDir } from "./support.js";
+import { appFor, cleanup, closeClient, connectClient, createUser, loginAs, pluginDir, request, tempDataDb, tempDir } from "./support.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..", "..");
@@ -46,6 +46,53 @@ describe("the platform", () => {
 		const body = (await response.json()) as { now: number; label: string };
 		expect(typeof body.now).toBe("number");
 		expect(body.label).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+	});
+
+	it("stamps each signed-in user's principal on plugin routes", async () => {
+		const dir = await pluginDir(`import { Routes, defineFacet, local, obj } from "@moonan_ai/sdk";
+const Root = local("test.principal", { version: 1, input: obj({}, { open: true }), members: {} });
+export default defineFacet((api) => {
+	api.serve(Root, (_input, _principal, self) => {
+		self.register(Routes, {
+			"GET /api/principal": (_request, response, ctx) => {
+				response.writeHead(200, { "content-type": "application/json" });
+				response.end(JSON.stringify(ctx.principal));
+			},
+		});
+		return {};
+	}, { lifetime: "host" });
+});
+`);
+		const app = await appFor([dir]);
+		try {
+			const status = (await (await fetch(`${app.url}/api/auth/status`)).json()) as {
+				user?: { id: string; username: string; role: string };
+			};
+			expect(status.user).toBeDefined();
+			const admin = (await (await fetch(`${app.url}/api/principal`)).json()) as {
+				kind: string;
+				id: string;
+				username: string;
+				role: string;
+				session: string;
+			};
+			expect(admin).toMatchObject({ kind: "user", username: "admin", role: "admin" });
+			expect(admin.id).toBe(status.user!.id);
+			// The session id is the server-side session, never the cookie token.
+			expect(admin.session).toEqual(expect.any(String));
+			expect(admin.session.length).toBeGreaterThan(0);
+
+			const bob = await createUser(app, { username: "bob" });
+			const bobCookie = await loginAs(app, "bob");
+			const bobPrincipal = JSON.parse(
+				(await request(`${app.url}/api/principal`, { cookie: bobCookie })).body,
+			) as { kind: string; id: string; username: string; role: string; session: string };
+			expect(bobPrincipal).toMatchObject({ kind: "user", id: bob.id, username: "bob", role: "user" });
+			// Different sessions are different Chord principals, so the objects are not shared.
+			expect(bobPrincipal.session).not.toBe(admin.session);
+		} finally {
+			await app.close();
+		}
 	});
 
 	it("refuses to read outside a facet's directory", async () => {
@@ -503,11 +550,12 @@ export default defineFacet((api) => {
 				headers: { origin: "http://other.example", "sec-fetch-site": "cross-site" },
 			});
 			expect(unlisted.status).toBe(403);
-			// The policy is scoped to plugin routes; built-ins keep their own checks.
+			// The policy is scoped to plugin routes; built-ins keep their own checks. The plugin
+			// diagnostics endpoint is administrator-only and refuses a cross-site request too.
 			const builtin = await request(`${app.url}/api/plugins`, {
 				headers: { "sec-fetch-site": "cross-site" },
 			});
-			expect(builtin.status).toBe(200);
+			expect(builtin.status).toBe(403);
 		} finally {
 			await app.close();
 		}

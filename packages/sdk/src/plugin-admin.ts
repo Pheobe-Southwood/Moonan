@@ -7,13 +7,14 @@
  * version's roots (`superseded`), so a call made from inside a root fails with the reload's
  * error. That is not a deadlock, but the control plane still belongs off the object graph:
  * the platform owns the endpoints; the browser panel and the CLI are clients of the same
- * JSON shape.
+ * JSON shape. The endpoints require an administrator principal; the API version below is
+ * the shape of what an administrator gets, not a public read surface.
  *
  * `ref` is the address of a plugin (a package name or an absolute directory), not a
  * runtime id: facets are still identified by module URL. It is only the stable key of the
  * plugin registry.
  */
-export const PLUGIN_ADMIN_API = 1 as const;
+export const PLUGIN_ADMIN_API = 2 as const;
 
 export interface PluginAdminWebFacet {
 	/** HTTP path under `/facets/...`, served by the platform. */
@@ -66,6 +67,8 @@ export interface PluginAdminPaths {
 	pluginsFile: string;
 	/** The unified plugin data database (SQLite, `~/.moonan/data.db` by default). */
 	dataDb: string;
+	/** The account database (SQLite, `~/.moonan/auth.db` by default). */
+	authDb: string;
 	/** The read-only startup scan directory. */
 	pluginsDir: string;
 }
@@ -75,8 +78,6 @@ export interface PluginAdminSnapshot {
 	version: string;
 	/** Chord's code version (`host.codeVersion`). */
 	revision: number;
-	/** False when the management endpoints are disabled (non-loopback bind without opt-in). */
-	management: boolean;
 	/** A recovery notice from the plugin registry (for example, restored from `.bak`). */
 	warning?: string;
 	startup?: PluginAdminStartup;

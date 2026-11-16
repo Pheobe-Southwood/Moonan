@@ -12,7 +12,7 @@ exports[`contract fingerprints > keeps the platform contracts' fingerprints 1`] 
     "variant": "v1",
   },
   "data": {
-    "contract": "b1cfd9b0e841f20c",
+    "contract": "97eca54cd751bb66",
     "members": [
       "revision",
       "storage",
@@ -20,6 +20,7 @@ exports[`contract fingerprints > keeps the platform contracts' fingerprints 1`] 
       "write",
       "update",
       "remove",
+      "removeOwner",
       "reload",
       "exportAll",
       "importAll",

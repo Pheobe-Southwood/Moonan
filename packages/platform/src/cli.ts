@@ -2,7 +2,6 @@ import { createLogger } from "./logger.js";
 import {
 	defaultPluginsDir,
 	defaultPluginsFile,
-	isLoopback,
 	officialPlugins,
 	PluginRegistry,
 	resolvePluginRef,
@@ -26,10 +25,11 @@ Options
       --plugins-dir <dir>  Scan for plugin directories        (default ~/.moonan/plugins)
       --plugins-file <path> Plugin registry file              (default ~/.moonan/plugins.json)
       --data-db <path>     Unified plugin data database       (default ~/.moonan/data.db)
+      --auth-db <path>     Account database                   (default ~/.moonan/auth.db)
   -P, --plugin <ref>       Add a plugin for this process only (repeatable)
       --no-official        Do not load the built-in official plugins
       --safe-mode          Load only the locked official plugins (recovery shell)
-      --allow-management   Enable the plugin-management API beyond loopback
+      --secure-cookies     Mark the session cookie Secure (HTTPS reverse proxy)
       --dev                Validate every cell write against its schema (development)
       --allow-origin <o>   Accept this browser origin besides same-origin (repeatable)
       --max-calls <n>      Max concurrent calls per WebSocket link (default: no limit)
@@ -57,11 +57,16 @@ Data
   The plugin registry (\`plugins.json\`) is engine configuration, not plugin data: it is not
   part of /api/data/export, so importing a bundle can never change which plugins load.
 
-Security
-  There is no account authentication. Cross-origin WebSocket connections and the built-in
-  reload endpoint are refused unless their origin is same-origin or listed with
-  --allow-origin. The plugin-management API is limited to a loopback bind unless
-  --allow-management is passed.
+Accounts
+  Moonan requires a username/password login. On the first start, the browser asks for the
+  first administrator; that administrator creates every later account. Plugin management
+  and account management are administrator-only. Cross-origin WebSocket connections and
+  the built-in reload endpoint are refused unless their origin is same-origin or listed
+  with --allow-origin.
+
+  Accounts live in a separate SQLite database (default ~/.moonan/auth.db, --auth-db or
+  MOONAN_AUTH_DB). Plugin data stays in ~/.moonan/data.db. Back up both. The account
+  database is never part of /api/data/export.
 `;
 
 interface Args {
@@ -70,16 +75,21 @@ interface Args {
 	pluginsDir?: string;
 	pluginsFile?: string;
 	dataDb?: string;
+	authDb?: string;
+	secureCookies: boolean;
 	plugins: string[];
 	official: boolean;
 	safeMode: boolean;
-	allowManagement: boolean;
 	dev: boolean;
 	allowedOrigins: string[];
 	maxCalls?: number;
 	webDist?: string;
 	help: boolean;
 	version: boolean;
+}
+
+function isLoopback(hostname: string): boolean {
+	return hostname === "localhost" || hostname === "::1" || /^127\./.test(hostname);
 }
 
 function valueOf(argv: readonly string[], index: number, flag: string): { value: string; index: number } {
@@ -93,7 +103,7 @@ function parse(argv: readonly string[]): Args {
 		plugins: [],
 		official: true,
 		safeMode: false,
-		allowManagement: false,
+		secureCookies: false,
 		dev: false,
 		allowedOrigins: [],
 		help: false,
@@ -136,6 +146,12 @@ function parse(argv: readonly string[]): Args {
 				args.dataDb = next.value;
 				break;
 			}
+			case "--auth-db": {
+				const next = valueOf(argv, index, flag);
+				index = next.index;
+				args.authDb = next.value;
+				break;
+			}
 			case "-P":
 			case "--plugin": {
 				const next = valueOf(argv, index, flag);
@@ -149,8 +165,8 @@ function parse(argv: readonly string[]): Args {
 			case "--safe-mode":
 				args.safeMode = true;
 				break;
-			case "--allow-management":
-				args.allowManagement = true;
+			case "--secure-cookies":
+				args.secureCookies = true;
 				break;
 			case "--dev":
 				args.dev = true;
@@ -365,13 +381,14 @@ async function main(): Promise<void> {
 			...(args.pluginsDir !== undefined ? { pluginsDir: args.pluginsDir } : {}),
 			...(args.pluginsFile !== undefined ? { pluginsFile: args.pluginsFile } : {}),
 			...(args.dataDb !== undefined ? { dataDb: args.dataDb } : {}),
+			...(args.authDb !== undefined ? { authDb: args.authDb } : {}),
+			...(args.secureCookies ? { secureCookies: true } : {}),
 			...(args.webDist !== undefined ? { webDist: args.webDist } : {}),
 			...(args.dev ? { dev: true } : {}),
 			...(args.allowedOrigins.length > 0 ? { allowedOrigins: args.allowedOrigins } : {}),
 			...(args.maxCalls !== undefined ? { maxCalls: args.maxCalls } : {}),
 			official: args.official,
 			safeMode: args.safeMode,
-			allowManagement: args.allowManagement,
 			plugins: args.plugins,
 			logger,
 		});
@@ -388,6 +405,7 @@ async function main(): Promise<void> {
 	logger.info(`plugin registry: ${moonan.pluginsFile}`);
 	logger.info(`plugins directory: ${args.pluginsDir ?? defaultPluginsDir()} (read-only scan)`);
 	logger.info(`unified data database: ${moonan.dataDb}`);
+	logger.info(`account database: ${moonan.authDb}`);
 	if (args.dev) logger.info("dev mode: every cell write is validated against its schema");
 	if (args.safeMode) logger.warn("safe mode: only the locked official plugins are enabled");
 	if (args.maxCalls !== undefined) logger.info(`websocket call limit: ${args.maxCalls} concurrent calls per link`);
@@ -406,12 +424,12 @@ async function main(): Promise<void> {
 		else if (!plugin.enabled) logger.info(`plugin "${plugin.name}" ${plugin.version} (disabled)`);
 		else logger.info(`plugin "${plugin.name}" ${plugin.version} (${plugin.source}${plugin.web ? ", web" : ""})`);
 	}
-	if (!isLoopback(hostname) && !args.allowManagement) {
-		logger.warn("plugin management API is disabled on a non-loopback bind; pass --allow-management to enable it");
+	if (!args.secureCookies) {
+		logger.info("session cookies are HttpOnly + SameSite=Lax (not Secure); an HTTPS reverse proxy should pass --secure-cookies");
 	}
 	if (!isLoopback(hostname)) {
 		logger.warn(
-			`bound to ${hostname}: there is no account authentication, so anyone who can reach this port can drive every plugin (cross-origin browsers are refused, but this is not a security boundary)`,
+			`bound to ${hostname}: accounts are required, but passwords travel over plain HTTP. Prefer a tailnet or an HTTPS reverse proxy for non-loopback use.`,
 		);
 	}
 

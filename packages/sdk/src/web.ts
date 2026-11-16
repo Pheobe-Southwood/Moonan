@@ -50,6 +50,11 @@ export interface PanelContribution {
 	title: string;
 	/** Ascending; ties keep registration order. */
 	order?: number;
+	/**
+	 * Shown only to a signed-in administrator by the shell. Presentation is not
+	 * authorization: the endpoints the panel calls must enforce the role themselves.
+	 */
+	adminOnly?: boolean;
 	component: (props: PanelProps) => ReactNode;
 }
 
